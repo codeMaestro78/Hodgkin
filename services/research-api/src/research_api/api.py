@@ -1,0 +1,944 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import uuid
+from collections.abc import AsyncIterable, Iterable
+from datetime import UTC, datetime
+from decimal import Decimal
+from typing import Annotated
+
+from fastapi import APIRouter, Header, HTTPException, Query, Request, status
+from fastapi.sse import EventSourceResponse, ServerSentEvent
+from sqlalchemy import func, select
+
+from research_api.auth import authenticated_caller as _caller
+from research_api.config import get_settings
+from research_api.db.models import (
+    Budget,
+    Citation,
+    EvidenceClaim,
+    NodeExecution,
+    ProviderCall,
+    Report,
+    ResearchGap,
+    ResearchRun,
+    RunEvent,
+    Source,
+    SubQuestion,
+    SubQuestionAttempt,
+    UsageLedger,
+)
+from research_api.db.session import tenant_session
+from research_api.events.outbox import EventOutbox
+from research_api.execution import prior_dependencies, task_projection
+from research_api.graph.builder import run_graph
+from research_api.query_intelligence import is_quick_explainer
+from research_api.reliability import claim_status, source_assessments
+from research_api.repositories.runs import RunBudgetDefaults, RunRepository
+from research_api.research_limits import source_limit
+from research_api.schemas.generated.create_research_run_request import CreateResearchRunRequest
+from research_api.schemas.generated.followup_request import FollowupRequest
+from research_api.schemas.generated.public_claim_check import PublicClaimCheck
+from research_api.schemas.generated.run_insights import RunInsights
+
+router = APIRouter(prefix="/research", tags=["research"])
+AfterSequenceQuery = Annotated[int, Query(ge=0, alias="after")]
+
+
+def _public_claim_checks(
+    rows: Iterable[tuple[EvidenceClaim, Citation | None]],
+) -> list[dict[str, object]]:
+    """Expose stored checks, not an inferred report-wide verification badge."""
+    claims: dict[str, dict[str, object]] = {}
+    for claim, citation in rows:
+        key = str(claim.id)
+        if key not in claims:
+            claims[key] = {
+                "id": key,
+                "claim": claim.claim,
+                "caveats": claim.caveats,
+                "citations": [],
+                "reportId": str(getattr(claim, "report_id", None))
+                if getattr(claim, "report_id", None)
+                else None,
+                "section": claim.provenance.get("reportSection"),
+                "publishedInReport": claim.provenance.get("publishedInReport") == "true",
+                "method": claim.provenance.get("method", "legacy-stored-quote-checks"),
+            }
+        if citation is None:
+            continue
+        verification = citation.verification if isinstance(citation.verification, dict) else {}
+        exact = verification.get("exactSpan", {})
+        semantic = verification.get("semanticSupport", {})
+        citations = claims[key]["citations"]
+        assert isinstance(citations, list)
+        citations.append(
+            {
+                "id": str(citation.id),
+                "sourceId": str(citation.source_id),
+                "quote": citation.quote,
+                "exactSpanVerified": isinstance(exact, dict) and exact.get("verified") is True,
+                "verdict": str(semantic.get("verdict") or "not_recorded")
+                if isinstance(semantic, dict)
+                else "not_recorded",
+                "context": verification.get("context")
+                if isinstance(verification.get("context"), str)
+                else None,
+            }
+        )
+    for item in claims.values():
+        item["status"] = claim_status(item["citations"])
+        if not item["citations"] and item["method"] != "legacy-stored-quote-checks":
+            item["status"] = "insufficient_evidence"
+        item["supportingSourceIds"] = sorted(
+            {
+                citation["sourceId"]
+                for citation in item["citations"]
+                if citation["exactSpanVerified"]
+                and citation["verdict"] in {"supports", "partially_supports"}
+            }
+        )
+        item["contradictingSourceIds"] = sorted(
+            {
+                citation["sourceId"]
+                for citation in item["citations"]
+                if citation["exactSpanVerified"] and citation["verdict"] == "contradicts"
+            }
+        )
+    return [
+        PublicClaimCheck.model_validate(item).model_dump(mode="json", by_alias=True)
+        for item in claims.values()
+    ]
+
+
+def _budget_from_request(request: CreateResearchRunRequest) -> RunBudgetDefaults:
+    defaults = RunBudgetDefaults()
+    overrides = request.budget_overrides
+    if overrides is None:
+        return defaults
+    return RunBudgetDefaults(
+        max_wall_clock_ms=overrides.max_wall_clock_ms or defaults.max_wall_clock_ms,
+        max_search_calls=overrides.max_search_calls or defaults.max_search_calls,
+        max_browser_sessions=overrides.max_browser_sessions
+        if overrides.max_browser_sessions is not None
+        else defaults.max_browser_sessions,
+        max_reflection_rounds=overrides.max_reflection_rounds
+        if overrides.max_reflection_rounds is not None
+        else defaults.max_reflection_rounds,
+        max_input_tokens=overrides.max_input_tokens or defaults.max_input_tokens,
+        max_output_tokens=overrides.max_output_tokens or defaults.max_output_tokens,
+        max_estimated_cost_usd=Decimal(str(overrides.max_estimated_cost_usd))
+        if overrides.max_estimated_cost_usd is not None
+        else defaults.max_estimated_cost_usd,
+    )
+
+
+@router.post("/runs", status_code=status.HTTP_202_ACCEPTED)
+async def create_research_run(
+    payload: CreateResearchRunRequest,
+    request: Request,
+    idempotency_key_header: str | None = Header(default=None, alias="Idempotency-Key"),
+    authorization: Annotated[str | None, Header()] = None,
+    x_internal_service_auth: str | None = Header(default=None),
+    x_development_tenant_id: str | None = Header(default=None),
+    x_development_user_id: str | None = Header(default=None),
+) -> dict[str, str]:
+    settings = get_settings()
+    caller = await _caller(
+        settings,
+        x_internal_service_auth,
+        x_development_tenant_id,
+        x_development_user_id,
+        authorization=authorization,
+    )
+    idempotency_key = payload.idempotency_key or idempotency_key_header
+    selected_budget = _budget_from_request(payload)
+    if selected_budget.max_search_calls < 2:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="the Tavily research slice requires at least two search-call budget units",
+        )
+    async with tenant_session(str(caller.tenant_id)) as session:
+        repository = RunRepository(session, caller.tenant_id)
+        if idempotency_key:
+            existing = await repository.get_by_idempotency_key(
+                user_id=caller.user_id, idempotency_key=idempotency_key
+            )
+            if existing is not None:
+                # The create-response contract intentionally acknowledges queueing, even when
+                # an idempotent replay arrives after the background graph has advanced.
+                return {"runId": str(existing.id), "status": "queued"}
+        run = await repository.create(
+            user_id=caller.user_id,
+            question=payload.question,
+            report_requirements=[item.root for item in payload.report_requirements],
+            budget=selected_budget,
+            idempotency_key=idempotency_key,
+        )
+        await EventOutbox(session, caller.tenant_id).append(
+            run_id=run.id,
+            event_type="run.created",
+            payload={"status": "queued", "questionLength": len(run.original_question)},
+        )
+        run_id = run.id
+        original_question = run.original_question
+    task = asyncio.create_task(
+        run_graph(
+            settings,
+            run_id=run_id,
+            tenant_id=caller.tenant_id,
+            user_id=caller.user_id,
+            question=original_question,
+        )
+    )
+    request.app.state.background_tasks.add(task)
+    task.add_done_callback(request.app.state.background_tasks.discard)
+    return {"runId": str(run_id), "status": "queued"}
+
+
+@router.get("/runs")
+async def list_research_runs(
+    reports_only: Annotated[bool, Query(alias="reportsOnly")] = False,
+    authorization: Annotated[str | None, Header()] = None,
+    x_internal_service_auth: str | None = Header(default=None),
+    x_development_tenant_id: str | None = Header(default=None),
+    x_development_user_id: str | None = Header(default=None),
+) -> dict[str, object]:
+    """Return the current operator's recent runs, newest first.
+
+    This is deliberately a compact projection: it gives the workspace a useful
+    history rail without exposing source material or another tenant's work.
+    """
+    settings = get_settings()
+    caller = await _caller(
+        settings,
+        x_internal_service_auth,
+        x_development_tenant_id,
+        x_development_user_id,
+        authorization=authorization,
+    )
+    async with tenant_session(str(caller.tenant_id)) as session:
+        runs = list(
+            await session.scalars(
+                select(ResearchRun)
+                .where(
+                    ResearchRun.tenant_id == caller.tenant_id,
+                    ResearchRun.user_id == caller.user_id,
+                    *(
+                        [ResearchRun.report_id.is_not(None), ResearchRun.status == "completed"]
+                        if reports_only
+                        else []
+                    ),
+                )
+                .order_by(ResearchRun.created_at.desc())
+                .limit(100 if reports_only else 24)
+            )
+        )
+        counts: dict[uuid.UUID, int] = {}
+        if runs:
+            count_rows = await session.execute(
+                select(Source.run_id, func.count())
+                .where(
+                    Source.tenant_id == caller.tenant_id,
+                    Source.run_id.in_([run.id for run in runs]),
+                )
+                .group_by(Source.run_id)
+            )
+            counts = {row[0]: row[1] for row in count_rows}
+        return {
+            "runs": [
+                {
+                    "runId": str(run.id),
+                    "question": run.original_question,
+                    "status": run.status,
+                    "sourceCount": counts.get(run.id, 0),
+                    "reportId": str(run.report_id) if run.report_id else None,
+                    # Pre-fast-path runs are still in the ledger. The compact
+                    # evidence footprint distinguishes a new fast run from an
+                    # older definition query that used the full planner.
+                    "quickMode": is_quick_explainer(run.original_question)
+                    and counts.get(run.id, 0) <= 2,
+                    "createdAt": run.created_at.isoformat(),
+                }
+                for run in runs
+            ]
+        }
+
+
+@router.get("/runs/{run_id}")
+async def get_research_run(
+    run_id: uuid.UUID,
+    report_version: Annotated[int | None, Query(alias="reportVersion", ge=1, le=10000)] = None,
+    authorization: Annotated[str | None, Header()] = None,
+    x_internal_service_auth: str | None = Header(default=None),
+    x_development_tenant_id: str | None = Header(default=None),
+    x_development_user_id: str | None = Header(default=None),
+) -> dict[str, object]:
+    settings = get_settings()
+    caller = await _caller(
+        settings,
+        x_internal_service_auth,
+        x_development_tenant_id,
+        x_development_user_id,
+        authorization=authorization,
+    )
+    async with tenant_session(str(caller.tenant_id)) as session:
+        run = await session.scalar(
+            select(ResearchRun).where(
+                ResearchRun.tenant_id == caller.tenant_id,
+                ResearchRun.id == run_id,
+                ResearchRun.user_id == caller.user_id,
+            )
+        )
+        if run is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="research run not found"
+            )
+        budget = await session.scalar(
+            select(Budget).where(Budget.tenant_id == caller.tenant_id, Budget.run_id == run_id)
+        )
+        usage = await session.scalar(
+            select(UsageLedger).where(
+                UsageLedger.tenant_id == caller.tenant_id, UsageLedger.run_id == run_id
+            )
+        )
+        report = await session.scalar(
+            select(Report)
+            .where(
+                Report.tenant_id == caller.tenant_id,
+                Report.run_id == run_id,
+                *([Report.version == report_version] if report_version is not None else []),
+            )
+            .order_by(Report.version.desc())
+            .limit(1)
+        )
+        if report_version is not None and report is None:
+            raise HTTPException(404, "report version not found")
+        source_count = await session.scalar(
+            select(func.count())
+            .select_from(Source)
+            .where(Source.tenant_id == caller.tenant_id, Source.run_id == run_id)
+        )
+        # Explicit tenant/run predicates on both sides of the join. Only compact,
+        # named evidence fields leave the API; artifact locations stay private.
+        evidence_rows = await session.execute(
+            select(EvidenceClaim, Citation)
+            .outerjoin(
+                Citation,
+                (
+                    (Citation.evidence_claim_id == EvidenceClaim.id)
+                    & (Citation.tenant_id == caller.tenant_id)
+                    & (Citation.run_id == run_id)
+                ),
+            )
+            .where(
+                EvidenceClaim.tenant_id == caller.tenant_id,
+                EvidenceClaim.run_id == run_id,
+                *(
+                    [
+                        (EvidenceClaim.report_id == report.id)
+                        | (EvidenceClaim.report_id.is_(None) if report.version == 1 else False)
+                    ]
+                    if report
+                    else []
+                ),
+            )
+            .order_by(EvidenceClaim.created_at, EvidenceClaim.id, Citation.id)
+            .limit(320)
+        )
+        claim_checks = _public_claim_checks(evidence_rows)
+        sources = list(
+            await session.scalars(
+                select(Source)
+                .where(Source.tenant_id == caller.tenant_id, Source.run_id == run_id)
+                .order_by(Source.retrieved_at.desc())
+                .limit(200)
+            )
+        )
+        questions = list(
+            await session.scalars(
+                select(SubQuestion)
+                .where(SubQuestion.tenant_id == caller.tenant_id, SubQuestion.run_id == run_id)
+                .order_by(SubQuestion.created_at)
+                .limit(16)
+            )
+        )
+        nodes = list(
+            await session.scalars(
+                select(NodeExecution)
+                .where(NodeExecution.tenant_id == caller.tenant_id, NodeExecution.run_id == run_id)
+                .order_by(NodeExecution.started_at)
+                .limit(60)
+            )
+        )
+        attempts = list(
+            await session.scalars(
+                select(SubQuestionAttempt)
+                .where(
+                    SubQuestionAttempt.tenant_id == caller.tenant_id,
+                    SubQuestionAttempt.run_id == run_id,
+                )
+                .order_by(SubQuestionAttempt.started_at)
+                .limit(32)
+            )
+        )
+        gaps = list(
+            await session.scalars(
+                select(ResearchGap)
+                .where(ResearchGap.tenant_id == caller.tenant_id, ResearchGap.run_id == run_id)
+                .order_by(ResearchGap.created_at)
+                .limit(40)
+            )
+        )
+        if report:
+            gaps = [
+                gap
+                for gap in gaps
+                if gap.details.get("reportId") == str(report.id)
+                or (report.version == 1 and gap.details.get("reportId") is None)
+            ]
+        versions = list(
+            await session.scalars(
+                select(Report)
+                .where(Report.tenant_id == caller.tenant_id, Report.run_id == run_id)
+                .order_by(Report.version.desc())
+                .limit(20)
+            )
+        )
+        calls = list(
+            await session.scalars(
+                select(ProviderCall)
+                .where(ProviderCall.tenant_id == caller.tenant_id, ProviderCall.run_id == run_id)
+                .order_by(ProviderCall.started_at)
+                .limit(100)
+            )
+        )
+        tasks = [
+            task_projection(
+                node,
+                dependencies=prior_dependencies(node, nodes),
+            )
+            for node in nodes
+        ]
+        by_question = {item.id: item for item in questions}
+        for attempt in attempts:
+            question = by_question.get(attempt.sub_question_id)
+            if question:
+                tasks.append(
+                    task_projection(
+                        attempt,
+                        name=question.question,
+                        source_ids=[
+                            str(source.id)
+                            for source in sources
+                            if source.sub_question_id == question.id
+                            or any(
+                                path.get("subQuestionId") == str(question.id)
+                                for path in (source.discovery_paths or [])
+                            )
+                        ],
+                        dependencies=[
+                            str(node.id)
+                            for node in nodes
+                            if node.node_id == "research_worker"
+                            and node.started_at <= attempt.started_at
+                            and (not node.completed_at or node.completed_at >= attempt.started_at)
+                        ][-1:],
+                    )
+                )
+        attempted = {attempt.sub_question_id for attempt in attempts}
+        for question in questions:
+            if question.id not in attempted:
+                tasks.append(
+                    {
+                        "id": str(question.id),
+                        "nodeId": "research_task",
+                        "name": question.question,
+                        "status": {
+                            "complete": "completed",
+                            "failed": "failed",
+                            "running": "running",
+                            "skipped": "skipped",
+                        }.get(question.status, "queued"),
+                        "attempt": question.attempts,
+                        "startedAt": None,
+                        "completedAt": None,
+                        "errorCode": None,
+                        "sourceIds": [],
+                        "dependsOn": ["planner"],
+                    }
+                )
+        parent_run_id = None
+        if getattr(run, "parent_report_id", None):
+            parent_run_id = await session.scalar(
+                select(Report.run_id)
+                .join(
+                    ResearchRun,
+                    (ResearchRun.id == Report.run_id)
+                    & (ResearchRun.tenant_id == caller.tenant_id)
+                    & (ResearchRun.user_id == caller.user_id),
+                )
+                .where(Report.tenant_id == caller.tenant_id, Report.id == run.parent_report_id)
+            )
+        followups = (
+            list(
+                await session.scalars(
+                    select(ResearchRun)
+                    .where(
+                        ResearchRun.tenant_id == caller.tenant_id,
+                        ResearchRun.user_id == caller.user_id,
+                        ResearchRun.parent_report_id == report.id,
+                    )
+                    .order_by(ResearchRun.created_at.desc())
+                    .limit(20)
+                )
+            )
+            if report
+            else []
+        )
+        insights = RunInsights.model_validate(
+            {
+                "schemaVersion": "1.2",
+                "tasks": tasks,
+                "providerCalls": [
+                    {
+                        "id": str(call.id),
+                        "provider": call.provider,
+                        "operation": call.operation,
+                        "outcome": call.outcome,
+                        "startedAt": call.started_at.isoformat(),
+                        "completedAt": call.completed_at.isoformat() if call.completed_at else None,
+                    }
+                    for call in calls
+                ],
+                "gaps": [
+                    {
+                        "id": str(gap.id),
+                        "description": gap.description,
+                        "why": gap.details.get(
+                            "why", "A recorded research limitation remains unresolved."
+                        ),
+                        "suggestedQuery": gap.target_query,
+                        "status": gap.status
+                        if gap.status in {"open", "investigating", "resolved"}
+                        else "open",
+                        "claimIds": gap.details.get("claimIds", []),
+                        "subQuestionIds": gap.details.get("subQuestionIds", []),
+                    }
+                    for gap in gaps
+                ],
+                "parentReportId": str(run.parent_report_id)
+                if getattr(run, "parent_report_id", None)
+                else None,
+                "parentRunId": str(parent_run_id) if parent_run_id else None,
+                "followupRuns": [
+                    {
+                        "runId": str(item.id),
+                        "status": item.status,
+                        "createdAt": item.created_at.isoformat(),
+                    }
+                    for item in followups
+                ],
+                "reportVersions": [
+                    {
+                        "id": str(item.id),
+                        "version": item.version,
+                        "createdAt": item.created_at.isoformat(),
+                    }
+                    for item in versions
+                ],
+            }
+        )
+        assessments = source_assessments(sources, run.original_question)
+        return {
+            "schemaVersion": "1.2",
+            "insights": insights.model_dump(mode="json", by_alias=True),
+            "runId": str(run.id),
+            "status": run.status,
+            "originalQuestion": run.original_question,
+            "planVersion": run.plan_version,
+            "sourceCount": source_count or 0,
+            "claimChecks": claim_checks,
+            "sourceLimit": source_limit(
+                budget.max_search_calls if budget else 0,
+                is_quick_explainer(run.original_question),
+            ),
+            "errorCode": run.error_code,
+            "createdAt": run.created_at.isoformat(),
+            "updatedAt": run.updated_at.isoformat(),
+            "budget": {
+                "maxSearchCalls": budget.max_search_calls if budget else 0,
+                "maxEstimatedCostUsd": float(budget.max_estimated_cost_usd) if budget else 0,
+            },
+            "usage": {"searchCalls": usage.search_calls if usage else 0},
+            "report": (
+                {
+                    "id": str(report.id),
+                    "version": report.version,
+                    "markdown": report.markdown,
+                    "publishedAt": report.updated_at.isoformat(),
+                }
+                if report
+                else None
+            ),
+            "quickMode": is_quick_explainer(run.original_question) and (source_count or 0) <= 2,
+            "sources": [
+                {
+                    "id": str(source.id),
+                    "title": source.title,
+                    "url": source.canonical_url,
+                    "provider": source.provider,
+                    "sourceClass": source.source_class,
+                    "assessment": assessments[str(source.id)],
+                    "discoveryPaths": source.discovery_paths or [],
+                }
+                for source in sources
+            ],
+            "subQuestions": [
+                {
+                    "id": str(item.id),
+                    "question": item.question,
+                    "status": item.status,
+                }
+                for item in questions
+            ],
+            "events": [
+                {
+                    "sequence": event.event_sequence,
+                    "type": event.event_type,
+                    "label": event.payload.get("label") or event.payload.get("message"),
+                    "occurredAt": event.occurred_at.isoformat(),
+                }
+                for event in (
+                    await session.scalars(
+                        select(RunEvent)
+                        .where(RunEvent.tenant_id == caller.tenant_id, RunEvent.run_id == run_id)
+                        .order_by(RunEvent.event_sequence.desc())
+                        .limit(40)
+                    )
+                )
+            ],
+        }
+
+
+@router.post("/runs/{run_id}/cancel", status_code=status.HTTP_202_ACCEPTED)
+async def cancel_research_run(
+    run_id: uuid.UUID,
+    authorization: Annotated[str | None, Header()] = None,
+    x_internal_service_auth: str | None = Header(default=None),
+    x_development_tenant_id: str | None = Header(default=None),
+    x_development_user_id: str | None = Header(default=None),
+) -> dict[str, str]:
+    """Request cancellation once; workers honor it at safe graph boundaries."""
+    settings = get_settings()
+    caller = await _caller(
+        settings,
+        x_internal_service_auth,
+        x_development_tenant_id,
+        x_development_user_id,
+        authorization=authorization,
+    )
+    async with tenant_session(str(caller.tenant_id)) as session:
+        run = await session.scalar(
+            select(ResearchRun)
+            .where(
+                ResearchRun.tenant_id == caller.tenant_id,
+                ResearchRun.user_id == caller.user_id,
+                ResearchRun.id == run_id,
+            )
+            .with_for_update()
+        )
+        if run is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="research run not found"
+            )
+        if run.status in {"completed", "failed", "cancelled"}:
+            return {"runId": str(run.id), "status": run.status}
+        if run.cancellation_requested_at is None:
+            run.cancellation_requested_at = datetime.now(UTC)
+            await EventOutbox(session, caller.tenant_id).append(
+                run_id=run.id,
+                event_type="run.cancellation_requested",
+                payload={"label": "Cancellation requested"},
+            )
+        if run.status == "queued":
+            run.status = "cancelled"
+            run.cancelled_at = datetime.now(UTC)
+            await EventOutbox(session, caller.tenant_id).append(
+                run_id=run.id,
+                event_type="run.cancelled",
+                payload={"label": "Research run cancelled"},
+            )
+        return {"runId": str(run.id), "status": run.status}
+
+
+@router.post("/runs/{run_id}/retry", status_code=status.HTTP_202_ACCEPTED)
+async def retry_research_run(
+    run_id: uuid.UUID,
+    request: Request,
+    authorization: Annotated[str | None, Header()] = None,
+    x_internal_service_auth: str | None = Header(default=None),
+    x_development_tenant_id: str | None = Header(default=None),
+    x_development_user_id: str | None = Header(default=None),
+) -> dict[str, str]:
+    """Create a fresh, auditable attempt instead of mutating terminal evidence."""
+    settings = get_settings()
+    caller = await _caller(
+        settings,
+        x_internal_service_auth,
+        x_development_tenant_id,
+        x_development_user_id,
+        authorization=authorization,
+    )
+    async with tenant_session(str(caller.tenant_id)) as session:
+        prior = await session.scalar(
+            select(ResearchRun).where(
+                ResearchRun.tenant_id == caller.tenant_id,
+                ResearchRun.user_id == caller.user_id,
+                ResearchRun.id == run_id,
+            )
+        )
+        if prior is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="research run not found"
+            )
+        if prior.status not in {"failed", "cancelled"}:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="only failed or cancelled research can be retried",
+            )
+        budget = await session.scalar(
+            select(Budget).where(Budget.tenant_id == caller.tenant_id, Budget.run_id == run_id)
+        )
+        if budget is None:
+            raise RuntimeError("run budget not found")
+        fresh = await RunRepository(session, caller.tenant_id).create(
+            user_id=caller.user_id,
+            question=prior.original_question,
+            report_requirements=prior.report_requirements,
+            budget=RunBudgetDefaults(
+                max_wall_clock_ms=budget.max_wall_clock_ms,
+                max_search_calls=budget.max_search_calls,
+                max_browser_sessions=budget.max_browser_sessions,
+                max_reflection_rounds=budget.max_reflection_rounds,
+                max_input_tokens=budget.max_input_tokens,
+                max_output_tokens=budget.max_output_tokens,
+                max_estimated_cost_usd=budget.max_estimated_cost_usd,
+            ),
+        )
+        await EventOutbox(session, caller.tenant_id).append(
+            run_id=fresh.id,
+            event_type="run.retried",
+            payload={
+                "label": "Retry created from a prior terminal run",
+                "priorRunId": str(prior.id),
+            },
+        )
+        fresh_id = fresh.id
+        question = fresh.original_question
+    task = asyncio.create_task(
+        run_graph(
+            settings,
+            run_id=fresh_id,
+            tenant_id=caller.tenant_id,
+            user_id=caller.user_id,
+            question=question,
+        )
+    )
+    request.app.state.background_tasks.add(task)
+    task.add_done_callback(request.app.state.background_tasks.discard)
+    return {"runId": str(fresh_id), "status": "queued"}
+
+
+@router.post("/runs/{run_id}/followups", status_code=status.HTTP_202_ACCEPTED)
+async def followup_research_run(
+    run_id: uuid.UUID,
+    body: FollowupRequest,
+    request: Request,
+    authorization: Annotated[str | None, Header()] = None,
+    x_internal_service_auth: str | None = Header(default=None),
+    x_development_tenant_id: str | None = Header(default=None),
+    x_development_user_id: str | None = Header(default=None),
+) -> dict[str, str]:
+    settings = get_settings()
+    if len(body.question.strip()) < 5:
+        raise HTTPException(422, "follow-up question is too short")
+    caller = await _caller(
+        settings,
+        x_internal_service_auth,
+        x_development_tenant_id,
+        x_development_user_id,
+        authorization=authorization,
+    )
+    async with tenant_session(str(caller.tenant_id)) as session:
+        prior = await session.scalar(
+            select(ResearchRun)
+            .where(
+                ResearchRun.tenant_id == caller.tenant_id,
+                ResearchRun.user_id == caller.user_id,
+                ResearchRun.id == run_id,
+            )
+            .with_for_update()
+        )
+        if prior is None:
+            raise HTTPException(404, "research run not found")
+        if prior.status != "completed" or not prior.report_id:
+            raise HTTPException(409, "follow-ups require a completed report")
+        parent_report_id = prior.report_id
+        if body.report_version is not None:
+            parent_report_id = await session.scalar(
+                select(Report.id).where(
+                    Report.tenant_id == caller.tenant_id,
+                    Report.run_id == run_id,
+                    Report.version == body.report_version,
+                )
+            )
+            if parent_report_id is None:
+                raise HTTPException(404, "report version not found")
+        gap = None
+        if body.gap_id:
+            gap = await session.scalar(
+                select(ResearchGap)
+                .where(
+                    ResearchGap.tenant_id == caller.tenant_id,
+                    ResearchGap.run_id == run_id,
+                    ResearchGap.id == body.gap_id,
+                )
+                .with_for_update()
+            )
+            if gap is None:
+                raise HTTPException(404, "research gap not found")
+            if gap.details.get("reportId") not in {None, str(parent_report_id)}:
+                raise HTTPException(409, "gap belongs to another report version")
+        repository = RunRepository(session, caller.tenant_id)
+        fresh = await repository.get_by_idempotency_key(
+            user_id=caller.user_id, idempotency_key=body.idempotency_key
+        )
+        if fresh:
+            expected_question = (
+                f"Follow-up to: {prior.original_question}\nInvestigate: {body.question.strip()}"
+            )
+            if (
+                fresh.parent_report_id != parent_report_id
+                or fresh.original_question != expected_question
+            ):
+                raise HTTPException(409, "idempotency key belongs to another request")
+            return {"runId": str(fresh.id), "status": fresh.status}
+        budget = await session.scalar(
+            select(Budget).where(Budget.tenant_id == caller.tenant_id, Budget.run_id == run_id)
+        )
+        if budget is None:
+            raise HTTPException(409, "parent budget unavailable")
+        question = f"Follow-up to: {prior.original_question}\nInvestigate: {body.question.strip()}"
+        fresh = await repository.create(
+            user_id=caller.user_id,
+            question=question,
+            idempotency_key=body.idempotency_key,
+            report_requirements=prior.report_requirements,
+            budget=RunBudgetDefaults(
+                **{
+                    field: getattr(budget, field)
+                    for field in RunBudgetDefaults.__dataclass_fields__
+                }
+            ),
+        )
+        fresh.parent_report_id = parent_report_id
+        if gap:
+            gap.status = "investigating"
+            gap.details = {**gap.details, "followupRunId": str(fresh.id)}
+        await EventOutbox(session, caller.tenant_id).append(
+            run_id=fresh.id,
+            event_type="followup.created",
+            payload={
+                "label": "Follow-up created; evidence will be collected afresh",
+                "parentReportId": str(parent_report_id),
+            },
+        )
+        fresh_id = fresh.id
+    task = asyncio.create_task(
+        run_graph(
+            settings,
+            run_id=fresh_id,
+            tenant_id=caller.tenant_id,
+            user_id=caller.user_id,
+            question=question,
+        )
+    )
+    request.app.state.background_tasks.add(task)
+    task.add_done_callback(request.app.state.background_tasks.discard)
+    return {"runId": str(fresh_id), "status": "queued"}
+
+
+@router.get("/runs/{run_id}/events", response_class=EventSourceResponse)
+async def stream_research_run_events(
+    run_id: uuid.UUID,
+    request: Request,
+    after: AfterSequenceQuery = 0,
+    authorization: Annotated[str | None, Header()] = None,
+    x_internal_service_auth: str | None = Header(default=None),
+    x_development_tenant_id: str | None = Header(default=None),
+    x_development_user_id: str | None = Header(default=None),
+) -> AsyncIterable[ServerSentEvent]:
+    """Replay committed run events, then tail them with monotonic sequence IDs."""
+    settings = get_settings()
+    caller = await _caller(
+        settings,
+        x_internal_service_auth,
+        x_development_tenant_id,
+        x_development_user_id,
+        authorization=authorization,
+    )
+    async with tenant_session(str(caller.tenant_id)) as session:
+        run = await session.scalar(
+            select(ResearchRun).where(
+                ResearchRun.tenant_id == caller.tenant_id,
+                ResearchRun.user_id == caller.user_id,
+                ResearchRun.id == run_id,
+            )
+        )
+    if run is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="research run not found")
+
+    async def event_stream() -> AsyncIterable[ServerSentEvent]:
+        watermark = after
+        terminal_statuses = {"completed", "failed", "cancelled"}
+        while not await request.is_disconnected():
+            async with tenant_session(str(caller.tenant_id)) as session:
+                events = list(
+                    await session.scalars(
+                        select(RunEvent)
+                        .where(
+                            RunEvent.tenant_id == caller.tenant_id,
+                            RunEvent.run_id == run_id,
+                            RunEvent.event_sequence > watermark,
+                        )
+                        .order_by(RunEvent.event_sequence)
+                    )
+                )
+                current_status = await session.scalar(
+                    select(ResearchRun.status).where(
+                        ResearchRun.tenant_id == caller.tenant_id, ResearchRun.id == run_id
+                    )
+                )
+            for event in events:
+                watermark = event.event_sequence
+                yield ServerSentEvent(
+                    id=str(event.event_sequence),
+                    data=json.dumps(
+                        {
+                            "sequence": event.event_sequence,
+                            "type": event.event_type,
+                            "label": event.payload.get("label") or event.payload.get("message"),
+                            "occurredAt": event.occurred_at.isoformat(),
+                        }
+                    ),
+                )
+            if current_status in terminal_statuses:
+                return
+            if not events:
+                yield ServerSentEvent(comment="keepalive")
+            await asyncio.sleep(1)
+
+    async for event in event_stream():
+        yield event
