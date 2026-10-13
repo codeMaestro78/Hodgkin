@@ -1,0 +1,33 @@
+{
+  "$id": "https://schemas.research.local/1.2/FollowupRequestSchema.json",
+  "title": "FollowupRequestSchema",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "question": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 1000
+    },
+    "gapId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "reportVersion": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 10000
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 200
+    }
+  },
+  "required": [
+    "question",
+    "idempotencyKey"
+  ],
+  "additionalProperties": false
+}
