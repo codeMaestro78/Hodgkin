@@ -4,7 +4,7 @@
 
 ## 1. Executive summary
 
-This project will build a multi-tenant research operations console whose only lifecycle orchestrator is LangGraph and whose output is a citation-grounded report assembled from verified evidence. The repository is currently greenfield: it contains the documentation set and no application source, dependency manifest, migrations, CI, infrastructure, or tests. The first implementation slice therefore establishes the repository, shared contracts, durable run/event storage, and one complete path from `intake` through `planner`, one `research_worker`, `distill_and_verify`, `writer`, `quality_gate`, and basic replayable SSE. That slice deliberately uses one provider family and no reflection, CrewAI, Parallel, or browser automation, while still preserving every invariant in [agent.md §2](./agent.md#2-architecture-invariants-non-negotiable).
+This project builds a multi-tenant research operations console whose only lifecycle orchestrator is LangGraph and whose output is a citation-grounded report assembled from verified evidence. As of 2026-09-28, the repository baseline, schema 1.1 contract pipeline, tenant-safe PostgreSQL core, event outbox, artifact store, and Tavily Search/Extract ingestion boundary are implemented. The next slice connects these foundations to `intake`, `planner`, one `research_worker`, `distill_and_verify`, `writer`, `quality_gate`, and replayable SSE. It deliberately uses one provider family and no reflection, CrewAI, Parallel, or browser automation while preserving every invariant in [agent.md §2](./agent.md#2-architecture-invariants-non-negotiable).
 
 The canonical contract will be authored in Zod 4, exported as Draft 2020-12 JSON Schema, generated into Pydantic v2 models, and protected by shared positive and negative fixtures. PostgreSQL application tables—not LangGraph checkpoints—will be business truth for runs, plans, evidence, budgets, and replay; checkpoints own only graph execution position and resumability. Provider calls will use transactional budget reservations so concurrent workers cannot overspend, and SSE reconciliation will use a projection watermark so reconnects cannot skip committed events. The three-month release is intentionally narrower than the full blueprint: Tavily, Serper, three parallel workers, one bounded reflection round, Jev routing, verified citations, replayable SSE, a 20-question evaluation, and one deployed demo. Parallel, browser automation, live CrewAI, the 60-question benchmark, and enterprise operations work remain post-launch roadmap items.
 
@@ -31,7 +31,7 @@ Recommended defaults allow work to begin, but each item remains an explicit deci
 
 ### 3.1 Repository layout and toolchain
 
-Every path marked `TODO: verify repository path` is not present. Adopt the following proposed layout as the greenfield default, then replace the TODO markers in the same scaffold PR (per [agent.md §3](./agent.md#3-repository-navigation)).
+The scaffold has confirmed the following layout. Rows for graph, coordination, and optional adapters describe their reserved future locations.
 
 | Concern | All documented unresolved path candidates | Recommended default |
 |---|---|---|
@@ -50,7 +50,7 @@ Every path marked `TODO: verify repository path` is not present. Adopt the follo
 | Configuration | `.env.example`, `services/research-api/config.py`, `apps/web/.env.example` | root non-secret examples plus typed settings in each service |
 | Deployment | `infra/`, Dockerfiles, compose path | `infra/` plus root `compose.yaml`; no Kubernetes in MVP |
 
-Toolchain defaults: pnpm workspaces with Node 22 LTS or the current supported LTS after scaffold verification; Python 3.12 with `uv`; Ruff, mypy, pytest, Vitest, and Playwright. These are recommendations, not claims from the current repository. Pin exact versions and commit lockfiles in PR 1.
+Confirmed toolchain: pnpm 10.18.3 workspaces with Node 24.15.0; Python 3.12 with `uv`; Ruff, mypy, pytest, and Vitest. Exact dependency versions and lockfiles are committed. Playwright remains a later-phase dependency.
 
 ### 3.2 Contracts, persistence, and platform
 
@@ -59,7 +59,7 @@ Toolchain defaults: pnpm workspaces with Node 22 LTS or the current supported LT
 | Zod/Pydantic synchronization | Zod 4 → checked-in Draft 2020-12 JSON Schema → generated Pydantic v2, plus shared valid/invalid fixtures and normalized-schema comparison |
 | Database tables and indexes | Start with the full table list in [database.md §Tables](./database.md#tables-proposed-derived-from-the-blueprints-persistence-list); implement only tables needed by each phase, always with `tenant_id` and RLS |
 | LangGraph interrupt call sites | Only before explicitly authorized authenticated/side-effecting browser actions; never inside CrewAI tools |
-| Object-store backend and key scheme | Local MinIO for development; S3-compatible interface in production; opaque content-hash-derived keys |
+| Object-store backend and key scheme | LocalStack S3 for development; S3-compatible interface in production; opaque content-hash-derived keys |
 | Artifact retention | Default 30 days for raw artifacts, but completed-report evidence remains until report retention expires; make both tenant-configurable before production |
 | Service-to-service authentication | Short-lived signed internal JWT with audience and tenant/user delegation claims; mTLS can be added by the deployment platform |
 | Session/auth provider | Choose during frontend scaffold; HTTP-only same-origin cookie is required by native `EventSource` |
@@ -169,7 +169,7 @@ The repository dimension is greenfield. There are no implementation claims that 
 
 **Implements:** [state-management.md](./state-management.md), [configuration.md](./configuration.md), [development.md](./development.md), [security.md](./security.md), [testing.md](./testing.md), and repository-navigation rules in [agent.md §3](./agent.md#3-repository-navigation).
 
-**Deliverables:** `RunStatusSchema`, `ProviderSchema`, `BudgetSchema`, `SourceSchema`, `CitationSchema`, `CitationVerificationSchema`, `EvidenceClaimSchema`, `SubQuestionSchema`, `ResearchGapSchema`, `ResearchStateSchema`, `AgentEventSchema`, `ReflectionDecisionSchema`, `WorkerResultSchema`, `ResearchPlanSchema`, `ProviderCallSchema`, and `ResearchRunProjectionSchema`; generated Pydantic v2 mirrors; shared fixtures; monorepo manifests/lockfiles; typed settings; local Postgres/Redis/MinIO; CI.
+**Deliverables:** `RunStatusSchema`, `ProviderSchema`, `BudgetSchema`, `SourceSchema`, `CitationSchema`, `CitationVerificationSchema`, `EvidenceClaimSchema`, `SubQuestionSchema`, `ResearchGapSchema`, `ResearchStateSchema`, `AgentEventSchema`, `ReflectionDecisionSchema`, `WorkerResultSchema`, `ResearchPlanSchema`, `ProviderCallSchema`, and `ResearchRunProjectionSchema`; generated Pydantic v2 mirrors; shared fixtures; monorepo manifests/lockfiles; typed settings; local PostgreSQL/Redis/LocalStack S3; CI.
 
 **Dependencies:** None.
 
@@ -276,7 +276,7 @@ Each checkbox is intended to be one reviewable PR/change.
 
 ### Phase 1 tasks
 
-- [ ] Implement artifact interface, content hashing, canonical URL normalization, and MinIO adapter; touches `SourceSchema.artifactRef/contentHash` and unit tests.
+- [x] Implement artifact interface, content hashing, canonical URL normalization, and S3-compatible adapter; touches `SourceSchema.artifactRef/contentHash` and unit/integration tests.
 - [ ] Implement Tavily Search normalization using basic chunks, no generated answer, and explicit usage capture; touches provider fixtures and `SourceSchema`.
 - [ ] Implement query-guided Tavily Extract with partial-result handling and hostname post-filter; touches provider fixtures and failure tests.
 - [ ] Implement `intake`, MVP defaults, usage ledger, and atomic budget reservation service; touches `BudgetSchema`, `ProviderCallSchema`, reservation state transitions, and concurrent oversubscription tests.
@@ -401,11 +401,11 @@ These targets are locked before implementation results are available. They may c
 
 ## 10. First 5 concrete next actions
 
-1. **PR 1 — Monorepo and verified developer baseline:** create `apps/web`, `services/research-api`, `packages/contracts`, `infra`, lockfiles, local Postgres/Redis/MinIO, CI, and replace repository-path TODOs with confirmed locations.
-2. **PR 2 — Canonical contract correction:** add orthogonal cancellation timestamps, `reportId`, `CitationVerificationSchema`, `WorkerResultSchema`, `ResearchPlanSchema.planVersion`, compact dispatch/reflection channels, event sequences, provenance fields, and the camelCase/Python alias policy; publish schema version 1.1.
-3. **PR 3 — Cross-language contract pipeline:** export Zod 4 JSON Schema, generate Pydantic v2, add shared valid/invalid fixtures and normalized-schema drift checks.
-4. **PR 4 — Tenant-safe authoritative core:** add tenants/users/runs/plans, atomic budget reservations, provider-call ledger, node execution, unique-sequence event outbox, non-owner/forced-RLS policies, repositories, and cross-tenant/concurrency negative tests.
-5. **PR 5 — First evidence ingestion slice:** add artifact hashing/storage plus Tavily basic Search/query-guided Extract adapters with committed reservations, versioned provider schemas, usage capture, strict hostname post-filtering, partial-result handling, and recorded contract fixtures.
+1. [x] **PR 1 — Monorepo and verified developer baseline:** `apps/web`, `services/research-api`, `packages/contracts`, `infra`, lockfiles, local PostgreSQL/Redis/LocalStack S3, CI, and confirmed paths.
+2. [x] **PR 2 — Canonical contract correction:** orthogonal cancellation timestamps, `reportId`, explicit citation verification, worker/plan contracts, compact state, event sequences, provenance, and schema version 1.1.
+3. [x] **PR 3 — Cross-language contract pipeline:** Zod 4 to Draft 2020-12 JSON Schema to generated Pydantic v2, plus shared valid/invalid fixtures and drift checks.
+4. [x] **PR 4 — Tenant-safe authoritative core:** tenant/run tables, atomic reservations, provider ledger, node executions, ordered outbox, non-owner forced RLS, repositories, and real concurrency/isolation tests.
+5. [x] **PR 5 — First evidence ingestion slice:** content-addressed S3 storage and Tavily basic Search/query-guided Extract with committed reservations, versioned schemas, usage/raw-response artifacts, strict hostname filtering, and mocked/live contract coverage.
 
 ---
 
