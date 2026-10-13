@@ -1,0 +1,108 @@
+{
+  "$id": "https://schemas.research.local/1.2/SubQuestionSchema.json",
+  "title": "SubQuestionSchema",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "enum": [
+        "1.1",
+        "1.2"
+      ]
+    },
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "tenantId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "runId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "planVersion": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991
+    },
+    "question": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 1000
+    },
+    "rationale": {
+      "type": "string",
+      "maxLength": 1000
+    },
+    "successCriteria": {
+      "minItems": 1,
+      "maxItems": 5,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 400
+      }
+    },
+    "preferredProvider": {
+      "type": "string",
+      "enum": [
+        "serper",
+        "tavily",
+        "parallel",
+        "browser",
+        "internal"
+      ]
+    },
+    "sourceClasses": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "official",
+          "primary",
+          "paper",
+          "news",
+          "secondary",
+          "community",
+          "unknown"
+        ]
+      }
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "running",
+        "complete",
+        "failed",
+        "skipped"
+      ]
+    },
+    "attempts": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "id",
+    "tenantId",
+    "runId",
+    "planVersion",
+    "question",
+    "rationale",
+    "successCriteria",
+    "sourceClasses",
+    "status",
+    "attempts"
+  ],
+  "additionalProperties": false
+}
