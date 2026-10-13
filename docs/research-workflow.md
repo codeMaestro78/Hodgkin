@@ -205,3 +205,24 @@ Hitting any hard limit (`maxSearchCalls`, `maxBrowserSessions`,
 `route_after_reflection` to route to `writer` regardless of the reflector's
 preference — see [reflection.md](./reflection.md#hard-limits). This is a
 deterministic, code-enforced stop, not a suggestion.
+
+## Depth ceilings and responsive presentation
+
+Focused, Balanced, and Deep now cap collected sources at 6, 12, and 20 respectively.
+The persisted `maxSearchCalls` budget also remains a separate ceiling on provider
+operations: both search and extraction consume one call. The source ceiling is
+derived from that persisted value, so no database migration is needed. Quick
+evergreen explainers retain a two-source ceiling. These are maxima, not quotas;
+duplicate URLs, empty extracts, and unavailable evidence can produce fewer sources.
+
+Workers preallocate source slots across planned questions (subtracting already
+stored sources) before dispatch. At most three questions run concurrently. Search
+responses are capped even when the provider overproduces; extraction only accepts
+requested, unique URLs. Source context loads concurrently, preserving reference
+order. Existing completed reports are not modified or truncated.
+
+The workspace displays source progress separately from provider calls, coalesces
+event bursts into snapshot refreshes, and provides keyboard-accessible report
+section navigation, searchable collected evidence, and live source previews.
+Answers remain gated by exact-span and semantic verification; the UI does not
+present an unverified draft as a completed answer.
