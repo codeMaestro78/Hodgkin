@@ -22,6 +22,14 @@ what happened without re-running anything.
 
 ## Event catalog
 
+The catalog below also contains design targets, not a claim that every target is
+emitted. The current runtime persists validated `task.state` transitions for real
+node/worker attempts, plus lifecycle/source events. The browser SSE transport is
+a compact notification (sequence, type, label, time); task, evidence and report
+data arrive through the tenant-scoped run snapshot. Duplicate or older sequences
+are ignored and refreshes are coalesced. No simulated percent-complete or draft
+token stream is emitted. `run.completed` is committed with final node completion.
+
 | Event | Payload highlights | Emitted by |
 |---|---|---|
 | `node.started` | `nodeId`, `agent`, `label` | Every node, on entry |
