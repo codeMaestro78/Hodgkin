@@ -1,0 +1,25 @@
+name: scheduled-provider-contracts
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  tavily-contract:
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.11.1"
+      - run: uv sync --project services/research-api --frozen --all-groups
+      - name: Run gated live contracts
+        working-directory: services/research-api
+        env:
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+        run: uv run pytest -m live_provider
