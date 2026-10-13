@@ -6,8 +6,8 @@ All request/response bodies validate against the schemas in
 [state-management.md](./state-management.md). Authentication and
 authorization details: [security.md](./security.md).
 
-`TODO: verify repository path` — proposed location:
-`apps/web/app/api/research/**/route.ts`.
+The BFF root is confirmed at `apps/web/app/api/`; only `/api/health` exists in the current slice.
+The research endpoints below remain planned under `apps/web/app/api/research/**/route.ts`.
 
 ## `POST /api/research/runs`
 
