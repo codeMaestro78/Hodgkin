@@ -28,13 +28,10 @@ for:
 
 ## Artifact references
 
-`Source.artifactRef` is the only pointer `ResearchState`/PostgreSQL holds
-into object storage. It should be treated as an opaque key — the storage
-backend, bucket/prefix scheme, and URL structure are implementation
-details that can change without affecting the schema. `PROPOSED` /
-`TODO: verify repository path` for the actual backend (S3-compatible
-object storage is the typical choice; not confirmed against a real
-repository).
+`Source.artifactRef` is the only pointer `ResearchState`/PostgreSQL holds into object storage. The
+implemented key is `tenants/{tenantId}/runs/{runId}/sha256/{contentHash}` and remains opaque to
+consumers. `S3ArtifactStore` is the production-facing interface; local development uses
+S3-compatible LocalStack and the `research-artifacts` bucket. Full bodies never enter hot tables.
 
 ## Retention
 
