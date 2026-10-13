@@ -1,5 +1,10 @@
 # State Management
 
+> Implementation authority: Zod schema version 1.2 in `packages/contracts/src/` is the canonical
+> executable contract. Draft 2020-12 output in `packages/contracts/schema/` and generated Pydantic
+> v2 models in `services/research-api/src/research_api/schemas/generated/` must be regenerated and
+> checked together. Illustrative snippets below do not override those checked-in artifacts.
+
 The canonical data contracts shared across the frontend, the Next.js BFF,
 the event store, and the Python research service. These are Zod schemas in
 TypeScript, mirrored as Pydantic models in Python — generate one from the
