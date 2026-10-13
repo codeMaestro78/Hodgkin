@@ -6,10 +6,11 @@ back, [redis.md](./redis.md) for what is deliberately *not* here, and
 [artifact-storage.md](./artifact-storage.md) for what large content is
 excluded from these tables.
 
-`TODO: verify repository path` for actual migrations/ORM models
-(proposed: `services/research-api/db/migrations/`, `services/research-api/db/models/`).
+ORM models are in `services/research-api/src/research_api/db/models.py`; Alembic migrations are in
+`services/research-api/src/research_api/db/migrations/`. Migration `0001` creates the application
+core, enables and forces RLS, and grants access to the non-owner `research_app` role.
 
-## Tables (proposed, derived from the blueprint's persistence list)
+## Tables
 
 | Table | Backs | Notes |
 |---|---|---|
@@ -41,6 +42,9 @@ layers, not one:
 2. **Database layer** — row-level security policies (or an equivalent
    mandatory-scoping mechanism) provide a second, defense-in-depth
    boundary in case an application-layer check is missed.
+
+Tenant-scoped foreign keys are composite (`tenant_id`, referenced ID), so a row cannot point at a
+run, user, plan, source, claim, or reservation owned by another tenant even through an admin path.
 
 See [security.md](./security.md#tenant-isolation) for the full policy.
 
@@ -79,5 +83,5 @@ depend on checkpoint internals.
 - `node_executions(run_id, node_id, attempt)` unique index — idempotency
   enforcement (see [reliability.md](./reliability.md#idempotency)).
 
-`PROPOSED` — confirm against actual migration files once the repository is
-available.
+These indexes and uniqueness constraints are present in migration `0001`; future migrations must
+preserve tenant-first access paths and RLS policies.
