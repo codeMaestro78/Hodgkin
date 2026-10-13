@@ -12,24 +12,28 @@ timeouts).
   cookie (see [events-and-sse.md](./events-and-sse.md#transport) for why
   this matters specifically for the SSE endpoint, which cannot carry
   arbitrary headers via native `EventSource`).
-- The BFF authenticates to the Python research API using its own
-  service-to-service credential — `TODO: verify repository path` /
-  `PROPOSED` for the exact mechanism (mTLS, signed internal JWT, etc.).
+- Supabase email/password and Google OAuth are implemented with HttpOnly
+  cookie sessions. See [authentication.md](./authentication.md) for setup and verification.
+- BFF-to-Python requests carry the server-only `INTERNAL_SERVICE_AUTH` secret
+  plus the user's bearer token. FastAPI verifies both; legacy development
+  identity headers and user-editable metadata cannot select a tenant.
 
 ## Authorization
 
 - Every API endpoint resolves the caller's `tenant_id`/`user_id` from the
   session and scopes the operation to it (see [api.md](./api.md)).
-- Cross-tenant access attempts return `403`, not a filtered `200` — the
-  distinction matters for not leaking existence of another tenant's data.
+- A lookup outside the caller's tenant returns not-found rather than
+  exposing another tenant's records. Unconfirmed/unprovisioned account access
+  returns `403`; missing or invalid sessions return `401`.
 
 ## Tenant isolation
 
 - Every durable record carries a `tenant_id` (see
-  [database.md](./database.md#tables-proposed-derived-from-the-blueprints-persistence-list)).
+  [database.md](./database.md#tables)).
 - Isolation is enforced at both the repository/query layer (explicit
   predicate on every query) and the database layer (row-level access
   policy or equivalent mandatory scoping) — defense in depth, not either/or.
+- Composite tenant-aware foreign keys prevent cross-tenant references as well as cross-tenant reads.
 - Provider API keys are stored **per tenant, encrypted**.
 - Per-tenant rate and cost budgets are enforced against the usage ledger
   (see [database.md](./database.md), [reflection.md](./reflection.md#hard-limits)).
@@ -72,8 +76,8 @@ timeouts).
 - Secrets (provider keys, service credentials, signing keys) are never
   committed to the repository and never exposed to LLM tool-call surfaces
   reachable from browsed page content.
-- `PROPOSED` secret store (e.g., a managed secrets manager) —
-  `TODO: verify repository path` for the actual mechanism.
+- The production secret-store integration is `PLANNED`; local examples contain names and safe
+  placeholders only.
 
 ## Audit logs
 
