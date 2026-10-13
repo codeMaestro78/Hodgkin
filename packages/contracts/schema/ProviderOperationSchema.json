@@ -1,0 +1,14 @@
+{
+  "$id": "https://schemas.research.local/1.2/ProviderOperationSchema.json",
+  "title": "ProviderOperationSchema",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "string",
+  "enum": [
+    "search",
+    "news",
+    "extract",
+    "research",
+    "model",
+    "semantic_verify"
+  ]
+}
