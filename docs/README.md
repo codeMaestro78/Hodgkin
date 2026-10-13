@@ -6,12 +6,9 @@
 > disagree, the blueprint wins — file an issue rather than silently
 > reconciling.
 >
-> **Repository status:** No source repository was available for inspection
-> when this documentation was generated. Every repository-specific path,
-> command, or configuration value below is therefore marked `PROPOSED`,
-> `PLANNED`, or `TODO: verify repository path` rather than presented as
-> confirmed fact. See [agent.md](./agent.md) for the full policy on how to
-> resolve these markers as the real repository comes online.
+> **Repository status:** Phase 0 and the first persistence/ingestion foundation are implemented.
+> [agent.md](./agent.md) distinguishes confirmed paths from planned graph, API, and UI work. The
+> checked-in contracts and migrations are authoritative over older illustrative snippets.
 
 ## What this system does
 
