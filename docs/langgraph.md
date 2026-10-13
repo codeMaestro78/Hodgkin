@@ -52,8 +52,8 @@ graph.add_edge("writer", "quality_gate")
 graph.add_edge("quality_gate", END)
 ```
 
-`TODO: verify repository path` — confirm the actual module this lives in
-(proposed: `services/research-api/graph/build_graph.py`).
+Graph implementation is `PLANNED` at
+`services/research-api/src/research_api/graph/{builder.py,nodes/}`.
 
 ## Nodes
 
