@@ -1,12 +1,13 @@
 # Frontend (Next.js)
 
-The Next.js 15 / TypeScript / Tailwind application: research composer,
+The Next.js 16 / TypeScript application: research composer,
 streaming report, and execution console. See [ui-ux.md](./ui-ux.md) for
 the visual/UX specification and [api.md](./api.md) /
 [events-and-sse.md](./events-and-sse.md) for the contracts this app
 consumes.
 
-`TODO: verify repository path` — proposed root: `apps/web/`.
+The confirmed root is `apps/web/`. The current `/research` page is a Phase 0 shell; the component
+hierarchy below remains the implementation target.
 
 ## Role
 
