@@ -89,5 +89,5 @@ committed to the repository — see [security.md](./security.md#secret-managemen
   both services simultaneously; document this explicitly at release time
   rather than assuming independent rollback is always safe.
 
-`TODO: verify repository path` for actual IaC/Dockerfiles (proposed:
-`infra/`).
+Confirmed deployment foundations are `compose.yaml`, `infra/`, `apps/web/Dockerfile`, and
+`services/research-api/Dockerfile`. Production IaC remains planned.
