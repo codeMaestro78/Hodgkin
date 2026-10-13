@@ -1,0 +1,10 @@
+{
+  "$id": "https://schemas.research.local/1.2/SchemaVersionSchema.json",
+  "title": "SchemaVersionSchema",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "string",
+  "enum": [
+    "1.1",
+    "1.2"
+  ]
+}
