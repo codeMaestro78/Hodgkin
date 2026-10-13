@@ -1,0 +1,13 @@
+{
+  "$id": "https://schemas.research.local/1.2/ClaimStatusSchema.json",
+  "title": "ClaimStatusSchema",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "string",
+  "enum": [
+    "supported",
+    "partially_supported",
+    "contradicted",
+    "insufficient_evidence",
+    "not_checked"
+  ]
+}
