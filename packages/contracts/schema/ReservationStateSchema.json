@@ -1,0 +1,12 @@
+{
+  "$id": "https://schemas.research.local/1.2/ReservationStateSchema.json",
+  "title": "ReservationStateSchema",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "string",
+  "enum": [
+    "reserved",
+    "consumed",
+    "released",
+    "uncertain"
+  ]
+}
