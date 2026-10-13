@@ -44,5 +44,5 @@ slower rate-limit checks) — it must never corrupt or lose a run's actual
 state. This is why architecture invariant #9 in
 [agent.md](./agent.md#2-architecture-invariants-non-negotiable) exists.
 
-`TODO: verify repository path` for the actual Redis client/coordination
-module (proposed: `services/research-api/coordination/`).
+The Redis container and `REDIS_URL` are confirmed. Coordination code is `PLANNED` at
+`services/research-api/src/research_api/coordination/` and cannot become business truth.
