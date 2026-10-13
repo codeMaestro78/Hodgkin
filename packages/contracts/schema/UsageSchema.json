@@ -1,0 +1,51 @@
+{
+  "$id": "https://schemas.research.local/1.2/UsageSchema.json",
+  "title": "UsageSchema",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "searchCalls": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "browserSessions": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "inputTokens": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "outputTokens": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "estimatedCostUsd": {
+      "type": "number",
+      "minimum": 0
+    },
+    "reservedSearchCalls": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "reservedEstimatedCostUsd": {
+      "type": "number",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "searchCalls",
+    "browserSessions",
+    "inputTokens",
+    "outputTokens",
+    "estimatedCostUsd",
+    "reservedSearchCalls",
+    "reservedEstimatedCostUsd"
+  ],
+  "additionalProperties": false
+}
