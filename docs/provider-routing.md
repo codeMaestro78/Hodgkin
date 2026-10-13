@@ -113,5 +113,6 @@ generated from its API specification rather than hard-coding beta paths.
 Pin the SDK version and contract-test provider adapters — see
 [testing.md](./testing.md).
 
-`TODO: verify repository path` for the actual adapter implementations
-(proposed: `services/research-api/providers/{serper,tavily,parallel,playwright,browserbase}.py`).
+Provider adapters are located at `services/research-api/src/research_api/providers/`. Tavily
+Search/Extract is implemented; Serper, Parallel, Playwright, and Browserbase remain planned or
+post-launch according to the release boundary.
