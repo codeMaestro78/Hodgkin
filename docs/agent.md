@@ -6,12 +6,8 @@
 > assistant) working on this project, and it takes precedence over your own
 > defaults or generic best practices when the two disagree.
 >
-> **Repository status:** No source repository was available to inspect when
-> this file was generated. Every path below is therefore a **proposed
-> layout** derived from the architecture blueprint, not a confirmed path.
-> Anywhere you see `TODO: verify repository path`, you must locate the real
-> path in the actual repository before relying on it, and then update this
-> file with the confirmed path (see [Modification workflow](#modification-workflow)).
+> **Repository status:** Phase 0 and the Tavily ingestion foundation are implemented. Paths marked
+> `CONFIRMED` below exist; paths marked `PLANNED` remain future implementation work.
 
 ---
 
@@ -87,34 +83,28 @@ require breaking one of these, stop and flag it rather than proceeding.
 
 ## 3. Repository navigation
 
-`TODO: verify repository path` applies to every row below — this table is
-a **proposed** mapping from architecture concepts to repository locations,
-not a confirmed one.
-
-| Concern | Proposed path | Status |
+| Concern | Path | Status |
 |---|---|---|
-| Frontend app (Next.js) | `apps/web/` or `frontend/` | `TODO: verify repository path` |
-| Research composer / report canvas UI | `apps/web/app/(research)/` | `TODO: verify repository path` |
-| Next.js BFF API routes | `apps/web/app/api/research/` | `TODO: verify repository path` |
-| Python research service | `services/research-api/` | `TODO: verify repository path` |
-| LangGraph graph definition | `services/research-api/graph/` | `TODO: verify repository path` |
-| Individual node implementations | `services/research-api/graph/nodes/` | `TODO: verify repository path` |
-| Provider adapters | `services/research-api/providers/` | `TODO: verify repository path` |
-| CrewAI worker adapter (optional) | `services/research-api/providers/crew/` | `TODO: verify repository path` |
-| Zod schemas (TS, shared contracts) | `packages/contracts/` | `TODO: verify repository path` |
-| Pydantic models (Python) | `services/research-api/schemas/` | `TODO: verify repository path` |
-| Database access / migrations | `services/research-api/db/` | `TODO: verify repository path` |
-| Redis coordination code | `services/research-api/coordination/` | `TODO: verify repository path` |
-| Event log / SSE outbox | `services/research-api/events/` | `TODO: verify repository path` |
-| Tests (unit/integration/graph) | `services/research-api/tests/`, `apps/web/tests/` | `TODO: verify repository path` |
-| Configuration | `.env.example`, `services/research-api/config.py` | `TODO: verify repository path` |
-| Deployment config (IaC, Dockerfiles) | `infra/` | `TODO: verify repository path` |
+| Frontend app (Next.js) | `apps/web/` | `CONFIRMED` |
+| Research workspace shell | `apps/web/app/(research)/research/` | `CONFIRMED` |
+| Next.js BFF API routes | `apps/web/app/api/` | `CONFIRMED` (health only; research routes planned) |
+| Python research service | `services/research-api/src/research_api/` | `CONFIRMED` |
+| LangGraph graph definition | `services/research-api/src/research_api/graph/` | `PLANNED` |
+| Individual node implementations | `services/research-api/src/research_api/graph/nodes/` | `PLANNED` |
+| Provider adapters | `services/research-api/src/research_api/providers/` | `CONFIRMED` |
+| CrewAI worker adapter (optional) | — | `DEFERRED` |
+| Zod schemas and generated JSON Schema | `packages/contracts/src/`, `packages/contracts/schema/` | `CONFIRMED` |
+| Generated Pydantic models | `services/research-api/src/research_api/schemas/generated/` | `CONFIRMED` |
+| Database access / migrations | `services/research-api/src/research_api/db/` | `CONFIRMED` |
+| Redis coordination code | `services/research-api/src/research_api/coordination/` | `PLANNED` |
+| Event log / outbox | `services/research-api/src/research_api/events/` | `CONFIRMED` |
+| Tests | `packages/contracts/tests/`, `services/research-api/tests/` | `CONFIRMED` |
+| Configuration | `.env.example`, `services/research-api/src/research_api/config.py` | `CONFIRMED` |
+| Deployment config (local infra, Dockerfiles) | `compose.yaml`, `infra/`, service Dockerfiles | `CONFIRMED` |
 | Documentation (this set) | `docs/` | Confirmed by this task |
 
-**Action for the agent:** the first time you touch this repository, run a
-structural inspection (`ls`, `find`, dependency manifests) and replace each
-`TODO: verify repository path` with the confirmed path, or leave a note if
-the concept doesn't exist yet (`PLANNED`).
+**Action for the agent:** inspect the tree and manifests before changing code. Never treat a
+`PLANNED` module as implemented merely because this document specifies its intended location.
 
 ---
 
