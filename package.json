@@ -1,0 +1,24 @@
+{
+  "name": "multi-agent-research-orchestration",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.18.3",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "build": "pnpm --recursive build",
+    "dev": "pnpm --filter @research/web dev",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "pnpm --recursive lint",
+    "test": "pnpm --recursive test",
+    "typecheck": "pnpm --recursive typecheck",
+    "contracts:generate": "pnpm --filter @research/contracts generate",
+    "contracts:check": "pnpm --filter @research/contracts check:generated"
+  },
+  "devDependencies": {
+    "prettier": "3.9.9",
+    "typescript": "7.0.2"
+  }
+}
