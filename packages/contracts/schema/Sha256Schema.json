@@ -1,0 +1,7 @@
+{
+  "$id": "https://schemas.research.local/1.2/Sha256Schema.json",
+  "title": "Sha256Schema",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "string",
+  "pattern": "^[a-f0-9]{64}$"
+}
