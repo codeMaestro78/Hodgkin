@@ -1,0 +1,1 @@
+"""Transactional event outbox."""
