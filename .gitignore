@@ -1,0 +1,90 @@
+.commandcode
+.env
+.env.local
+.next/
+.pnpm-store/
+node_modules/
+coverage/
+dist/
+*.tsbuildinfo
+.venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.py[cod]
+htmlcov/
+.coverage
+.DS_Store
+.playwright-cli/
+# --- Production exclusions: never commit local / generated / QA dumps ---
+*.log
+logs/
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Env variants (keep *.example committed)
+.env*.local
+.env.development
+.env.production
+.env.test
+!.env.example
+!*.example
+
+# Build / deploy caches
+.turbo/
+.vercel/
+.netlify/
+out/
+build/
+.parcel-cache/
+.vite/
+storybook-static/
+
+# Test / report artifacts
+playwright-report/
+test-results/
+blob-report/
+.nyc_output/
+.coverage.*
+.hypothesis/
+
+# Python packaging
+.tox/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Lint / type caches
+.eslintcache
+.stylelintcache
+
+# IDE / OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.swo
+*~
+Thumbs.db
+
+# Secrets / certs
+*.pem
+*.key
+*.p12
+secrets/
+
+# Local emulator / volume state
+.localstack/
+supabase/.temp/
+*.sqlite
+*.db
+
+# Dev-only design QA dumps (~15MB PNGs + check scripts, not production assets)
+# Production images live in apps/web/public/ and stay tracked.
+docs/design/codebase-refresh/*.png
+docs/design/*.png
+docs/*-browser-check.js
+docs/design/codebase-refresh/*-check.js
