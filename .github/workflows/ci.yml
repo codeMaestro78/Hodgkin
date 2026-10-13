@@ -1,0 +1,84 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [master, main]
+
+permissions:
+  contents: read
+
+jobs:
+  node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm contracts:generate
+      - run: git diff --exit-code -- packages/contracts/schema
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
+  python:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: research
+          POSTGRES_USER: research_owner
+          POSTGRES_PASSWORD: research_owner
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U research_owner -d research"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+      object-storage:
+        image: localstack/localstack:4.9.2
+        env:
+          SERVICES: s3
+          AWS_DEFAULT_REGION: us-east-1
+        ports: ["4566:4566"]
+        options: >-
+          --health-cmd "curl -fs http://localhost:4566/_localstack/health"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    defaults:
+      run:
+        working-directory: services/research-api
+    env:
+      DATABASE_URL: postgresql+psycopg://research_app:research_app@localhost:5432/research
+      TEST_DATABASE_ADMIN_URL: postgresql+psycopg://research_owner:research_owner@localhost:5432/research
+      OBJECT_STORAGE_ENDPOINT: http://localhost:4566
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.11.1"
+          enable-cache: true
+      - run: uv sync --frozen --all-groups
+      - name: Create artifact bucket
+        run: >-
+          uv run python -c "import boto3;
+          boto3.client('s3', endpoint_url='http://localhost:4566',
+          aws_access_key_id='test', aws_secret_access_key='test',
+          region_name='us-east-1').create_bucket(Bucket='research-artifacts')"
+      - name: Create non-owner application role
+        working-directory: .
+        run: PGPASSWORD=research_owner psql -h localhost -U research_owner -d research -f infra/postgres/init.sql
+      - run: uv run alembic upgrade head
+      - run: ./scripts/generate-pydantic.sh
+      - run: git diff --exit-code -- src/research_api/schemas/generated
+      - run: uv run ruff check .
+      - run: uv run mypy src
+      - run: uv run pytest
