@@ -59,14 +59,13 @@ At minimum, inject:
 - Mid-run cancellation → confirm idempotent cancel and no corrupted
   partial evidence.
 
-## CI expectations (proposed)
+## CI expectations
 
-`PROPOSED` — no CI configuration confirmed against a real repository.
-Reasonable baseline: unit + schema + node + reducer + security tests on
-every PR; graph + integration + SSE tests on every PR against ephemeral
-Postgres/Redis; provider contract tests and the 20-question evaluation
-subset on a schedule (nightly) rather than per-PR, to control cost and
-flakiness; the full 60-question benchmark on release branches.
+`.github/workflows/ci.yml` runs generated-file drift checks, TypeScript type checking/tests/build,
+Python generation drift checks, Ruff, mypy, and pytest with PostgreSQL. Contract fixtures live in
+`packages/contracts/tests/`; Python unit/integration tests live in `services/research-api/tests/`.
 
-`TODO: verify repository path` for actual test locations (proposed:
-`services/research-api/tests/`, `apps/web/tests/`, `packages/contracts/tests/`).
+`.github/workflows/provider-contracts.yml` runs the gated `live_provider` suite daily and on manual
+dispatch. It is intentionally separate and continue-on-error because it depends on a billed live
+provider and detects external drift rather than application regressions. Graph, reducer, SSE, and
+evaluation suites remain required additions as those phases are implemented.
