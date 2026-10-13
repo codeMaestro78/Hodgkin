@@ -1,0 +1,54 @@
+name: research-orchestration
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: research
+      POSTGRES_USER: research_owner
+      POSTGRES_PASSWORD: research_owner
+    ports:
+      - "${POSTGRES_PORT:-55432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U research_owner -d research"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - postgres-data:/var/lib/postgresql
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+
+  redis:
+    image: redis:8.2-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "${REDIS_PORT:-56379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  object-storage:
+    image: localstack/localstack:4.9.2
+    environment:
+      SERVICES: s3
+      AWS_DEFAULT_REGION: us-east-1
+    ports:
+      - "${OBJECT_STORAGE_PORT:-54566}:4566"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'curl -fs http://localhost:4566/_localstack/health | grep -q ''"s3": "running"''',
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - localstack-data:/var/lib/localstack
+      - ./infra/localstack/init-s3.sh:/etc/localstack/init/ready.d/init-s3.sh:ro
+
+volumes:
+  postgres-data:
+  localstack-data:
