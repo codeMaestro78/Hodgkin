@@ -59,7 +59,9 @@ jobs:
     env:
       DATABASE_URL: postgresql+psycopg://research_app:research_app@localhost:5432/research
       TEST_DATABASE_ADMIN_URL: postgresql+psycopg://research_owner:research_owner@localhost:5432/research
+      DATABASE_ADMIN_URL: postgresql+psycopg://research_owner:research_owner@localhost:5432/research
       OBJECT_STORAGE_ENDPOINT: http://localhost:4566
+      RUN_AUTH_SCHEMA_TESTS: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v7
@@ -81,4 +83,4 @@ jobs:
       - run: git diff --exit-code -- src/research_api/schemas/generated
       - run: uv run ruff check .
       - run: uv run mypy src
-      - run: uv run pytest
+      - run: uv run pytest -m "not live_provider"
