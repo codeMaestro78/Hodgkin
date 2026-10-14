@@ -21,6 +21,7 @@ import { GET as callback } from "../app/auth/callback/route";
 import { GET as confirm } from "../app/auth/confirm/route";
 import { forwardResearch } from "../lib/research-proxy";
 import { authDestination } from "../lib/auth/config";
+import { emptyOnboarding } from "../lib/onboarding";
 
 function request(
   action: string,
@@ -94,7 +95,10 @@ describe("account flows", () => {
     );
   });
   it("logs in and restricts redirect destinations", async () => {
-    auth.signInWithPassword.mockResolvedValue({ error: null });
+    auth.signInWithPassword.mockResolvedValue({
+      data: { user: { user_metadata: {} } },
+      error: null,
+    });
     expect(
       await (
         await run("login", {
@@ -103,7 +107,7 @@ describe("account flows", () => {
           next: "https://evil.example",
         })
       ).json(),
-    ).toEqual({ redirect: "/research" });
+    ).toEqual({ redirect: "/onboarding?next=%2Fresearch" });
   });
   it("returns useful confirmation errors without leaking upstream details", async () => {
     auth.signInWithPassword.mockResolvedValue({
@@ -136,7 +140,10 @@ describe("account flows", () => {
     });
   });
   it("exchanges OAuth code before redirecting and handles denied consent", async () => {
-    auth.exchangeCodeForSession.mockResolvedValue({ error: null });
+    auth.exchangeCodeForSession.mockResolvedValue({
+      data: { user: { user_metadata: {} } },
+      error: null,
+    });
     const response = await callback(
       new NextRequest(
         "http://localhost:3000/auth/callback?code=fixture&next=https://evil.example",
@@ -144,7 +151,7 @@ describe("account flows", () => {
     );
     expect(auth.exchangeCodeForSession).toHaveBeenCalledWith("fixture");
     expect(response.headers.get("location")).toBe(
-      "http://localhost:3000/research",
+      "http://localhost:3000/onboarding?next=%2Fresearch",
     );
     expect(
       (
@@ -157,7 +164,10 @@ describe("account flows", () => {
     ).toContain("error=callback");
   });
   it("verifies confirmation and recovery tokens without trusting arbitrary types", async () => {
-    auth.verifyOtp.mockResolvedValue({ error: null });
+    auth.verifyOtp.mockResolvedValue({
+      data: { user: { user_metadata: {} } },
+      error: null,
+    });
     const response = await confirm(
       new NextRequest(
         "http://localhost:3000/auth/confirm?token_hash=fixture&type=recovery&next=https://evil.example",
@@ -175,6 +185,66 @@ describe("account flows", () => {
         )
       ).headers.get("location"),
     ).toContain("error=confirmation");
+  });
+  it.each([
+    "/research/11111111-1111-4111-8111-111111111111",
+    "/research/automation",
+  ])("returns completed accounts directly to %s", async (next) => {
+    auth.signInWithPassword.mockResolvedValue({
+      data: {
+        user: {
+          user_metadata: {
+            research_onboarding: {
+              ...emptyOnboarding,
+              version: 1,
+              step: 6,
+              status: "skipped",
+              updatedAt: "2026-10-13T10:00:00.000Z",
+            },
+          },
+        },
+      },
+      error: null,
+    });
+    expect(
+      await (
+        await run("login", {
+          email: "user@example.test",
+          password: "fixture-password",
+          next,
+        })
+      ).json(),
+    ).toEqual({ redirect: next });
+  });
+  it("preserves Automation through login and the setup redirect", async () => {
+    auth.signInWithPassword.mockResolvedValue({
+      data: { user: { user_metadata: {} } },
+      error: null,
+    });
+    expect(
+      await (
+        await run("login", {
+          email: "user@example.test",
+          password: "fixture-password",
+          next: "/research/automation",
+        })
+      ).json(),
+    ).toEqual({ redirect: "/onboarding?next=%2Fresearch%2Fautomation" });
+  });
+  it("routes immediate-session signup to setup", async () => {
+    auth.signUp.mockResolvedValue({
+      data: { user: { user_metadata: {} }, session: {} },
+      error: null,
+    });
+    expect(
+      await (
+        await run("signup", {
+          name: "Fixture",
+          email: "user@example.test",
+          password: "fixture-password",
+        })
+      ).json(),
+    ).toEqual({ redirect: "/onboarding?next=%2Fresearch" });
   });
   it("requests password recovery with a reset-specific destination", async () => {
     auth.resetPasswordForEmail.mockResolvedValue({ error: null });
@@ -212,6 +282,80 @@ describe("account flows", () => {
 });
 
 describe("research BFF identity", () => {
+  it("treats an aborted browser request as disconnect rather than upstream failure", async () => {
+    auth.getUser.mockResolvedValue({
+      data: { user: { id: "verified", email_confirmed_at: "2026-01-01" } },
+      error: null,
+    });
+    auth.getSession.mockResolvedValue({
+      data: {
+        session: { user: { id: "verified" }, access_token: "fixture-access" },
+      },
+    });
+    const controller = new AbortController();
+    controller.abort();
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockRejectedValue(
+          new DOMException("Client disconnected", "AbortError"),
+        ),
+    );
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const response = await forwardResearch(
+        new NextRequest("http://localhost:3000/api/research/runs", {
+          signal: controller.signal,
+        }),
+        "/research/runs",
+      );
+      expect(response.status).toBe(499);
+      expect(log).not.toHaveBeenCalled();
+    } finally {
+      log.mockRestore();
+    }
+  });
+  it.each([
+    "/research/runs/run/approve",
+    "/research/batches",
+    "/research/schedules",
+    "/research/schedules/id/disable",
+  ])("forwards POST bodies intact to %s", async (path) => {
+    auth.getUser.mockResolvedValue({
+      data: { user: { id: "verified", email_confirmed_at: "2026-01-01" } },
+      error: null,
+    });
+    auth.getSession.mockResolvedValue({
+      data: {
+        session: { user: { id: "verified" }, access_token: "fixture-access" },
+      },
+    });
+    const fetch = vi.fn().mockResolvedValue(new Response("{}"));
+    vi.stubGlobal("fetch", fetch);
+    const body = JSON.stringify({ decision: "approve", planId: "fixture" });
+    const req = new NextRequest(`http://localhost:3000/api${path}`, {
+      method: "POST",
+      headers: { origin: "http://localhost:3000" },
+      body,
+    });
+    expect((await forwardResearch(req, path, "POST")).status).toBe(200);
+    expect(fetch.mock.calls[0]![1].body).toBe(body);
+  });
+  it("rejects oversized research bodies before authentication or upstream dispatch", async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    const req = new NextRequest("http://localhost:3000/api/research/batches", {
+      method: "POST",
+      headers: { origin: "http://localhost:3000" },
+      body: "x".repeat(256 * 1024 + 1),
+    });
+    expect(
+      (await forwardResearch(req, "/research/batches", "POST")).status,
+    ).toBe(413);
+    expect(auth.getUser).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
   it("rejects missing session despite forged identity headers", async () => {
     auth.getUser.mockResolvedValue({ data: { user: null }, error: null });
     const fetch = vi.fn();
@@ -256,18 +400,21 @@ describe("research BFF identity", () => {
         session: { user: { id: "verified" }, access_token: "fixture-access" },
       },
     });
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(new Response("data: {}\n\n")),
-    );
+    const fetch = vi.fn().mockResolvedValue(new Response("data: {}\n\n"));
+    vi.stubGlobal("fetch", fetch);
     const response = await forwardResearch(
-      new NextRequest("http://localhost:3000/api/research/runs/run/events"),
+      new NextRequest("http://localhost:3000/api/research/runs/run/events", {
+        headers: { "last-event-id": "42" },
+      }),
       "/research/runs/run/events",
       "GET",
       true,
     );
     expect(response.headers.get("content-type")).toBe("text/event-stream");
     expect(response.headers.get("cache-control")).toContain("private");
+    expect(
+      (fetch.mock.calls[0]![1].headers as Headers).get("last-event-id"),
+    ).toBe("42");
     expect(await response.text()).toBe("data: {}\n\n");
   });
 });

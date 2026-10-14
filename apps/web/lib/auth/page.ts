@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { authConfigured, authDestination } from "./config";
 import { createAuthClient } from "./server";
+import { onboardingDestination } from "../onboarding";
 
 const messages: Record<string, string> = {
   configuration:
@@ -27,7 +28,12 @@ export async function authPageProps(
     const supabase = await createAuthClient();
     const { data } = await supabase.auth.getUser();
     if (data.user && !data.user.is_anonymous)
-      redirect(next === "/reset-password" ? "/research" : next);
+      redirect(
+        onboardingDestination(
+          next === "/reset-password" ? "/research" : next,
+          data.user.user_metadata,
+        ),
+      );
   }
   const code =
     typeof params.error === "string"
