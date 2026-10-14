@@ -6,3 +6,4 @@ pnpm-lock.yaml
 # Playwright run-code requires a bare function expression without a trailing semicolon.
 apps/web/tests/browser-fixture/check.js
 apps/web/tests/browser-fixture/reliability-check.js
+apps/web/tests/browser-fixture/onboarding-check.js
