@@ -30,7 +30,7 @@ from research_api.db.session import tenant_session
 from research_api.execution import finish_node, start_node
 from research_api.graph import builder
 from research_api.model_budget import model_response, model_run
-from research_api.repositories.budgets import BudgetExceededError
+from research_api.repositories.budgets import ReservationReplayError
 from research_api.repositories.runs import RunBudgetDefaults, RunRepository
 from research_api.schemas.generated.followup_request import FollowupRequest
 
@@ -221,7 +221,9 @@ async def test_model_reservations_do_not_spend_search_budget_or_redispatch_termi
     )
     try:
         await model_response(client, model="fixture", input="public evidence", store=False)
-        with pytest.raises(BudgetExceededError):
+        # This old mock supplies usage but no replayable output. A receipt cannot
+        # authorize redispatch or fabricate a missing response.
+        with pytest.raises(ReservationReplayError):
             await model_response(client, model="fixture", input="public evidence", store=False)
         assert client.responses.create.await_count == 1
         assert client.responses.create.call_args.kwargs["max_output_tokens"] == 4096

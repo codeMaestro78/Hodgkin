@@ -7,6 +7,7 @@ import pytest
 
 from research_api import ingestion
 from research_api.artifacts.store import InMemoryArtifactStore
+from research_api.db.models import Budget, ResearchRun
 
 
 @pytest.mark.asyncio
@@ -43,7 +44,15 @@ async def test_extraction_rejects_unsolicited_and_duplicate_urls(monkeypatch) ->
 
     @asynccontextmanager
     async def session(_tenant):
-        yield SimpleNamespace(scalar=AsyncMock())
+        async def scalar(statement):
+            entity = statement.column_descriptions[0].get("entity")
+            if entity is ResearchRun:
+                return SimpleNamespace(status="researching", cancellation_requested_at=None)
+            if entity is Budget:
+                return SimpleNamespace(max_search_calls=6)
+            return 0
+
+        yield SimpleNamespace(scalar=scalar)
 
     upsert = AsyncMock(
         return_value=SimpleNamespace(
@@ -61,6 +70,26 @@ async def test_extraction_rejects_unsolicited_and_duplicate_urls(monkeypatch) ->
     )
     monkeypatch.setattr(ingestor, "_reserve", AsyncMock(return_value=uuid.uuid4()))
     monkeypatch.setattr(ingestor, "_finalize", AsyncMock())
+    monkeypatch.setattr(ingestor, "_replay_response", AsyncMock(return_value=None))
+    accepted = []
+
+    async def persist(**kwargs):
+        accepted.extend(item.canonical_url for item in kwargs["prepared"])
+        return [uuid.uuid4()]
+
+    monkeypatch.setattr(ingestor, "_persist_sources", AsyncMock(side_effect=persist))
+    monkeypatch.setattr(
+        ingestor,
+        "_admit_extraction",
+        AsyncMock(
+            return_value=(
+                SimpleNamespace(payload={"urls": ["https://example.com/a"]}),
+                uuid.uuid4(),
+                [],
+                False,
+            )
+        ),
+    )
     ids = await ingestor.ingest(
         tenant_id=uuid.uuid4(),
         run_id=uuid.uuid4(),
@@ -69,8 +98,8 @@ async def test_extraction_rejects_unsolicited_and_duplicate_urls(monkeypatch) ->
         max_results=2,
     )
     assert len(ids) == 1
-    assert upsert.await_count == 1
-    assert upsert.call_args.kwargs["canonical_url"] == "https://example.com/a"
+    assert ingestor._persist_sources.await_count == 1
+    assert accepted == ["https://example.com/a"]
 
 
 @pytest.mark.asyncio

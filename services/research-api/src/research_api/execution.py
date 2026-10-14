@@ -8,18 +8,16 @@ from typing import Any
 
 from sqlalchemy import func, select
 
-from research_api.db.models import NodeExecution, ResearchRun
+from research_api.db.models import NodeExecution
 from research_api.db.session import tenant_session
 from research_api.events.outbox import EventOutbox
+from research_api.lifecycle import TERMINAL_RUN_STATUSES, ensure_active, lock_run
 
 
 async def start_node(tenant_id: uuid.UUID, run_id: uuid.UUID, node: str) -> uuid.UUID:
     async with tenant_session(str(tenant_id)) as session:
-        await session.scalar(
-            select(ResearchRun)
-            .where(ResearchRun.tenant_id == tenant_id, ResearchRun.id == run_id)
-            .with_for_update()
-        )
+        run = await lock_run(session, tenant_id, run_id)
+        ensure_active(run)
         attempt = (
             await session.scalar(
                 select(func.max(NodeExecution.attempt)).where(
@@ -59,9 +57,10 @@ async def start_node(tenant_id: uuid.UUID, run_id: uuid.UUID, node: str) -> uuid
 async def finish_node(
     tenant_id: uuid.UUID, run_id: uuid.UUID, node_id: uuid.UUID, status: str
 ) -> None:
-    if status not in {"completed", "failed", "cancelled"}:
+    if status not in {"completed", "failed", "cancelled", "paused"}:
         raise ValueError("invalid terminal task status")
     async with tenant_session(str(tenant_id)) as session:
+        run = await lock_run(session, tenant_id, run_id)
         row = await session.scalar(
             select(NodeExecution)
             .where(
@@ -74,7 +73,7 @@ async def finish_node(
         if row is None or row.status != "running":
             return
         row.status = status
-        row.completed_at = datetime.now(UTC)
+        row.completed_at = None if status == "paused" else datetime.now(UTC)
         await EventOutbox(session, tenant_id).append(
             run_id=run_id,
             event_type="task.state",
@@ -87,12 +86,11 @@ async def finish_node(
             },
         )
         if row.node_id == "synthesizer" and status == "completed":
-            run = await session.scalar(
-                select(ResearchRun)
-                .where(ResearchRun.tenant_id == tenant_id, ResearchRun.id == run_id)
-                .with_for_update()
-            )
-            if run and run.report_id and run.status != "cancelled":
+            if (
+                run.report_id
+                and run.status not in TERMINAL_RUN_STATUSES
+                and run.cancellation_requested_at is None
+            ):
                 run.status = "completed"
                 await EventOutbox(session, tenant_id).append(
                     run_id=run_id,
