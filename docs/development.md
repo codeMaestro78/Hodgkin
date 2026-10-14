@@ -49,7 +49,7 @@ pnpm --filter @research/web dev
 
 # FastAPI service
 cd services/research-api
-uv run uvicorn research_api.main:app --reload
+uv run uvicorn research_api.main:app --reload --reload-dir src/research_api
 ```
 
 ## Generate contracts
