@@ -4,6 +4,7 @@ import asyncio
 import logging
 import uuid
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, NotRequired, TypedDict
@@ -350,6 +351,7 @@ class ReportAssertions(BaseModel):
 async def _report_assertions(
     settings: Settings, markdown: str, source_context: str
 ) -> ReportAssertions:
+    assert settings.OPENAI_API_KEY is not None
     client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY.get_secret_value())
     response = await model_response(
         client,
@@ -387,11 +389,11 @@ def _verified_claims(
 ) -> list[tuple[ClaimDraft, list[tuple[CitationDraft, SourceMaterial, int, int, SemanticReview]]]]:
     reviews_by_key = {}
     duplicate_keys = set()
-    for review in reviews:
-        key = (review.claim_index, review.citation_index)
+    for semantic_review in reviews:
+        key = (semantic_review.claim_index, semantic_review.citation_index)
         if key in reviews_by_key:
             duplicate_keys.add(key)
-        reviews_by_key[key] = review
+        reviews_by_key[key] = semantic_review
     for key in duplicate_keys:
         del reviews_by_key[key]
     verified_claims: list[
@@ -434,7 +436,7 @@ def _exact_span(content: str, quote: str) -> tuple[int, int] | None:
 
 
 async def _semantic_reviews_with_openai(
-    settings: Settings, *, claims: list[ClaimDraft] | list[ReportAssertion]
+    settings: Settings, *, claims: Sequence[ClaimDraft | ReportAssertion]
 ) -> list[SemanticReview]:
     """Independently judge whether each already-exact quote supports its claim."""
     if settings.OPENAI_API_KEY is None:

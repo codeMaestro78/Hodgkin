@@ -88,13 +88,15 @@ def _public_claim_checks(
             }
         )
     for item in claims.values():
-        item["status"] = claim_status(item["citations"])
+        citations = item["citations"]
+        assert isinstance(citations, list)
+        item["status"] = claim_status(citations)
         if not item["citations"] and item["method"] != "legacy-stored-quote-checks":
             item["status"] = "insufficient_evidence"
         item["supportingSourceIds"] = sorted(
             {
                 citation["sourceId"]
-                for citation in item["citations"]
+                for citation in citations
                 if citation["exactSpanVerified"]
                 and citation["verdict"] in {"supports", "partially_supports"}
             }
@@ -102,7 +104,7 @@ def _public_claim_checks(
         item["contradictingSourceIds"] = sorted(
             {
                 citation["sourceId"]
-                for citation in item["citations"]
+                for citation in citations
                 if citation["exactSpanVerified"] and citation["verdict"] == "contradicts"
             }
         )
@@ -785,7 +787,7 @@ async def followup_research_run(
             raise HTTPException(404, "research run not found")
         if prior.status != "completed" or not prior.report_id:
             raise HTTPException(409, "follow-ups require a completed report")
-        parent_report_id = prior.report_id
+        parent_report_id: uuid.UUID | None = prior.report_id
         if body.report_version is not None:
             parent_report_id = await session.scalar(
                 select(Report.id).where(
