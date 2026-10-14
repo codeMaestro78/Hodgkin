@@ -22,23 +22,26 @@ export function useEntrance(
           return;
         const targets = scope.current?.querySelectorAll(selector);
         if (!targets?.length) return;
-        gsap.fromTo(
-          targets,
-          {
-            opacity: 0.35,
-            x: direction === "up" ? 0 : direction === "right" ? 10 : -10,
-            y: direction === "up" ? 10 : 0,
-          },
-          {
-            opacity: 1,
-            x: 0,
-            y: 0,
-            duration: 0.28,
-            stagger: 0.035,
-            ease: "power3.out",
-            clearProps: "transform,opacity",
-          },
+        // Predetermined keyframes run without a JavaScript update on every frame.
+        // No retained fill or inline styles: content stays readable if interrupted.
+        const transform =
+          direction === "up"
+            ? "translateY(6px)"
+            : `translateX(${direction === "right" ? 6 : -6}px)`;
+        const animations = Array.from(targets, (target, index) =>
+          target.animate(
+            [
+              { opacity: 0.7, transform },
+              { opacity: 1, transform: "none" },
+            ],
+            {
+              duration: 200,
+              delay: Math.min(index * 20, 60),
+              easing: "cubic-bezier(0.23, 1, 0.32, 1)",
+            },
+          ),
         );
+        return () => animations.forEach((animation) => animation.cancel());
       });
       return () => media.revert();
     },

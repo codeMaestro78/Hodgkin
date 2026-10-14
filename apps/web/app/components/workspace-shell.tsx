@@ -161,6 +161,21 @@ export function WorkspaceShell({
       >
         <Icon name="book" size={17} /> Reports
       </Link>
+      <Link
+        className="desk-library-link"
+        href="/research/automation"
+        aria-current={pathname === "/research/automation" ? "page" : undefined}
+        onClick={() => setOpen(false)}
+      >
+        <Icon name="layers" size={17} /> Automation
+      </Link>
+      <Link
+        className="desk-library-link"
+        href="/onboarding"
+        onClick={() => setOpen(false)}
+      >
+        <Icon name="book" size={17} /> Research preferences
+      </Link>
       <label className="history-search">
         <Icon name="search" size={16} />
         <input
@@ -291,6 +306,9 @@ export function WorkspaceShell({
             </div>
             <div className="toolbar-actions">
               {toolbar}
+              <Link className="toolbar-home" href="/onboarding">
+                Research preferences
+              </Link>
               <Link className="toolbar-home" href="/">
                 Overview
                 <Icon name="external" size={13} />

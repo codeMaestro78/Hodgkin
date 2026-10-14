@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAuthClient } from "../../../lib/auth/server";
 import { appOrigin, authDestination } from "../../../lib/auth/config";
+import { onboardingDestination } from "../../../lib/onboarding";
 
 export async function GET(request: NextRequest) {
   const hash = request.nextUrl.searchParams.get("token_hash");
@@ -11,7 +12,7 @@ export async function GET(request: NextRequest) {
       (type === "signup" || type === "email" || type === "recovery")
     ) {
       const supabase = await createAuthClient();
-      const { error } = await supabase.auth.verifyOtp({
+      const { data, error } = await supabase.auth.verifyOtp({
         token_hash: hash,
         type,
       });
@@ -20,9 +21,15 @@ export async function GET(request: NextRequest) {
           ? "/reset-password"
           : authDestination(request.nextUrl.searchParams.get("next"));
       if (!error)
-        return NextResponse.redirect(new URL(next, appOrigin()), {
-          headers: { "cache-control": "private, no-store" },
-        });
+        return NextResponse.redirect(
+          new URL(
+            onboardingDestination(next, data.user?.user_metadata),
+            appOrigin(),
+          ),
+          {
+            headers: { "cache-control": "private, no-store" },
+          },
+        );
     }
   } catch {
     /* Tokens and upstream errors must not be echoed into the page. */

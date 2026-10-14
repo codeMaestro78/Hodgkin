@@ -6,9 +6,11 @@ export async function POST(
   { params }: { params: Promise<{ runId: string }> },
 ) {
   const { runId } = await params;
+  const limit = request.nextUrl.searchParams.get("maxWallClockMs");
+  const query = limit ? `?maxWallClockMs=${encodeURIComponent(limit)}` : "";
   return forwardResearch(
     request,
-    `/research/runs/${encodeURIComponent(runId)}/retry`,
+    `/research/runs/${encodeURIComponent(runId)}/retry${query}`,
     "POST",
   );
 }
