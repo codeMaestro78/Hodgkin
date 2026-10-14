@@ -1,6 +1,7 @@
 .commandcode
 .env
 .env.local
+.env.migrations
 .next/
 .pnpm-store/
 node_modules/
