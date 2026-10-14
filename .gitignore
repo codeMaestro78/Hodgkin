@@ -88,3 +88,6 @@ docs/design/codebase-refresh/*.png
 docs/design/*.png
 docs/*-browser-check.js
 docs/design/codebase-refresh/*-check.js
+
+# Graphify generated knowledge-graph outputs (regenerable via /graphify)
+graphify-out/
