@@ -1,9 +1,14 @@
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { WorkspaceShell } from "../../components/workspace-shell";
 import { Icon } from "../../components/ui";
+import { onboardingProfileSchema } from "../../../lib/onboarding";
+import {
+  researchSubmission,
+  type ResearchSubmission,
+} from "../../../lib/research-submission";
 import {
   Alert,
   Badge,
@@ -19,17 +24,23 @@ const depths = [
   {
     name: "Focused",
     sources: 6,
-    description: "A specific question or quick decision.",
+    minutes: 3,
+    description:
+      "A decision brief with analysis, trade-offs and cited findings.",
   },
   {
     name: "Balanced",
     sources: 12,
-    description: "Broader coverage and considered comparisons.",
+    minutes: 5,
+    description:
+      "A structured comparison with mechanisms, risks and implications.",
   },
   {
     name: "Deep",
     sources: 20,
-    description: "More perspectives and supporting evidence.",
+    minutes: 10,
+    description:
+      "A detailed investigation with broader evidence and cross-source analysis.",
   },
 ] as const;
 const examples = [
@@ -51,10 +62,39 @@ const examples = [
 export default function ResearchPage() {
   const [question, setQuestion] = useState("");
   const [depth, setDepth] = useState("Balanced");
+  const [requireApproval, setRequireApproval] = useState(true);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const textarea = useRef<HTMLTextAreaElement>(null);
   const router = useRouter();
+  const editedQuestion = useRef(false);
+  const editedDepth = useRef(false);
+  const submission = useRef<ResearchSubmission | null>(null);
+  const submitting = useRef(false);
+  const defaultsFrozen = useRef(false);
+  useEffect(() => {
+    const controller = new AbortController();
+    const handoff =
+      new URLSearchParams(window.location.search).get("setup") === "ready";
+    void fetch("/api/onboarding", {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then(async (response) => (response.ok ? response.json() : null))
+      .then((body: { profile?: unknown } | null) => {
+        if (controller.signal.aborted || defaultsFrozen.current) return;
+        const profile = onboardingProfileSchema.safeParse(body?.profile).data;
+        if (!profile || profile.status !== "completed") return;
+        if (!editedDepth.current) setDepth(profile.depth);
+        if (handoff && !editedQuestion.current) setQuestion(profile.topic);
+        if (handoff)
+          window.history.replaceState(window.history.state, "", "/research");
+      })
+      .catch(() => {
+        /* Optional defaults never block the composer. */
+      });
+    return () => controller.abort();
+  }, []);
   const scope = depths.find((item) => item.name === depth) ?? depths[1];
   const simple =
     /^(what is|who is|define|explain)\s+.+\??$/i.test(question.trim()) &&
@@ -66,7 +106,7 @@ export default function ResearchPage() {
 
   async function start(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy) return;
+    if (busy || submitting.current) return;
     if (question.trim().length < 5) {
       setNotice(
         "Add a little more detail—your question needs at least five characters.",
@@ -74,31 +114,46 @@ export default function ResearchPage() {
       textarea.current?.focus();
       return;
     }
+    defaultsFrozen.current = true;
+    submitting.current = true;
     setBusy(true);
     setNotice("");
     try {
+      submission.current = researchSubmission(
+        submission.current,
+        JSON.stringify({
+          question: question.trim(),
+          reportRequirements: [],
+          requireApproval,
+          budgetOverrides: {
+            maxSearchCalls: limit,
+            maxWallClockMs: (simple ? 2 : scope.minutes) * 60_000,
+          },
+        }),
+      );
       const response = await fetch("/api/research/runs", {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "idempotency-key": crypto.randomUUID(),
+          "idempotency-key": submission.current.key,
         },
-        body: JSON.stringify({
-          question: question.trim(),
-          reportRequirements: [],
-          budgetOverrides: { maxSearchCalls: limit },
-        }),
+        body: submission.current.body,
       });
       const body = (await response.json()) as {
         runId?: string;
         error?: string;
+        detail?: unknown;
       };
       if (!response.ok || !body.runId)
         throw new Error(
-          body.error ?? "The research couldn’t be started. Please try again.",
+          body.error ??
+            (typeof body.detail === "string"
+              ? body.detail
+              : "The research couldn’t be started. Please try again."),
         );
       router.push(`/research/${body.runId}`);
     } catch (error) {
+      submitting.current = false;
       setNotice(
         error instanceof Error
           ? error.message
@@ -142,6 +197,7 @@ export default function ResearchPage() {
                     value={question}
                     onChange={(event) => {
                       setQuestion(event.target.value);
+                      editedQuestion.current = true;
                       if (notice) setNotice("");
                     }}
                     placeholder="Ask a question, compare alternatives, or investigate a decision…"
@@ -157,7 +213,10 @@ export default function ResearchPage() {
                   <span className="desk-field-label">Research depth</span>
                   <ToggleGroup
                     value={depth}
-                    onChange={setDepth}
+                    onChange={(value) => {
+                      editedDepth.current = true;
+                      setDepth(value);
+                    }}
                     label="Research depth"
                   >
                     {depths.map((item) => (
@@ -173,15 +232,37 @@ export default function ResearchPage() {
                           {item.description}
                         </span>
                         <span className="depth-limit">
-                          Up to {item.sources} sources
+                          Up to {item.sources} sources · {item.minutes}-minute
+                          active limit
                         </span>
                       </ToggleGroupItem>
                     ))}
                   </ToggleGroup>
                   <p id="scope-note" className="desk-help">
+                    Planning, collection and verification share this active-time
+                    limit; waiting for approval does not count.{" "}
                     {simple
                       ? "This evergreen question uses a fast explainer with up to two sources, regardless of the selected depth."
                       : "Limits are ceilings, not quotas. Search and extraction both count toward the provider-call budget."}
+                  </p>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="require-approval">
+                    <input
+                      id="require-approval"
+                      type="checkbox"
+                      checked={requireApproval}
+                      onChange={(event) =>
+                        setRequireApproval(event.target.checked)
+                      }
+                      disabled={busy}
+                      aria-describedby="approval-note"
+                    />{" "}
+                    Review the plan before research starts
+                  </FieldLabel>
+                  <p id="approval-note" className="desk-help">
+                    Approve the proposed questions to continue, or reject the
+                    plan to stop the run.
                   </p>
                 </Field>
               </FieldGroup>
@@ -215,6 +296,7 @@ export default function ResearchPage() {
                     key={example.type}
                     disabled={busy}
                     onClick={() => {
+                      editedQuestion.current = true;
                       setQuestion(example.question);
                       setNotice("");
                       textarea.current?.focus();
