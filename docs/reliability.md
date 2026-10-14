@@ -1,5 +1,70 @@
 # Reliability
 
+## Current implementation
+
+Read [durable runtime](./implementation/durable-runtime.md) for milestones 4–8,
+exact guarantees, migration 0007, deployment requirements and limits. This is
+local-tested implementation, not a production or live-provider certification.
+
+## Implemented bounded slice (2026-10-13)
+
+Follow-on implementation (2026-10-14): extraction URLs now pass transactional
+admission before fetching, and a privileged accounting CLI exposes unresolved
+reservations. See [extraction admission](./implementation/extraction-admission.md)
+for exact semantics, migration 0006, validation and hosted-rollout requirements.
+The earlier persistence-only extraction caveat below is superseded by that phase.
+
+The sections below describe architectural targets unless explicitly confirmed
+here or in the durable-runtime runbook. The API now drains durable PostgreSQL
+jobs with leases and checkpoints. A global provider semaphore and circuit-breaker
+rollout are still not implemented.
+
+- OpenAI SDK retries are explicitly disabled. The model boundary owns at most
+  three attempts (`PROVIDER_MAX_ATTEMPTS`, 1–3), retrying only 429 rejection or
+  recognizable connect/pool failures before dispatch. Read/write timeouts and
+  ambiguous 408/409/5xx outcomes are not automatically retried. Each OpenAI attempt
+  has its own committed reservation and ProviderCall receipt. One model client is
+  owned/closed by the parent run and inherited by graph child tasks.
+- Tavily retries only recognizable pre-dispatch connect/pool failures, with
+  bounded jitter. It does not retry HTTP failures or ambiguous dispatched calls.
+  Its shared worker client has a finite timeout. A pre-dispatch retry stays in
+  the same reservation because it did not execute another provider operation;
+  transport attempt numbers are logged separately.
+- Reservation admission locks budget/usage before duplicate detection. Existing
+  attempts cannot authorize redispatch. This blocks repetition; it is not durable
+  result replay or proof that a provider will never bill an ambiguous operation.
+- Model token admission uses a UTF-8-length heuristic, not an exact tokenizer
+  bound. Both larger and smaller actual usage are recorded. Usage exceeding the
+  admitted budget is committed and then fails closed before further calls.
+- Standard text pricing for the default GPT-4o-mini model is versioned in
+  `pricing.py`; received token counts reconcile its estimate. Unknown models retain
+  a labelled $0.10 policy estimate, and Tavily retains $0.008 operation estimates.
+  These are not invoices: unsupported model prices, tier/tool fees, and purchased
+  Tavily credit prices are not verified billing. There is no billing guarantee.
+- Ambiguous calls retain reservations. `reconcile_from_receipt` can settle only
+  from an existing tenant-scoped successful call receipt and is idempotent. There
+  is no automatic stale-reservation refund or provider-receipt retrieval job.
+- Successful Tavily calls settle before response-artifact I/O. Storage failure
+  is logged and cannot hide spend. Invalid source URLs/individual evidence-artifact
+  failures do not poison healthy sources. Database failures still fail closed.
+- Existing graph allocations bound requested search/extract results. A retained
+  run-row lock now also bounds persisted sources (6/12/20 presets; two for quick
+  explainers), independently of overlapping ingestion. This persistence guard is
+  not a cross-process extraction-slot allocator: overlapping invocations may
+  fetch pages later rejected at persistence. Source and outbox locks remain.
+- Cancellation is checked before search, between search/extraction, before source
+  storage, before retry attempts, and under the source-persistence lock. Requested
+  cancellation observed by a model node is terminalized at the graph boundary;
+  already completed/failed runs are not regressed. Already dispatched calls may
+  finish and remain accounted. A cancelled `to_thread` upload may still complete;
+  orphan-artifact retention cleanup and durable cancellation are separate work.
+
+Call outcome enums remain `pending/succeeded/failed/uncertain`; a known rejection
+is a failed call with a released reservation. An invalid successful HTTP response
+is a failed call with a consumed policy charge, not usable evidence.
+
+File-level scope and acceptance gates: [core reliability slice](./implementation/core-reliability-slice.md).
+
 Concurrency, retries, idempotency, and failure handling. See
 [langgraph.md](./langgraph.md#concurrency) for the execution-engine side of
 this and [observability.md](./observability.md) for how failures are

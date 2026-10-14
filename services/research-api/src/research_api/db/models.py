@@ -29,6 +29,109 @@ class Base(DeclarativeBase):
     pass
 
 
+# Dispatch discovery exposes only tenant IDs and wake-up times, never research data.
+# All job claims and execution are subsequently made under that tenant's RLS context.
+class DispatchRegistry(Base):
+    __tablename__ = "dispatch_registry"
+    tenant_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("tenants.id"), primary_key=True)
+    next_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class ResearchBatch(Base):
+    __tablename__ = "research_batches"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "user_id", "idempotency_key"),
+        UniqueConstraint("tenant_id", "id", name="uq_batch_tenant_id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "user_id"], ["users.tenant_id", "users.id"], name="fk_batch_owner"
+        ),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("tenants.id"), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class RuntimeJob(Base):
+    __tablename__ = "runtime_jobs"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "user_id"], ["users.tenant_id", "users.id"], name="fk_job_owner"
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "batch_id"],
+            ["research_batches.tenant_id", "research_batches.id"],
+            name="fk_job_batch",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "run_id"], ["research_runs.tenant_id", "research_runs.id"]
+        ),
+        Index("ix_runtime_jobs_due", "tenant_id", "state", "lease_expires_at"),
+        CheckConstraint("generation >= 0 AND attempts >= 0 AND active_ms >= 0"),
+        CheckConstraint("state IN ('queued','running','waiting','completed','failed','cancelled')"),
+    )
+    run_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("tenants.id"), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    batch_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    graph_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    active_ms: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PlanApproval(Base):
+    __tablename__ = "plan_approvals"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "user_id"], ["users.tenant_id", "users.id"], name="fk_approval_owner"
+        ),
+        UniqueConstraint("tenant_id", "run_id", "plan_id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "run_id"], ["research_runs.tenant_id", "research_runs.id"]
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "plan_id"], ["research_plans.tenant_id", "research_plans.id"]
+        ),
+        CheckConstraint("decision IN ('approve','reject')"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("tenants.id"), nullable=False)
+    run_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    plan_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    decision: Mapped[str] = mapped_column(String(16), nullable=False)
+    decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ResearchSchedule(Base):
+    __tablename__ = "research_schedules"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "user_id"], ["users.tenant_id", "users.id"], name="fk_schedule_owner"
+        ),
+        UniqueConstraint("tenant_id", "user_id", "idempotency_key"),
+        CheckConstraint("interval_minutes >= 60 AND interval_minutes <= 43200"),
+        Index("ix_schedules_due", "tenant_id", "enabled", "next_run_at"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("tenants.id"), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    budget: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    approval_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    interval_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    next_run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class TimestampMixin:
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -94,6 +197,7 @@ class ResearchRun(Base, TenantScopedMixin, TimestampMixin):
     idempotency_key: Mapped[str | None] = mapped_column(String(200))
     next_event_sequence: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     parent_report_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    approval_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
 class ResearchPlan(Base, TenantScopedMixin):
@@ -332,6 +436,7 @@ class ProviderCallReservation(Base, TenantScopedMixin, TimestampMixin):
     __table_args__ = (
         UniqueConstraint("tenant_id", "run_id", "request_fingerprint", "attempt"),
         UniqueConstraint("tenant_id", "id"),
+        UniqueConstraint("tenant_id", "run_id", "id", name="uq_reservations_tenant_run_id"),
         ForeignKeyConstraint(
             ["tenant_id", "run_id"], ["research_runs.tenant_id", "research_runs.id"]
         ),
@@ -349,6 +454,37 @@ class ProviderCallReservation(Base, TenantScopedMixin, TimestampMixin):
     reserved_estimated_cost_usd: Mapped[Decimal] = mapped_column(Numeric(12, 6), nullable=False)
     state: Mapped[str] = mapped_column(String(32), nullable=False, default="reserved")
     terminal_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ExtractionSlot(Base, TenantScopedMixin, TimestampMixin):
+    """One admitted canonical URL per run; unknown dispatches retain quota."""
+
+    __tablename__ = "extraction_slots"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "run_id", "url_fingerprint"),
+        ForeignKeyConstraint(
+            ["tenant_id", "run_id"], ["research_runs.tenant_id", "research_runs.id"]
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "run_id", "reservation_id"],
+            [
+                "provider_call_reservations.tenant_id",
+                "provider_call_reservations.run_id",
+                "provider_call_reservations.id",
+            ],
+        ),
+        CheckConstraint(
+            "state IN ('reserved','consumed','released','uncertain')",
+            name="ck_extraction_slot_state",
+        ),
+        Index("ix_extraction_slots_run_state", "tenant_id", "run_id", "state"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    run_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    url_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    canonical_url: Mapped[str] = mapped_column(Text, nullable=False)
+    reservation_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    state: Mapped[str] = mapped_column(String(32), nullable=False, default="reserved")
 
 
 class ProviderCall(Base, TenantScopedMixin):

@@ -12,9 +12,9 @@ class Budget(BaseModel):
         populate_by_name=True,
     )
     max_wall_clock_ms: conint(le=1800000, gt=0) = Field(..., alias="maxWallClockMs")
-    max_search_calls: conint(ge=1, le=50) = Field(..., alias="maxSearchCalls")
-    max_browser_sessions: conint(ge=0, le=5) = Field(..., alias="maxBrowserSessions")
-    max_reflection_rounds: conint(ge=0, le=3) = Field(..., alias="maxReflectionRounds")
+    max_search_calls: conint(ge=1, le=50) = Field(12, alias="maxSearchCalls")
+    max_browser_sessions: conint(ge=0, le=5) = Field(0, alias="maxBrowserSessions")
+    max_reflection_rounds: conint(ge=0, le=3) = Field(1, alias="maxReflectionRounds")
     max_input_tokens: conint(le=9007199254740991, gt=0) = Field(..., alias="maxInputTokens")
     max_output_tokens: conint(le=9007199254740991, gt=0) = Field(..., alias="maxOutputTokens")
     max_estimated_cost_usd: confloat(ge=0.0) = Field(..., alias="maxEstimatedCostUsd")

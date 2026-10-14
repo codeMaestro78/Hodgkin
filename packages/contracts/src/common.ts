@@ -1,8 +1,8 @@
 import { z } from "zod";
 
-export const SCHEMA_VERSION = "1.2" as const;
-// Persisted 1.1 snapshots remain readable; new extensions emit 1.2.
-export const SchemaVersionSchema = z.enum(["1.1", SCHEMA_VERSION]);
+export const SCHEMA_VERSION = "1.3" as const;
+// Persisted 1.1/1.2 snapshots remain readable; new extensions emit 1.3.
+export const SchemaVersionSchema = z.enum(["1.1", "1.2", SCHEMA_VERSION]);
 export const UuidSchema = z.uuid();
 export const DateTimeSchema = z.iso.datetime({ offset: true });
 export const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -10,6 +10,7 @@ export const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
 export const RunStatusSchema = z.enum([
   "queued",
   "planning",
+  "awaiting_approval",
   "researching",
   "verifying",
   "reflecting",

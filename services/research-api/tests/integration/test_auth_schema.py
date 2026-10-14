@@ -8,6 +8,7 @@ import pytest
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 
 pytestmark = [
@@ -20,17 +21,16 @@ pytestmark = [
 
 
 def test_signup_provisioning_and_user_isolation() -> None:
-    # Deliberately hardcoded Docker credentials, never the service .env/cloud DB.
+    # conftest validates this target is local, including CI's selected port.
+    admin_url = make_url(os.environ["TEST_DATABASE_ADMIN_URL"])
     admin = create_engine(
-        "postgresql+psycopg://research_owner:research_owner@localhost:55432/research",
+        admin_url,
         isolation_level="AUTOCOMMIT",
     )
     name = "research_auth_test_" + uuid.uuid4().hex
     with admin.connect() as connection:
         connection.exec_driver_sql(f'CREATE DATABASE "{name}"')
-    engine = create_engine(
-        f"postgresql+psycopg://research_owner:research_owner@localhost:55432/{name}"
-    )
+    engine = create_engine(admin_url.set(database=name))
     try:
         with engine.connect() as connection:
             transaction = connection.begin()
@@ -58,6 +58,8 @@ def test_signup_provisioning_and_user_isolation() -> None:
                         "0003_supabase_accounts",
                         "0004_auth_function_grants",
                         "0005_evidence_reliability",
+                        "0006_extraction_admission",
+                        "0007_durable_runtime",
                     ]:
                         importlib.import_module(
                             f"research_api.db.migrations.versions.{version}"
@@ -102,6 +104,13 @@ def test_signup_provisioning_and_user_isolation() -> None:
                 )
                 for sql in [
                     "SELECT * FROM research_runs",
+                    "SELECT * FROM extraction_slots",
+                    "SELECT * FROM runtime_jobs",
+                    "SELECT * FROM plan_approvals",
+                    "SELECT * FROM research_batches",
+                    "SELECT * FROM research_schedules",
+                    "SELECT * FROM dispatch_registry",
+                    "SELECT * FROM research_checkpoints.checkpoints",
                     "UPDATE user_profiles SET tenant_id = id",
                     "DELETE FROM user_profiles",
                     "SELECT public.provision_research_account(gen_random_uuid(), '{}'::jsonb)",
@@ -110,6 +119,14 @@ def test_signup_provisioning_and_user_isolation() -> None:
                         with pytest.raises(DBAPIError):
                             connection.exec_driver_sql(sql)
                         savepoint.rollback()
+                connection.exec_driver_sql("RESET ROLE")
+                connection.exec_driver_sql("SET LOCAL ROLE research_app")
+                with connection.begin_nested() as savepoint:
+                    with pytest.raises(DBAPIError):
+                        connection.exec_driver_sql(
+                            "SELECT * FROM research_checkpoints.checkpoint_migrations"
+                        )
+                    savepoint.rollback()
                 connection.exec_driver_sql("RESET ROLE")
                 connection.exec_driver_sql("SET LOCAL ROLE anon")
                 with connection.begin_nested() as savepoint:

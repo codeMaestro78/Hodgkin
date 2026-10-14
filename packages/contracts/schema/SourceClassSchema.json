@@ -1,5 +1,5 @@
 {
-  "$id": "https://schemas.research.local/1.2/SourceClassSchema.json",
+  "$id": "https://schemas.research.local/1.3/SourceClassSchema.json",
   "title": "SourceClassSchema",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "string",

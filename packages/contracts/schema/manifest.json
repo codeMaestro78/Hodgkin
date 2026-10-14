@@ -1,7 +1,9 @@
 {
-  "schemaVersion": "1.2",
+  "schemaVersion": "1.3",
   "schemas": [
     "AgentEventSchema",
+    "ApprovalRequestSchema",
+    "BatchRequestSchema",
     "BudgetSchema",
     "CitationSchema",
     "CitationVerificationSchema",
@@ -25,6 +27,7 @@
     "ReservationStateSchema",
     "RunInsightsSchema",
     "RunStatusSchema",
+    "ScheduleRequestSchema",
     "SchemaVersionSchema",
     "Sha256Schema",
     "SourceClassSchema",

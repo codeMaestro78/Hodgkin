@@ -18,7 +18,7 @@ export const AgentEventSchema = z.discriminatedUnion("type", [
     type: z.literal("task.state"),
     taskId: UuidSchema,
     nodeId: z.string().min(1).max(100),
-    status: z.enum(["running", "completed", "failed", "cancelled"]),
+    status: z.enum(["running", "paused", "completed", "failed", "cancelled"]),
     attempt: z.number().int().positive(),
     label: z.string().min(1).max(250),
   }),

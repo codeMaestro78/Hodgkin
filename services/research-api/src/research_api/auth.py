@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import secrets
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from time import monotonic
 
 import httpx
 from fastapi import HTTPException
@@ -11,6 +14,21 @@ from sqlalchemy import select
 from research_api.config import Settings
 from research_api.db.models import User
 from research_api.db.session import tenant_session
+from research_api.telemetry import operation_event
+
+_identity_client: httpx.AsyncClient | None = None
+
+
+@asynccontextmanager
+async def identity_transport() -> AsyncIterator[None]:
+    """Reuse connections, never cache identities or authorization decisions."""
+    global _identity_client
+    async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
+        _identity_client = client
+        try:
+            yield
+        finally:
+            _identity_client = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,7 +46,12 @@ async def verified_subject(settings: Settings, authorization: str | None) -> uui
     if not settings.SUPABASE_URL or not settings.SUPABASE_PUBLISHABLE_KEY:
         raise HTTPException(status_code=503, detail="Supabase Auth is not configured")
     try:
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
+        started = monotonic()
+        client = _identity_client
+        owned = client is None
+        if client is None:
+            client = httpx.AsyncClient(timeout=10.0, follow_redirects=False)
+        try:
             response = await client.get(
                 f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1/user",
                 headers={
@@ -36,6 +59,13 @@ async def verified_subject(settings: Settings, authorization: str | None) -> uui
                     "Authorization": f"Bearer {token}",
                 },
             )
+            operation_event("auth.verify", started=started, statusCode=response.status_code)
+        except httpx.HTTPError as exc:
+            operation_event("auth.verify", started=started, outcome="failed", error=exc)
+            raise
+        finally:
+            if owned:
+                await client.aclose()
         if response.status_code in (401, 403):
             raise HTTPException(status_code=401, detail="session expired or invalid")
         if response.status_code != 200:

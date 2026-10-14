@@ -116,7 +116,7 @@ async def test_report_extraction_rejects_hallucinated_locations_and_untrusted_in
     monkeypatch.setattr(
         builder,
         "AsyncOpenAI",
-        lambda **_: SimpleNamespace(responses=SimpleNamespace(create=request)),
+        lambda **_: SimpleNamespace(responses=SimpleNamespace(create=request), close=AsyncMock()),
     )
     result = await builder._report_assertions(
         Settings(OPENAI_API_KEY="fixture"),

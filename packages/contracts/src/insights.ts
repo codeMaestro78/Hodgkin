@@ -16,6 +16,7 @@ export const ExecutionTaskSchema = z
     status: z.enum([
       "queued",
       "running",
+      "paused",
       "completed",
       "failed",
       "cancelled",

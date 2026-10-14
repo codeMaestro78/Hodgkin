@@ -23,10 +23,12 @@ from pydantic import (
 class SchemaVersion(StrEnum):
     field_1_1 = "1.1"
     field_1_2 = "1.2"
+    field_1_3 = "1.3"
 
 
 class Status(StrEnum):
     running = "running"
+    paused = "paused"
     completed = "completed"
     failed = "failed"
     cancelled = "cancelled"
