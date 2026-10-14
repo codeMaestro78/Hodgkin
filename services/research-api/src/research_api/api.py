@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import uuid
 from collections.abc import AsyncIterable, Iterable
 from datetime import UTC, datetime
@@ -18,29 +17,32 @@ from research_api.db.models import (
     Budget,
     Citation,
     EvidenceClaim,
-    NodeExecution,
-    ProviderCall,
+    PlanApproval,
     Report,
     ResearchGap,
     ResearchRun,
     RunEvent,
+    RuntimeJob,
     Source,
-    SubQuestion,
-    SubQuestionAttempt,
     UsageLedger,
 )
 from research_api.db.session import tenant_session
 from research_api.events.outbox import EventOutbox
 from research_api.execution import prior_dependencies, task_projection
-from research_api.graph.builder import run_graph
+from research_api.jobs import enqueue, lock_registry, refresh_due
 from research_api.query_intelligence import is_quick_explainer
 from research_api.reliability import claim_status, source_assessments
-from research_api.repositories.runs import RunBudgetDefaults, RunRepository
-from research_api.research_limits import source_limit
+from research_api.repositories.runs import (
+    IdempotencyConflictError,
+    RunBudgetDefaults,
+    RunRepository,
+)
+from research_api.research_limits import active_time_limit, source_limit
 from research_api.schemas.generated.create_research_run_request import CreateResearchRunRequest
 from research_api.schemas.generated.followup_request import FollowupRequest
 from research_api.schemas.generated.public_claim_check import PublicClaimCheck
 from research_api.schemas.generated.run_insights import RunInsights
+from research_api.snapshots import load_collections
 
 router = APIRouter(prefix="/research", tags=["research"])
 AfterSequenceQuery = Annotated[int, Query(ge=0, alias="after")]
@@ -118,9 +120,10 @@ def _budget_from_request(request: CreateResearchRunRequest) -> RunBudgetDefaults
     defaults = RunBudgetDefaults()
     overrides = request.budget_overrides
     if overrides is None:
-        return defaults
+        return RunBudgetDefaults(max_wall_clock_ms=active_time_limit(defaults.max_search_calls))
     return RunBudgetDefaults(
-        max_wall_clock_ms=overrides.max_wall_clock_ms or defaults.max_wall_clock_ms,
+        max_wall_clock_ms=overrides.max_wall_clock_ms
+        or active_time_limit(overrides.max_search_calls or defaults.max_search_calls),
         max_search_calls=overrides.max_search_calls or defaults.max_search_calls,
         max_browser_sessions=overrides.max_browser_sessions
         if overrides.max_browser_sessions is not None
@@ -163,39 +166,26 @@ async def create_research_run(
         )
     async with tenant_session(str(caller.tenant_id)) as session:
         repository = RunRepository(session, caller.tenant_id)
-        if idempotency_key:
-            existing = await repository.get_by_idempotency_key(
-                user_id=caller.user_id, idempotency_key=idempotency_key
+        try:
+            run, created = await repository.create_once(
+                user_id=caller.user_id,
+                question=payload.question,
+                report_requirements=[item.root for item in payload.report_requirements],
+                budget=selected_budget,
+                idempotency_key=idempotency_key,
+                approval_required=payload.require_approval,
             )
-            if existing is not None:
-                # The create-response contract intentionally acknowledges queueing, even when
-                # an idempotent replay arrives after the background graph has advanced.
-                return {"runId": str(existing.id), "status": "queued"}
-        run = await repository.create(
-            user_id=caller.user_id,
-            question=payload.question,
-            report_requirements=[item.root for item in payload.report_requirements],
-            budget=selected_budget,
-            idempotency_key=idempotency_key,
-        )
+        except IdempotencyConflictError as exc:
+            raise HTTPException(409, "idempotency key belongs to another request") from exc
+        if not created:
+            return {"runId": str(run.id), "status": "queued"}
         await EventOutbox(session, caller.tenant_id).append(
             run_id=run.id,
             event_type="run.created",
             payload={"status": "queued", "questionLength": len(run.original_question)},
         )
         run_id = run.id
-        original_question = run.original_question
-    task = asyncio.create_task(
-        run_graph(
-            settings,
-            run_id=run_id,
-            tenant_id=caller.tenant_id,
-            user_id=caller.user_id,
-            question=original_question,
-        )
-    )
-    request.app.state.background_tasks.add(task)
-    task.add_done_callback(request.app.state.background_tasks.discard)
+        await enqueue(session, run, settings)
     return {"runId": str(run_id), "status": "queued"}
 
 
@@ -221,9 +211,16 @@ async def list_research_runs(
         authorization=authorization,
     )
     async with tenant_session(str(caller.tenant_id)) as session:
-        runs = list(
-            await session.scalars(
-                select(ResearchRun)
+        source_count = (
+            select(func.count())
+            .select_from(Source)
+            .where(Source.tenant_id == caller.tenant_id, Source.run_id == ResearchRun.id)
+            .correlate(ResearchRun)
+            .scalar_subquery()
+        )
+        rows = list(
+            await session.execute(
+                select(ResearchRun, source_count)
                 .where(
                     ResearchRun.tenant_id == caller.tenant_id,
                     ResearchRun.user_id == caller.user_id,
@@ -237,33 +234,21 @@ async def list_research_runs(
                 .limit(100 if reports_only else 24)
             )
         )
-        counts: dict[uuid.UUID, int] = {}
-        if runs:
-            count_rows = await session.execute(
-                select(Source.run_id, func.count())
-                .where(
-                    Source.tenant_id == caller.tenant_id,
-                    Source.run_id.in_([run.id for run in runs]),
-                )
-                .group_by(Source.run_id)
-            )
-            counts = {row[0]: row[1] for row in count_rows}
         return {
             "runs": [
                 {
                     "runId": str(run.id),
                     "question": run.original_question,
                     "status": run.status,
-                    "sourceCount": counts.get(run.id, 0),
+                    "sourceCount": count,
                     "reportId": str(run.report_id) if run.report_id else None,
                     # Pre-fast-path runs are still in the ledger. The compact
                     # evidence footprint distinguishes a new fast run from an
                     # older definition query that used the full planner.
-                    "quickMode": is_quick_explainer(run.original_question)
-                    and counts.get(run.id, 0) <= 2,
+                    "quickMode": is_quick_explainer(run.original_question) and count <= 2,
                     "createdAt": run.created_at.isoformat(),
                 }
-                for run in runs
+                for run, count in rows
             ]
         }
 
@@ -286,25 +271,35 @@ async def get_research_run(
         authorization=authorization,
     )
     async with tenant_session(str(caller.tenant_id)) as session:
-        run = await session.scalar(
-            select(ResearchRun).where(
-                ResearchRun.tenant_id == caller.tenant_id,
-                ResearchRun.id == run_id,
-                ResearchRun.user_id == caller.user_id,
-            )
+        source_total = (
+            select(func.count())
+            .select_from(Source)
+            .where(Source.tenant_id == caller.tenant_id, Source.run_id == run_id)
+            .scalar_subquery()
         )
-        if run is None:
+        header = (
+            await session.execute(
+                select(ResearchRun, Budget, UsageLedger, source_total)
+                .select_from(ResearchRun)
+                .outerjoin(
+                    Budget, (Budget.tenant_id == caller.tenant_id) & (Budget.run_id == run_id)
+                )
+                .outerjoin(
+                    UsageLedger,
+                    (UsageLedger.tenant_id == caller.tenant_id) & (UsageLedger.run_id == run_id),
+                )
+                .where(
+                    ResearchRun.tenant_id == caller.tenant_id,
+                    ResearchRun.id == run_id,
+                    ResearchRun.user_id == caller.user_id,
+                )
+            )
+        ).first()
+        if header is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="research run not found"
             )
-        budget = await session.scalar(
-            select(Budget).where(Budget.tenant_id == caller.tenant_id, Budget.run_id == run_id)
-        )
-        usage = await session.scalar(
-            select(UsageLedger).where(
-                UsageLedger.tenant_id == caller.tenant_id, UsageLedger.run_id == run_id
-            )
-        )
+        run, budget, usage, source_count = header
         report = await session.scalar(
             select(Report)
             .where(
@@ -317,11 +312,6 @@ async def get_research_run(
         )
         if report_version is not None and report is None:
             raise HTTPException(404, "report version not found")
-        source_count = await session.scalar(
-            select(func.count())
-            .select_from(Source)
-            .where(Source.tenant_id == caller.tenant_id, Source.run_id == run_id)
-        )
         # Explicit tenant/run predicates on both sides of the join. Only compact,
         # named evidence fields leave the API; artifact locations stay private.
         evidence_rows = await session.execute(
@@ -350,49 +340,28 @@ async def get_research_run(
             .limit(320)
         )
         claim_checks = _public_claim_checks(evidence_rows)
-        sources = list(
-            await session.scalars(
-                select(Source)
-                .where(Source.tenant_id == caller.tenant_id, Source.run_id == run_id)
-                .order_by(Source.retrieved_at.desc())
-                .limit(200)
-            )
-        )
-        questions = list(
-            await session.scalars(
-                select(SubQuestion)
-                .where(SubQuestion.tenant_id == caller.tenant_id, SubQuestion.run_id == run_id)
-                .order_by(SubQuestion.created_at)
-                .limit(16)
-            )
-        )
-        nodes = list(
-            await session.scalars(
-                select(NodeExecution)
-                .where(NodeExecution.tenant_id == caller.tenant_id, NodeExecution.run_id == run_id)
-                .order_by(NodeExecution.started_at)
-                .limit(60)
-            )
-        )
-        attempts = list(
-            await session.scalars(
-                select(SubQuestionAttempt)
-                .where(
-                    SubQuestionAttempt.tenant_id == caller.tenant_id,
-                    SubQuestionAttempt.run_id == run_id,
+        collections = await load_collections(session, caller.tenant_id, run_id)
+        sources, questions = collections.sources, collections.questions
+        nodes, attempts = collections.nodes, collections.attempts
+        gaps, versions, calls = collections.gaps, collections.versions, collections.calls
+        approval = None
+        if run.approval_required and run.active_plan_id:
+            decision = await session.scalar(
+                select(PlanApproval).where(
+                    PlanApproval.tenant_id == caller.tenant_id,
+                    PlanApproval.run_id == run_id,
+                    PlanApproval.plan_id == run.active_plan_id,
                 )
-                .order_by(SubQuestionAttempt.started_at)
-                .limit(32)
             )
-        )
-        gaps = list(
-            await session.scalars(
-                select(ResearchGap)
-                .where(ResearchGap.tenant_id == caller.tenant_id, ResearchGap.run_id == run_id)
-                .order_by(ResearchGap.created_at)
-                .limit(40)
-            )
-        )
+            approval = {
+                "planId": str(run.active_plan_id),
+                "state": decision.decision if decision else "pending",
+                "questions": [
+                    {"id": str(item.id), "question": item.question}
+                    for item in questions
+                    if item.plan_id == run.active_plan_id
+                ],
+            }
         if report:
             gaps = [
                 gap
@@ -400,22 +369,6 @@ async def get_research_run(
                 if gap.details.get("reportId") == str(report.id)
                 or (report.version == 1 and gap.details.get("reportId") is None)
             ]
-        versions = list(
-            await session.scalars(
-                select(Report)
-                .where(Report.tenant_id == caller.tenant_id, Report.run_id == run_id)
-                .order_by(Report.version.desc())
-                .limit(20)
-            )
-        )
-        calls = list(
-            await session.scalars(
-                select(ProviderCall)
-                .where(ProviderCall.tenant_id == caller.tenant_id, ProviderCall.run_id == run_id)
-                .order_by(ProviderCall.started_at)
-                .limit(100)
-            )
-        )
         tasks = [
             task_projection(
                 node,
@@ -501,7 +454,7 @@ async def get_research_run(
         )
         insights = RunInsights.model_validate(
             {
-                "schemaVersion": "1.2",
+                "schemaVersion": "1.3",
                 "tasks": tasks,
                 "providerCalls": [
                     {
@@ -554,11 +507,12 @@ async def get_research_run(
         )
         assessments = source_assessments(sources, run.original_question)
         return {
-            "schemaVersion": "1.2",
+            "schemaVersion": "1.3",
             "insights": insights.model_dump(mode="json", by_alias=True),
             "runId": str(run.id),
             "status": run.status,
             "originalQuestion": run.original_question,
+            "approval": approval,
             "planVersion": run.plan_version,
             "sourceCount": source_count or 0,
             "claimChecks": claim_checks,
@@ -571,6 +525,7 @@ async def get_research_run(
             "updatedAt": run.updated_at.isoformat(),
             "budget": {
                 "maxSearchCalls": budget.max_search_calls if budget else 0,
+                "maxWallClockMs": budget.max_wall_clock_ms if budget else 0,
                 "maxEstimatedCostUsd": float(budget.max_estimated_cost_usd) if budget else 0,
             },
             "usage": {"searchCalls": usage.search_calls if usage else 0},
@@ -612,14 +567,7 @@ async def get_research_run(
                     "label": event.payload.get("label") or event.payload.get("message"),
                     "occurredAt": event.occurred_at.isoformat(),
                 }
-                for event in (
-                    await session.scalars(
-                        select(RunEvent)
-                        .where(RunEvent.tenant_id == caller.tenant_id, RunEvent.run_id == run_id)
-                        .order_by(RunEvent.event_sequence.desc())
-                        .limit(40)
-                    )
-                )
+                for event in collections.events
             ],
         }
 
@@ -642,6 +590,16 @@ async def cancel_research_run(
         authorization=authorization,
     )
     async with tenant_session(str(caller.tenant_id)) as session:
+        registry = await lock_registry(session, caller.tenant_id)
+        job = await session.scalar(
+            select(RuntimeJob)
+            .where(
+                RuntimeJob.tenant_id == caller.tenant_id,
+                RuntimeJob.user_id == caller.user_id,
+                RuntimeJob.run_id == run_id,
+            )
+            .with_for_update()
+        )
         run = await session.scalar(
             select(ResearchRun)
             .where(
@@ -664,7 +622,7 @@ async def cancel_research_run(
                 event_type="run.cancellation_requested",
                 payload={"label": "Cancellation requested"},
             )
-        if run.status == "queued":
+        if run.status in {"queued", "awaiting_approval"}:
             run.status = "cancelled"
             run.cancelled_at = datetime.now(UTC)
             await EventOutbox(session, caller.tenant_id).append(
@@ -672,6 +630,11 @@ async def cancel_research_run(
                 event_type="run.cancelled",
                 payload={"label": "Research run cancelled"},
             )
+            if job is not None:
+                job.state = "cancelled"
+                job.owner_id, job.lease_expires_at = None, None
+            await session.flush()
+            await refresh_due(session, registry)
         return {"runId": str(run.id), "status": run.status}
 
 
@@ -679,6 +642,9 @@ async def cancel_research_run(
 async def retry_research_run(
     run_id: uuid.UUID,
     request: Request,
+    max_wall_clock_ms: Annotated[
+        int | None, Query(alias="maxWallClockMs", gt=0, le=1_800_000)
+    ] = None,
     authorization: Annotated[str | None, Header()] = None,
     x_internal_service_auth: str | None = Header(default=None),
     x_development_tenant_id: str | None = Header(default=None),
@@ -720,7 +686,7 @@ async def retry_research_run(
             question=prior.original_question,
             report_requirements=prior.report_requirements,
             budget=RunBudgetDefaults(
-                max_wall_clock_ms=budget.max_wall_clock_ms,
+                max_wall_clock_ms=max_wall_clock_ms or budget.max_wall_clock_ms,
                 max_search_calls=budget.max_search_calls,
                 max_browser_sessions=budget.max_browser_sessions,
                 max_reflection_rounds=budget.max_reflection_rounds,
@@ -738,18 +704,8 @@ async def retry_research_run(
             },
         )
         fresh_id = fresh.id
-        question = fresh.original_question
-    task = asyncio.create_task(
-        run_graph(
-            settings,
-            run_id=fresh_id,
-            tenant_id=caller.tenant_id,
-            user_id=caller.user_id,
-            question=question,
-        )
-    )
-    request.app.state.background_tasks.add(task)
-    task.add_done_callback(request.app.state.background_tasks.discard)
+        fresh.approval_required = prior.approval_required
+        await enqueue(session, fresh, settings)
     return {"runId": str(fresh_id), "status": "queued"}
 
 
@@ -774,6 +730,7 @@ async def followup_research_run(
         authorization=authorization,
     )
     async with tenant_session(str(caller.tenant_id)) as session:
+        await lock_registry(session, caller.tenant_id)
         prior = await session.scalar(
             select(ResearchRun)
             .where(
@@ -826,26 +783,45 @@ async def followup_research_run(
                 or fresh.original_question != expected_question
             ):
                 raise HTTPException(409, "idempotency key belongs to another request")
+            linked_gap = await session.scalar(
+                select(ResearchGap.id)
+                .where(
+                    ResearchGap.tenant_id == caller.tenant_id,
+                    ResearchGap.run_id == run_id,
+                    ResearchGap.details["followupRunId"].as_string() == str(fresh.id),
+                )
+                .limit(1)
+            )
+            if linked_gap != body.gap_id:
+                raise HTTPException(409, "idempotency key belongs to another gap investigation")
             return {"runId": str(fresh.id), "status": fresh.status}
+        if gap and gap.details.get("followupRunId"):
+            raise HTTPException(409, "gap already has a follow-up; open the existing investigation")
         budget = await session.scalar(
             select(Budget).where(Budget.tenant_id == caller.tenant_id, Budget.run_id == run_id)
         )
         if budget is None:
             raise HTTPException(409, "parent budget unavailable")
         question = f"Follow-up to: {prior.original_question}\nInvestigate: {body.question.strip()}"
-        fresh = await repository.create(
-            user_id=caller.user_id,
-            question=question,
-            idempotency_key=body.idempotency_key,
-            report_requirements=prior.report_requirements,
-            budget=RunBudgetDefaults(
-                **{
-                    field: getattr(budget, field)
-                    for field in RunBudgetDefaults.__dataclass_fields__
-                }
-            ),
-        )
-        fresh.parent_report_id = parent_report_id
+        try:
+            fresh, created = await repository.create_once(
+                user_id=caller.user_id,
+                question=question,
+                idempotency_key=body.idempotency_key,
+                report_requirements=prior.report_requirements,
+                parent_report_id=parent_report_id,
+                approval_required=prior.approval_required,
+                budget=RunBudgetDefaults(
+                    **{
+                        field: getattr(budget, field)
+                        for field in RunBudgetDefaults.__dataclass_fields__
+                    }
+                ),
+            )
+        except IdempotencyConflictError as exc:
+            raise HTTPException(409, "idempotency key belongs to another request") from exc
+        if not created:
+            return {"runId": str(fresh.id), "status": fresh.status}
         if gap:
             gap.status = "investigating"
             gap.details = {**gap.details, "followupRunId": str(fresh.id)}
@@ -858,17 +834,7 @@ async def followup_research_run(
             },
         )
         fresh_id = fresh.id
-    task = asyncio.create_task(
-        run_graph(
-            settings,
-            run_id=fresh_id,
-            tenant_id=caller.tenant_id,
-            user_id=caller.user_id,
-            question=question,
-        )
-    )
-    request.app.state.background_tasks.add(task)
-    task.add_done_callback(request.app.state.background_tasks.discard)
+        await enqueue(session, fresh, settings)
     return {"runId": str(fresh_id), "status": "queued"}
 
 
@@ -902,45 +868,65 @@ async def stream_research_run_events(
     if run is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="research run not found")
 
+    cursor = request.headers.get("last-event-id")
+    if cursor is not None:
+        if not cursor.isascii() or not cursor.isdecimal() or len(cursor) > 16:
+            raise HTTPException(422, "invalid event cursor")
+        after = max(after, int(cursor))
+
     async def event_stream() -> AsyncIterable[ServerSentEvent]:
         watermark = after
         terminal_statuses = {"completed", "failed", "cancelled"}
+        idle_polls = 0
         while not await request.is_disconnected():
             async with tenant_session(str(caller.tenant_id)) as session:
-                events = list(
-                    await session.scalars(
-                        select(RunEvent)
+                rows = list(
+                    await session.execute(
+                        select(ResearchRun.status, RunEvent)
+                        .select_from(ResearchRun)
+                        .outerjoin(
+                            RunEvent,
+                            (RunEvent.tenant_id == caller.tenant_id)
+                            & (RunEvent.run_id == run_id)
+                            & (RunEvent.event_sequence > watermark),
+                        )
                         .where(
-                            RunEvent.tenant_id == caller.tenant_id,
-                            RunEvent.run_id == run_id,
-                            RunEvent.event_sequence > watermark,
+                            ResearchRun.tenant_id == caller.tenant_id,
+                            ResearchRun.user_id == caller.user_id,
+                            ResearchRun.id == run_id,
                         )
                         .order_by(RunEvent.event_sequence)
+                        .limit(128)
                     )
                 )
-                current_status = await session.scalar(
-                    select(ResearchRun.status).where(
-                        ResearchRun.tenant_id == caller.tenant_id, ResearchRun.id == run_id
-                    )
-                )
+                if not rows:
+                    return
+                current_status = rows[0][0]
+                events = [row[1] for row in rows if row[1] is not None]
             for event in events:
                 watermark = event.event_sequence
                 yield ServerSentEvent(
                     id=str(event.event_sequence),
-                    data=json.dumps(
-                        {
-                            "sequence": event.event_sequence,
-                            "type": event.event_type,
-                            "label": event.payload.get("label") or event.payload.get("message"),
-                            "occurredAt": event.occurred_at.isoformat(),
-                        }
-                    ),
+                    data={
+                        "sequence": event.event_sequence,
+                        "type": event.event_type,
+                        "label": event.payload.get("label") or event.payload.get("message"),
+                        "occurredAt": event.occurred_at.isoformat(),
+                        "errorCode": event.payload.get("errorCode")
+                        if event.event_type == "run.failed"
+                        else None,
+                    },
                 )
+            if len(events) == 128:
+                # Drain replay pages without waiting, even after a terminal event.
+                continue
             if current_status in terminal_statuses:
                 return
             if not events:
                 yield ServerSentEvent(comment="keepalive")
-            await asyncio.sleep(1)
+            idle_polls = 0 if events else min(idle_polls + 1, 5)
+            # Quiet tabs should not compete continuously with graph persistence.
+            await asyncio.sleep(5 if current_status == "awaiting_approval" else max(1, idle_polls))
 
     async for event in event_stream():
         yield event

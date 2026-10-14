@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from research_api.config import Settings
-from research_api.db.models import Budget, SubQuestion
+from research_api.db.models import Budget, ResearchRun, SubQuestion
 from research_api.graph import builder
 
 
@@ -33,6 +33,10 @@ async def test_real_worker_bounds_sources_and_concurrency(monkeypatch, calls, qu
             entity = statement.column_descriptions[0].get("entity")
             if entity is Budget:
                 return SimpleNamespace(max_search_calls=calls)
+            if entity is ResearchRun:
+                # Collection cleanup reads cancellation intent under the real
+                # lifecycle lock; this fixture models an active, uncancelled run.
+                return SimpleNamespace(concurrency_limit=3, cancellation_requested_at=None)
             if entity is SubQuestion:
                 key = str(statement.compile().params["id_1"])
                 return records[key]
@@ -67,7 +71,9 @@ async def test_real_worker_bounds_sources_and_concurrency(monkeypatch, calls, qu
     monkeypatch.setattr(builder, "finish_node", AsyncMock())
     monkeypatch.setattr(builder, "EventOutbox", lambda *_args: SimpleNamespace(append=AsyncMock()))
     worker = (
-        builder.build_graph(Settings(TAVILY_API_KEY="test")).nodes["research_worker"].bound.afunc
+        builder.build_graph(Settings(_env_file=None, TAVILY_API_KEY="test"))
+        .nodes["research_worker"]
+        .bound.afunc
     )
     result = await worker(
         {
