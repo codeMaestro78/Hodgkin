@@ -129,6 +129,7 @@ export const CreateResearchRunRequestSchema = z
     reportRequirements: z.array(z.string().max(500)).max(20).default([]),
     budgetOverrides: BudgetSchema.partial().optional(),
     idempotencyKey: z.string().min(16).max(200).optional(),
+    requireApproval: z.boolean().default(true),
   })
   .strict();
 

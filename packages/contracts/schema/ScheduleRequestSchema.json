@@ -1,0 +1,77 @@
+{
+  "$id": "https://schemas.research.local/1.3/ScheduleRequestSchema.json",
+  "title": "ScheduleRequestSchema",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "question": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 10000
+    },
+    "intervalMinutes": {
+      "type": "integer",
+      "minimum": 60,
+      "maximum": 43200
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 200
+    },
+    "requireApproval": {
+      "default": true,
+      "type": "boolean"
+    },
+    "budgetOverrides": {
+      "type": "object",
+      "properties": {
+        "maxWallClockMs": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 1800000
+        },
+        "maxSearchCalls": {
+          "default": 12,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50
+        },
+        "maxBrowserSessions": {
+          "default": 0,
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5
+        },
+        "maxReflectionRounds": {
+          "default": 1,
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "maxInputTokens": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "maxOutputTokens": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "maxEstimatedCostUsd": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "question",
+    "intervalMinutes",
+    "idempotencyKey",
+    "requireApproval"
+  ],
+  "additionalProperties": false
+}

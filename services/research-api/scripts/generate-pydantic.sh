@@ -8,6 +8,9 @@ output_dir="$service_dir/src/research_api/schemas/generated"
 mkdir -p "$output_dir"
 
 contracts=(
+  "ApprovalRequestSchema:approval_request:ApprovalRequest"
+  "BatchRequestSchema:batch_request:BatchRequest"
+  "ScheduleRequestSchema:schedule_request:ScheduleRequest"
   "ExecutionTaskSchema:execution_task:ExecutionTask"
   "FollowupRequestSchema:followup_request:FollowupRequest"
   "PublicGapSchema:public_gap:PublicGap"
@@ -45,6 +48,7 @@ for contract in "${contracts[@]}"; do
     --allow-population-by-field-name \
     --use-standard-collections \
     --use-union-operator \
+    --use-default \
     --target-python-version 3.12 \
     --disable-timestamp \
     --formatters ruff-check ruff-format

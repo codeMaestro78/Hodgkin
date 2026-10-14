@@ -12,6 +12,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, confloat, coni
 class SchemaVersion(StrEnum):
     field_1_1 = "1.1"
     field_1_2 = "1.2"
+    field_1_3 = "1.3"
 
 
 class Locator(BaseModel):

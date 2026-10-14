@@ -1,5 +1,5 @@
 {
-  "$id": "https://schemas.research.local/1.2/AgentEventSchema.json",
+  "$id": "https://schemas.research.local/1.3/AgentEventSchema.json",
   "title": "AgentEventSchema",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "oneOf": [
@@ -10,7 +10,8 @@
           "type": "string",
           "enum": [
             "1.1",
-            "1.2"
+            "1.2",
+            "1.3"
           ]
         },
         "eventId": {
@@ -56,6 +57,7 @@
           "type": "string",
           "enum": [
             "running",
+            "paused",
             "completed",
             "failed",
             "cancelled"
@@ -95,7 +97,8 @@
           "type": "string",
           "enum": [
             "1.1",
-            "1.2"
+            "1.2",
+            "1.3"
           ]
         },
         "eventId": {
@@ -164,7 +167,8 @@
           "type": "string",
           "enum": [
             "1.1",
-            "1.2"
+            "1.2",
+            "1.3"
           ]
         },
         "eventId": {
@@ -240,7 +244,8 @@
           "type": "string",
           "enum": [
             "1.1",
-            "1.2"
+            "1.2",
+            "1.3"
           ]
         },
         "eventId": {
@@ -330,7 +335,8 @@
           "type": "string",
           "enum": [
             "1.1",
-            "1.2"
+            "1.2",
+            "1.3"
           ]
         },
         "eventId": {
@@ -369,7 +375,8 @@
               "type": "string",
               "enum": [
                 "1.1",
-                "1.2"
+                "1.2",
+                "1.3"
               ]
             },
             "id": {
@@ -510,7 +517,8 @@
           "type": "string",
           "enum": [
             "1.1",
-            "1.2"
+            "1.2",
+            "1.3"
           ]
         },
         "eventId": {
@@ -566,7 +574,8 @@
           "type": "string",
           "enum": [
             "1.1",
-            "1.2"
+            "1.2",
+            "1.3"
           ]
         },
         "eventId": {
@@ -623,7 +632,8 @@
           "type": "string",
           "enum": [
             "1.1",
-            "1.2"
+            "1.2",
+            "1.3"
           ]
         },
         "eventId": {

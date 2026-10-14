@@ -1,5 +1,5 @@
 {
-  "$id": "https://schemas.research.local/1.2/CreateResearchRunResponseSchema.json",
+  "$id": "https://schemas.research.local/1.3/CreateResearchRunResponseSchema.json",
   "title": "CreateResearchRunResponseSchema",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",

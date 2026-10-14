@@ -12,6 +12,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, RootModel, con
 class Status(StrEnum):
     queued = "queued"
     running = "running"
+    paused = "paused"
     completed = "completed"
     failed = "failed"
     cancelled = "cancelled"
