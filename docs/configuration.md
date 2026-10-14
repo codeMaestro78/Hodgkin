@@ -39,6 +39,13 @@ Implemented settings are defined in `.env.example` and
 
 ## Providers
 
+Implemented retry controls: `PROVIDER_MAX_ATTEMPTS` defaults to 3 (validated 1–3),
+and `PROVIDER_TIMEOUT_SECONDS` defaults to 30 (greater than zero, at most 120).
+OpenAI SDK retries are disabled; explicit model attempts retry only known
+rejections/pre-dispatch failures. Tavily retries only pre-dispatch failures.
+Both recheck persisted cancellation before retry dispatch. The run wall-clock
+budget bounds backoff and request time. See [reliability](./reliability.md).
+
 | Name | Type | Required | Default | Description | Range | Sensitivity | Used by | Status |
 |---|---|---|---|---|---|---|---|---|
 | `SERPER_API_KEY` | string | Yes (if Serper enabled) | — | Auth for `google.serper.dev` | — | **High** | Serper adapter | `PROPOSED` |
@@ -57,7 +64,7 @@ the source document, not invented. See
 | Name | Type | Required | Default | Description | Range | Sensitivity | Used by |
 |---|---|---|---|---|---|---|---|
 | `maxWallClockMs` | int | Yes | — | Max run duration | 1 – 1,800,000 (30 min) | Low | Reflection routing, node deadlines |
-| `maxSearchCalls` | int | Yes | 12 (MVP) | Max provider search calls per run | 1 – 50 | Low | `provider_router`, `research_worker` |
+| `maxSearchCalls` | int | Yes | 12 (MVP) | Max provider operations per run (search and extract each use one unit; model calls use zero) | 1 – 50 | Low | `provider_router`, `research_worker` |
 | `maxBrowserSessions` | int | Yes | 0 (MVP) | Max browser sessions per run | 0 – 5 | Low | Browser adapters |
 | `maxReflectionRounds` | int | Yes | 1 (MVP) | Max delta-research rounds | 0 – 3 | Low | `route_after_reflection` |
 | `maxInputTokens` | int | Yes | — | Max cumulative input tokens | > 0 | Low | Usage enforcement |
