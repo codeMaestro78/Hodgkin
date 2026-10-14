@@ -4,7 +4,10 @@ import { usePathname } from "./navigation";
 import Composer from "../../app/(research)/research/page";
 import Report from "../../app/(research)/research/[runId]/page";
 import Reports from "../../app/(research)/research/reports/page";
+import { OnboardingFlow } from "../../app/components/onboarding-flow";
+import { readOnboarding } from "../../lib/onboarding";
 import "../../app/styles.css";
+import "../../app/onboarding.css";
 
 const options = new URLSearchParams(location.search);
 const id = "11111111-1111-4111-8111-111111111111";
@@ -175,6 +178,41 @@ const runs = Array.from({ length: 32 }, (_, i) => ({
 }));
 window.fetch = async (input, init) => {
   const url = String(input);
+  if (url === "/api/onboarding") {
+    if (init?.method === "POST") {
+      const payload = JSON.parse(String(init.body));
+      (
+        window as unknown as { fixtureOnboardingRequest: unknown }
+      ).fixtureOnboardingRequest = payload;
+      if (
+        (window as unknown as { fixtureOnboardingFail?: boolean })
+          .fixtureOnboardingFail
+      )
+        return Response.json(
+          { error: "Fixture setup save failed. Retry your answers." },
+          { status: 503 },
+        );
+      const profile = {
+        ...payload.draft,
+        version: 1,
+        step: payload.step,
+        status:
+          payload.action === "complete"
+            ? "completed"
+            : payload.action === "skip"
+              ? "skipped"
+              : "in_progress",
+        updatedAt: new Date().toISOString(),
+      };
+      sessionStorage.setItem("fixture-onboarding", JSON.stringify(profile));
+      return Response.json({ profile, redirect: payload.next ?? "/research" });
+    }
+    return Response.json({
+      profile: JSON.parse(
+        sessionStorage.getItem("fixture-onboarding") ?? "null",
+      ),
+    });
+  }
   if (url.includes("/api/auth/session"))
     return Response.json({
       user: { name: "Fixture researcher", email: "fixture@example.test" },
@@ -231,14 +269,28 @@ const view = options.get("view");
 history.replaceState(
   {},
   "",
-  view === "run"
-    ? `/research/${id}`
-    : view === "reports"
-      ? "/research/reports"
-      : "/research",
+  view === "onboarding" || location.pathname === "/onboarding"
+    ? "/onboarding"
+    : view === "run"
+      ? `/research/${id}`
+      : view === "reports"
+        ? "/research/reports"
+        : options.get("setup") === "ready"
+          ? "/research?setup=ready"
+          : "/research",
 );
 function App() {
   const path = usePathname();
+  if (path === "/onboarding")
+    return (
+      <OnboardingFlow
+        initialProfile={readOnboarding({
+          research_onboarding: JSON.parse(
+            sessionStorage.getItem("fixture-onboarding") ?? "null",
+          ),
+        })}
+      />
+    );
   return path === "/research/reports" ? (
     <Reports />
   ) : path === "/research" ? (
