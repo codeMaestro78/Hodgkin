@@ -52,3 +52,42 @@ it("does not invent verification for old reports", () => {
     }),
   ).toContain("No claim checks were recorded");
 });
+
+it("exports coverage without upgrading evidence links to fulfilled requirements", () => {
+  const output = reportExport({
+    originalQuestion: "Compare evidence",
+    report: {
+      version: 3,
+      publishedAt: "2026-10-15",
+      markdown: "Verified finding [1]",
+      document: {
+        quality: {
+          status: "partial",
+          reason: "Completeness has not been assessed.",
+        },
+        requirements: [
+          {
+            id: "question",
+            text: "Compare evidence",
+            status: "unresolved",
+            claimIds: [],
+          },
+          {
+            id: "requirement-1",
+            text: "Include risks",
+            status: "addressed",
+            claimIds: ["claim"],
+          },
+        ],
+      },
+    },
+    sources: [],
+  });
+  expect(output).toContain("Report version 3");
+  expect(output).toContain("partial: Completeness has not been assessed.");
+  expect(output).toContain("Compare evidence — Unresolved");
+  expect(output).toContain(
+    "Include risks — Evidence linked; completeness not established",
+  );
+  expect(output).not.toContain("fully satisfied");
+});

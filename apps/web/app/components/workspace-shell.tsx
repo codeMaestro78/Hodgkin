@@ -16,6 +16,11 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Brand, dateLabel, Icon } from "./ui";
 import { useEntrance } from "./workspace-motion";
+import {
+  patchResearchHistory,
+  subscribeResearchHistorySnapshots,
+  type ResearchHistorySnapshot,
+} from "../../lib/research-history-events";
 
 export type HistoryRun = {
   runId: string;
@@ -40,6 +45,7 @@ export function WorkspaceShell({
   const [history, setHistory] = useState<HistoryRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
+  const [historyRevision, setHistoryRevision] = useState(0);
   const [filter, setFilter] = useState("");
   const [open, setOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -83,6 +89,14 @@ export function WorkspaceShell({
 
   useEffect(() => {
     const controller = new AbortController();
+    // Replay snapshots received during a list request over its older response.
+    const snapshots = new Map<string, ResearchHistorySnapshot>();
+    const unsubscribe = subscribeResearchHistorySnapshots((snapshot) => {
+      if (snapshots.size >= 100 && !snapshots.has(snapshot.runId))
+        snapshots.delete(snapshots.keys().next().value!);
+      snapshots.set(snapshot.runId, snapshot);
+      setHistory((current) => patchResearchHistory(current, snapshot));
+    });
     setLoading(true);
     fetch("/api/research/runs", {
       cache: "no-store",
@@ -91,7 +105,11 @@ export function WorkspaceShell({
       .then(async (response) => {
         if (!response.ok) throw new Error("History unavailable");
         const body = (await response.json()) as { runs?: HistoryRun[] };
-        setHistory(body.runs ?? []);
+        if (controller.signal.aborted) return;
+        let runs = body.runs ?? [];
+        for (const snapshot of snapshots.values())
+          runs = patchResearchHistory(runs, snapshot);
+        setHistory(runs);
         setFailed(false);
       })
       .catch((error) => {
@@ -100,8 +118,11 @@ export function WorkspaceShell({
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
       });
-    return () => controller.abort();
-  }, [activeRunId]);
+    return () => {
+      controller.abort();
+      unsubscribe();
+    };
+  }, [activeRunId, historyRevision]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -161,6 +182,21 @@ export function WorkspaceShell({
       >
         <Icon name="book" size={17} /> Reports
       </Link>
+      <Link
+        className="desk-library-link"
+        href="/research/automation"
+        aria-current={pathname === "/research/automation" ? "page" : undefined}
+        onClick={() => setOpen(false)}
+      >
+        <Icon name="layers" size={17} /> Automation
+      </Link>
+      <Link
+        className="desk-library-link"
+        href="/onboarding"
+        onClick={() => setOpen(false)}
+      >
+        <Icon name="book" size={17} /> Research preferences
+      </Link>
       <label className="history-search">
         <Icon name="search" size={16} />
         <input
@@ -173,6 +209,15 @@ export function WorkspaceShell({
       <div className="history-label">
         <span>Recent research</span>
         <span>{loading ? "…" : history.length}</span>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label="Refresh research history"
+          disabled={loading}
+          onClick={() => setHistoryRevision((revision) => revision + 1)}
+        >
+          <Icon name="arrow" size={14} />
+        </button>
       </div>
       <nav className="history-list" aria-label="Saved research">
         {loading ? (
@@ -291,6 +336,9 @@ export function WorkspaceShell({
             </div>
             <div className="toolbar-actions">
               {toolbar}
+              <Link className="toolbar-home" href="/onboarding">
+                Research preferences
+              </Link>
               <Link className="toolbar-home" href="/">
                 Overview
                 <Icon name="external" size={13} />

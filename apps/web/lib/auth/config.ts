@@ -27,7 +27,12 @@ export function appOrigin() {
 /** Auth destinations are an allowlist, not a client-controlled open redirect. */
 export function authDestination(value: string | null | undefined) {
   if (value === "/reset-password") return value;
-  if (value === "/research" || /^\/research\/[a-f0-9-]{36}$/i.test(value ?? ""))
+  if (
+    value === "/research" ||
+    value === "/research/reports" ||
+    value === "/research/automation" ||
+    /^\/research\/[a-f0-9-]{36}$/i.test(value ?? "")
+  )
     return value!;
   return "/research";
 }

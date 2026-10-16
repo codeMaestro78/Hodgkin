@@ -7,6 +7,7 @@ import {
   authDestination,
 } from "../../../../lib/auth/config";
 import { authJson, sameOrigin } from "../../../../lib/auth/http";
+import { onboardingDestination } from "../../../../lib/onboarding";
 
 export const runtime = "nodejs";
 const credentials = z.object({
@@ -136,7 +137,7 @@ export async function POST(
       );
     const { email, password, name } = parsed.data;
     if (action === "login") {
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
@@ -151,7 +152,10 @@ export async function POST(
           error.status === 429 ? 429 : 400,
         );
       return authJson({
-        redirect: next === "/reset-password" ? "/research" : next,
+        redirect: onboardingDestination(
+          next === "/reset-password" ? "/research" : next,
+          data.user?.user_metadata,
+        ),
       });
     }
     const callback = new URL("/auth/callback", appOrigin());
@@ -177,7 +181,10 @@ export async function POST(
       );
     if (data.session)
       return authJson({
-        redirect: next === "/reset-password" ? "/research" : next,
+        redirect: onboardingDestination(
+          next === "/reset-password" ? "/research" : next,
+          data.user?.user_metadata,
+        ),
       });
     return authJson({
       message:

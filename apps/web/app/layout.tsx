@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import localFont from "next/font/local";
 import "./styles.css";
+import "./onboarding.css";
 
 const outfit = localFont({
   src: [

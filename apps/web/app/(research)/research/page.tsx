@@ -1,9 +1,24 @@
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { WorkspaceShell } from "../../components/workspace-shell";
 import { Icon } from "../../components/ui";
+import { onboardingProfileSchema } from "../../../lib/onboarding";
+import {
+  clearResearchDraft,
+  emptyResearchDraft,
+  MAX_REQUIREMENTS_TEXT,
+  parseReportRequirements,
+  readResearchDraft,
+  researchDraftAccount,
+  writeResearchDraft,
+  type ResearchDraft,
+} from "../../../lib/research-draft";
+import {
+  researchSubmission,
+  type ResearchSubmission,
+} from "../../../lib/research-submission";
 import {
   Alert,
   Badge,
@@ -19,17 +34,23 @@ const depths = [
   {
     name: "Focused",
     sources: 6,
-    description: "A specific question or quick decision.",
+    minutes: 3,
+    description:
+      "A decision brief with analysis, trade-offs and cited findings.",
   },
   {
     name: "Balanced",
     sources: 12,
-    description: "Broader coverage and considered comparisons.",
+    minutes: 5,
+    description:
+      "A structured comparison with mechanisms, risks and implications.",
   },
   {
     name: "Deep",
     sources: 20,
-    description: "More perspectives and supporting evidence.",
+    minutes: 10,
+    description:
+      "A detailed investigation with broader evidence and cross-source analysis.",
   },
 ] as const;
 const examples = [
@@ -49,12 +70,129 @@ const examples = [
 ];
 
 export default function ResearchPage() {
-  const [question, setQuestion] = useState("");
-  const [depth, setDepth] = useState("Balanced");
+  const [draft, setDraft] = useState<ResearchDraft>(emptyResearchDraft);
+  const { question, depth, requireApproval, requirementsText } = draft;
+  const draftRef = useRef(draft);
+  const accountId = useRef<string | null>(null);
+  const accountGeneration = useRef(0);
+  const checkingAccount = useRef(true);
+  const [draftReady, setDraftReady] = useState(false);
+  const editedFields = useRef(new Set<keyof ResearchDraft>());
+  const created = useRef(false);
+  function updateDraft(patch: Partial<ResearchDraft>, userEdit = true) {
+    if (userEdit) {
+      for (const key of Object.keys(patch) as (keyof ResearchDraft)[])
+        editedFields.current.add(key);
+    }
+    draftRef.current = { ...draftRef.current, ...patch };
+    setDraft(draftRef.current);
+    if (accountId.current && !created.current)
+      writeResearchDraft(accountId.current, draftRef.current);
+  }
+  const setQuestion = (question: string) => updateDraft({ question });
+  const setDepth = (depth: string) => {
+    if (depth === "Focused" || depth === "Balanced" || depth === "Deep")
+      updateDraft({ depth });
+  };
+  const setRequireApproval = (requireApproval: boolean) =>
+    updateDraft({ requireApproval });
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const textarea = useRef<HTMLTextAreaElement>(null);
   const router = useRouter();
+  const editedQuestion = useRef(false);
+  const editedDepth = useRef(false);
+  const submission = useRef<ResearchSubmission | null>(null);
+  const submitting = useRef(false);
+  const defaultsFrozen = useRef(false);
+  useEffect(() => {
+    let controller = new AbortController();
+    const handoff =
+      new URLSearchParams(window.location.search).get("setup") === "ready";
+    const hydrate = async () => {
+      controller.abort();
+      controller = new AbortController();
+      const { signal } = controller;
+      checkingAccount.current = true;
+      setDraftReady(false);
+      try {
+        const response = await fetch("/api/auth/session", {
+          cache: "no-store",
+          signal,
+        });
+        const id = response.ok
+          ? researchDraftAccount(await response.json())
+          : null;
+        if (signal.aborted) return;
+        const previousId = accountId.current;
+        if (previousId && previousId === id) return;
+        if (previousId !== id) accountGeneration.current++;
+        accountId.current = id;
+        if (previousId) {
+          // Never carry the previous account's in-memory text into a new scope.
+          draftRef.current = { ...emptyResearchDraft };
+          editedFields.current.clear();
+          editedQuestion.current = false;
+          editedDepth.current = false;
+          defaultsFrozen.current = false;
+          submission.current = null;
+          created.current = false;
+          submitting.current = false;
+          setBusy(false);
+          setNotice("");
+          setDraft(draftRef.current);
+        }
+        if (!id) return;
+        const recovered = readResearchDraft(id);
+        if (recovered) {
+          const patch: Partial<ResearchDraft> = {};
+          for (const key of Object.keys(recovered) as (keyof ResearchDraft)[]) {
+            if (!editedFields.current.has(key))
+              Object.assign(patch, { [key]: recovered[key] });
+          }
+          updateDraft(patch, false);
+        } else writeResearchDraft(id, draftRef.current);
+        // Identity and account-scoped draft are ready. Optional defaults must not
+        // keep the composer locked behind another network round trip.
+        checkingAccount.current = false;
+        setDraftReady(true);
+        const defaults = await fetch("/api/onboarding", {
+          cache: "no-store",
+          signal,
+        });
+        const body = defaults.ok ? await defaults.json() : null;
+        if (
+          signal.aborted ||
+          defaultsFrozen.current ||
+          accountId.current !== id
+        )
+          return;
+        const profile = onboardingProfileSchema.safeParse(body?.profile).data;
+        if (profile?.status === "completed" && !recovered) {
+          const patch: Partial<ResearchDraft> = {};
+          if (!editedDepth.current) patch.depth = profile.depth;
+          if (handoff && !editedQuestion.current)
+            patch.question = profile.topic;
+          updateDraft(patch, false);
+        }
+        if (handoff)
+          window.history.replaceState(window.history.state, "", "/research");
+      } catch {
+        // Unavailable identity/storage/defaults must not block composing.
+      } finally {
+        if (!signal.aborted) {
+          checkingAccount.current = false;
+          setDraftReady(true);
+        }
+      }
+    };
+    void hydrate();
+    window.addEventListener("focus", hydrate);
+    return () => {
+      controller.abort();
+      window.removeEventListener("focus", hydrate);
+    };
+  }, []);
   const scope = depths.find((item) => item.name === depth) ?? depths[1];
   const simple =
     /^(what is|who is|define|explain)\s+.+\??$/i.test(question.trim()) &&
@@ -66,7 +204,15 @@ export default function ResearchPage() {
 
   async function start(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy) return;
+    if (busy || submitting.current || !draftReady || checkingAccount.current)
+      return;
+    if (!accountId.current) {
+      setNotice(
+        "Verify your account before starting research. Please try again.",
+      );
+      window.dispatchEvent(new Event("focus"));
+      return;
+    }
     if (question.trim().length < 5) {
       setNotice(
         "Add a little more detail—your question needs at least five characters.",
@@ -74,31 +220,64 @@ export default function ResearchPage() {
       textarea.current?.focus();
       return;
     }
+    let reportRequirements: string[];
+    try {
+      reportRequirements = parseReportRequirements(requirementsText);
+    } catch (error) {
+      setNotice(
+        error instanceof Error ? error.message : "Check report requirements.",
+      );
+      return;
+    }
+    defaultsFrozen.current = true;
+    submitting.current = true;
     setBusy(true);
     setNotice("");
+    const submissionAccountId = accountId.current;
+    const submissionGeneration = accountGeneration.current;
     try {
+      submission.current = researchSubmission(
+        submission.current,
+        JSON.stringify({
+          question: question.trim(),
+          reportRequirements,
+          requireApproval,
+          budgetOverrides: {
+            maxSearchCalls: limit,
+            maxWallClockMs: (simple ? 2 : scope.minutes) * 60_000,
+          },
+        }),
+      );
       const response = await fetch("/api/research/runs", {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "idempotency-key": crypto.randomUUID(),
+          "idempotency-key": submission.current.key,
+          "x-research-account-id": submissionAccountId,
         },
-        body: JSON.stringify({
-          question: question.trim(),
-          reportRequirements: [],
-          budgetOverrides: { maxSearchCalls: limit },
-        }),
+        body: submission.current.body,
       });
       const body = (await response.json()) as {
         runId?: string;
         error?: string;
+        detail?: unknown;
       };
+      // A previous account's request must never mutate a newly hydrated composer.
+      if (submissionGeneration !== accountGeneration.current) return;
+      if (response.status === 409) window.dispatchEvent(new Event("focus"));
       if (!response.ok || !body.runId)
         throw new Error(
-          body.error ?? "The research couldn’t be started. Please try again.",
+          body.error ??
+            (typeof body.detail === "string"
+              ? body.detail
+              : "The research couldn’t be started. Please try again."),
         );
+      created.current = true;
+      if (submissionAccountId) clearResearchDraft(submissionAccountId);
       router.push(`/research/${body.runId}`);
     } catch (error) {
+      if (submissionGeneration !== accountGeneration.current) return;
+      submitting.current = false;
       setNotice(
         error instanceof Error
           ? error.message
@@ -142,6 +321,7 @@ export default function ResearchPage() {
                     value={question}
                     onChange={(event) => {
                       setQuestion(event.target.value);
+                      editedQuestion.current = true;
                       if (notice) setNotice("");
                     }}
                     placeholder="Ask a question, compare alternatives, or investigate a decision…"
@@ -154,10 +334,34 @@ export default function ResearchPage() {
                   />
                 </Field>
                 <Field>
+                  <FieldLabel htmlFor="report-requirements">
+                    Report requirements
+                  </FieldLabel>
+                  <textarea
+                    id="report-requirements"
+                    value={requirementsText}
+                    onChange={(event) =>
+                      updateDraft({ requirementsText: event.target.value })
+                    }
+                    maxLength={MAX_REQUIREMENTS_TEXT}
+                    rows={4}
+                    disabled={busy}
+                    aria-describedby="requirements-note"
+                    placeholder="Compare costs and trade-offs\nInclude implementation risks"
+                  />
+                  <p id="requirements-note" className="desk-help">
+                    Optional. One requirement per line, up to 20 requirements
+                    and 500 characters each.
+                  </p>
+                </Field>
+                <Field>
                   <span className="desk-field-label">Research depth</span>
                   <ToggleGroup
                     value={depth}
-                    onChange={setDepth}
+                    onChange={(value) => {
+                      editedDepth.current = true;
+                      setDepth(value);
+                    }}
                     label="Research depth"
                   >
                     {depths.map((item) => (
@@ -173,15 +377,37 @@ export default function ResearchPage() {
                           {item.description}
                         </span>
                         <span className="depth-limit">
-                          Up to {item.sources} sources
+                          Up to {item.sources} sources · {item.minutes}-minute
+                          active limit
                         </span>
                       </ToggleGroupItem>
                     ))}
                   </ToggleGroup>
                   <p id="scope-note" className="desk-help">
+                    Planning, collection and verification share this active-time
+                    limit; waiting for approval does not count.{" "}
                     {simple
                       ? "This evergreen question uses a fast explainer with up to two sources, regardless of the selected depth."
                       : "Limits are ceilings, not quotas. Search and extraction both count toward the provider-call budget."}
+                  </p>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="require-approval">
+                    <input
+                      id="require-approval"
+                      type="checkbox"
+                      checked={requireApproval}
+                      onChange={(event) =>
+                        setRequireApproval(event.target.checked)
+                      }
+                      disabled={busy}
+                      aria-describedby="approval-note"
+                    />{" "}
+                    Review the plan before research starts
+                  </FieldLabel>
+                  <p id="approval-note" className="desk-help">
+                    Approve the proposed questions to continue, or reject the
+                    plan to stop the run.
                   </p>
                 </Field>
               </FieldGroup>
@@ -192,7 +418,7 @@ export default function ResearchPage() {
                 </span>
                 <Button
                   type="submit"
-                  disabled={busy || question.trim().length < 5}
+                  disabled={busy || !draftReady || question.trim().length < 5}
                 >
                   {busy ? (
                     <span className="motion-spinner" aria-hidden="true" />
@@ -215,6 +441,7 @@ export default function ResearchPage() {
                     key={example.type}
                     disabled={busy}
                     onClick={() => {
+                      editedQuestion.current = true;
                       setQuestion(example.question);
                       setNotice("");
                       textarea.current?.focus();

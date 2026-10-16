@@ -1,6 +1,19 @@
 type ExportRun = {
   originalQuestion: string;
-  report: { version: number; markdown: string; publishedAt: string } | null;
+  report: {
+    version: number;
+    markdown: string;
+    publishedAt: string;
+    document?: {
+      quality: { status: string; reason: string };
+      requirements: {
+        id: string;
+        text: string;
+        status: string;
+        claimIds: string[];
+      }[];
+    } | null;
+  } | null;
   sources: { id: string; title: string; url: string }[];
   claimChecks?: {
     claim: string;
@@ -26,6 +39,16 @@ export function reportExport(run: ExportRun): string {
     "## Verification summary",
     "Exact passage checks and model support reviews are not factual certification. Unchecked legacy prose is not implied to be verified.",
   ];
+  output.push(
+    "## Answer quality and requirement coverage",
+    run.report.document
+      ? `${escape(run.report.document.quality.status)}: ${escape(run.report.document.quality.reason)}`
+      : "Not assessed: this historical report has no structured coverage assessment.",
+  );
+  for (const requirement of run.report.document?.requirements ?? [])
+    output.push(
+      `- ${escape(requirement.text)} — ${requirement.status === "addressed" ? "Evidence linked; completeness not established" : "Unresolved"}.`,
+    );
   for (const claim of run.claimChecks ?? []) {
     output.push(
       `### ${escape(claim.claim)}`,
