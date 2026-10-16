@@ -191,6 +191,11 @@ async (page) => {
       return;
     }
     if (path === `/api/research/runs/${runId}`) return reply(run());
+    if (
+      request.method() === "GET" &&
+      /^\/api\/research\/reports\/[^/]+\/shares$/.test(path)
+    )
+      return reply([]);
     unexpected.push(`${request.method()} ${path}`);
     return reply({ error: "Unexpected fixture API request" }, 501);
   };

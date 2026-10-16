@@ -9,6 +9,7 @@ export async function forwardResearch(
   path: string,
   method: "GET" | "POST" = "GET",
   events = false,
+  binary = false,
 ) {
   const requestId = crypto.randomUUID();
   const started = performance.now();
@@ -145,6 +146,21 @@ export async function forwardResearch(
           "server-timing": serverTiming(),
         },
       });
+    if (binary) {
+      return new Response(response.body, {
+        status: response.status,
+        headers: {
+          "content-type":
+            response.headers.get("content-type") ?? "application/octet-stream",
+          "content-disposition":
+            response.headers.get("content-disposition") ?? "attachment",
+          "cache-control": "private, no-store",
+          "x-content-type-options": "nosniff",
+          "x-request-id": requestId,
+          "server-timing": serverTiming(),
+        },
+      });
+    }
     const body = await response.text();
     timing("response", started, response.status);
     return new Response(body, {

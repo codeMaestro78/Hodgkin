@@ -59,7 +59,7 @@ async (page) => {
     }
     if (url.pathname.endsWith("/session"))
       return reply({
-        user: { name: "Fixture", email: "fixture@example.test" },
+        user: { id: "fixture-account", name: "Fixture", email: "fixture@example.test" },
       });
     if (url.pathname.endsWith("/runs")) return reply({ runs: [] });
     if (block)
@@ -188,4 +188,4 @@ async (page) => {
     fullPage: true,
   });
   return { checksPassed: checks.length, checks };
-};
+}

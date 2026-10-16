@@ -1,12 +1,29 @@
 "use client";
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
+import {
+  answerSectionKind,
+  followupSuggestions,
+  hasNoVerifiedFindings,
   readingMinutes,
+  reportDisplayMarkdown,
   reportSections,
 } from "../../../../lib/report-presentation";
+import { parseSourceList } from "../../../../lib/citation-format";
 import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
 import ReactMarkdown from "react-markdown";
-import { ReportDocumentV1Schema } from "@research/contracts";
+import {
+  EditResearchPlanRequestSchema,
+  EditResearchPlanResponseSchema,
+  ReportDocumentV1Schema,
+} from "@research/contracts";
 import type { z } from "zod";
 import { publishResearchHistory } from "../../../../lib/research-history-events";
 import { reportExport } from "../../../../lib/report-export";
@@ -16,11 +33,33 @@ import {
   runFailure,
   snapshotRefreshDelay,
   createSnapshotRefresh,
+  runPhaseIndex,
+  runPhases,
 } from "../../../../lib/run-status";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
 import { WorkspaceShell } from "../../../components/workspace-shell";
 import { RunClock } from "../../../components/run-clock";
 import { ResearchActivity } from "../../../components/research-activity";
+import { SaveToLibrary } from "../../../components/save-to-library";
+import { ReportActions } from "../../../components/report-actions";
+import {
+  EvidencePresets,
+  EvidenceResizer,
+  SourcesTable,
+  useEvidenceLayout,
+  type SourceRow,
+} from "../../../components/research-workspace";
+import {
+  CitationPreview,
+  FollowupSuggestions,
+  MethodSummary,
+  ReferenceList,
+  ReportTable,
+  type CitationPreviewData,
+} from "../../../components/research-answer";
 import {
   Badge,
   Button,
@@ -29,6 +68,8 @@ import {
 } from "../../../components/workbench-ui";
 import {
   ExecutionView,
+  OrchestrationSummary,
+  settleInsights,
   GapView,
   type RunInsights,
 } from "../../../components/research-insights";
@@ -80,8 +121,16 @@ type Run = {
   approval?: {
     planId: string;
     state: "pending" | "approve" | "reject";
+    editable: boolean;
+    planVersion: number;
+    maxQuestions: number;
     questions: { id: string; question: string }[];
+    /** Closed plan-review waits, excluded from active run time. */
+    waitedMs?: number;
+    /** Start of the plan-review wait that is still open, if any. */
+    waitStartedAt?: string | null;
   } | null;
+  planVersion: number;
   sourceCount: number;
   sourceLimit?: number;
   errorCode: string | null;
@@ -131,12 +180,14 @@ type MarkdownNode = {
   type: string;
   value?: string;
   url?: string;
+  depth?: number;
   children?: MarkdownNode[];
-  data?: { hProperties: { id: string } };
+  data?: { hName?: string; hProperties: Record<string, unknown> };
 };
 const terminal = ["failed", "completed", "cancelled"];
-const phases = ["planning", "researching", "verifying", "writing", "completed"];
 const labels = ["Plan", "Research", "Check", "Write", "Answer"];
+const sourceLabel = (count: number) =>
+  `${count} ${count === 1 ? "source" : "sources"}`;
 
 function remarkCitations() {
   return (tree: MarkdownNode) => {
@@ -175,6 +226,47 @@ function remarkCitations() {
   };
 }
 
+function publicationLabel(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? null
+    : new Intl.DateTimeFormat(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      }).format(date);
+}
+
+const plainText = (node: MarkdownNode): string =>
+  node.value ?? (node.children ?? []).map(plainText).join("");
+
+/** Wrap each level-2 heading and its body in a section tagged with its role. */
+function remarkAnswerSections() {
+  return (tree: MarkdownNode) => {
+    if (!tree.children) return;
+    const out: MarkdownNode[] = [];
+    let current: MarkdownNode | null = null;
+    for (const child of tree.children) {
+      if (child.type === "heading" && child.depth === 2) {
+        current = {
+          type: "answerSection",
+          children: [child],
+          data: {
+            hName: "section",
+            hProperties: {
+              className: ["answer-section"],
+              dataKind: answerSectionKind(plainText(child)),
+            },
+          },
+        };
+        out.push(current);
+      } else if (current) current.children?.push(child);
+      else out.push(child);
+    }
+    tree.children = out;
+  };
+}
+
 function referenceMap(markdown: string, sources: Source[]) {
   const section = markdown.split(/^## Sources\s*$/im)[1] ?? "";
   const result = new Map<number, Source>();
@@ -199,6 +291,14 @@ export default function LiveRunWorkspace() {
     "approve" | "reject" | null
   >(null);
   const [approvalFeedback, setApprovalFeedback] = useState("");
+  const [editingPlan, setEditingPlan] = useState(false);
+  const [draftQuestions, setDraftQuestions] = useState<string[]>([]);
+  const [planSaving, setPlanSaving] = useState(false);
+  const [planEditError, setPlanEditError] = useState("");
+  const [editBaseVersion, setEditBaseVersion] = useState<number | null>(null);
+  const [editBasePlanId, setEditBasePlanId] = useState<string | null>(null);
+  const [planStale, setPlanStale] = useState(false);
+  const [savedPlanVersion, setSavedPlanVersion] = useState<number | null>(null);
   const [tab, setTab] = useState<"sources" | "checks" | "method">("sources");
   const [mobileView, setMobileView] = useState<"report" | "evidence">("report");
   const [evidenceVisible, setEvidenceVisible] = useState(true);
@@ -208,6 +308,31 @@ export default function LiveRunWorkspace() {
   const [claimFilter, setClaimFilter] = useState("all");
   const [followupQuestion, setFollowupQuestion] = useState("");
   const [reportVersion, setReportVersion] = useState<number | null>(null);
+  const sourceQueryApplied = useRef<string | null>(null);
+  useEffect(() => {
+    const version = new URLSearchParams(window.location.search).get(
+      "reportVersion",
+    );
+    setReportVersion(
+      version && /^[1-9]\d{0,3}$|^10000$/.test(version)
+        ? Number(version)
+        : null,
+    );
+    sourceQueryApplied.current = null;
+  }, [runId]);
+  useEffect(() => {
+    if (!run || run.runId !== runId || sourceQueryApplied.current === runId)
+      return;
+    const sourceId = new URLSearchParams(window.location.search).get(
+      "sourceId",
+    );
+    sourceQueryApplied.current = runId;
+    if (!sourceId || !run.sources.some((source) => source.id === sourceId))
+      return;
+    setActiveSource(sourceId);
+    setEvidenceVisible(true);
+    setMobileView("evidence");
+  }, [run, runId]);
   const followupKeys = useRef(new Map<string, string>());
   const deferredSourceQuery = useDeferredValue(
     sourceQuery.trim().toLowerCase(),
@@ -220,6 +345,7 @@ export default function LiveRunWorkspace() {
   const [snapshotRefreshing, setSnapshotRefreshing] = useState(false);
   const panel = useRef<HTMLElement>(null);
   const report = useRef<HTMLDivElement>(null);
+  const grid = useRef<HTMLDivElement>(null);
   const tabList = useRef<HTMLDivElement>(null);
   const tabPositions = useRef({ sources: 0, checks: 0, method: 0 });
   useSlidingIndicator(tabList, `${runId}-${tab}-${Boolean(run)}`);
@@ -258,12 +384,50 @@ export default function LiveRunWorkspace() {
   const versionRun = useRef(runId);
 
   useEffect(() => {
+    if (!run?.approval) return;
+    const planChangedSinceEdit =
+      editBaseVersion !== null &&
+      (run.planVersion !== editBaseVersion ||
+        (editBasePlanId !== null && run.approval.planId !== editBasePlanId));
+    if (!editingPlan) {
+      setDraftQuestions(run.approval.questions.map(({ question }) => question));
+      setEditBaseVersion(run.planVersion);
+      setEditBasePlanId(run.approval.planId);
+      if (!planStale || planChangedSinceEdit) {
+        setPlanEditError("");
+        setPlanStale(false);
+      }
+      return;
+    }
+    if (planChangedSinceEdit) {
+      setPlanStale(true);
+      setPlanEditError(
+        "This plan changed in another tab. Refresh the run, review the latest questions, then edit again.",
+      );
+    }
+  }, [
+    run?.approval,
+    run?.planVersion,
+    editingPlan,
+    editBaseVersion,
+    editBasePlanId,
+    planStale,
+  ]);
+
+  useEffect(() => {
     if (versionRun.current === runId) return;
     versionRun.current = runId;
     setReportVersion(null);
     setClaimFilter("all");
     setFollowupQuestion("");
     setApprovalFeedback("");
+    setEditingPlan(false);
+    setDraftQuestions([]);
+    setPlanEditError("");
+    setEditBaseVersion(null);
+    setEditBasePlanId(null);
+    setPlanStale(false);
+    setSavedPlanVersion(null);
     followupKeys.current.clear();
   }, [runId]);
 
@@ -491,6 +655,8 @@ export default function LiveRunWorkspace() {
   async function decidePlan(decision: "approve" | "reject") {
     if (
       busy ||
+      planSaving ||
+      planVersionConflict ||
       approving.current ||
       run?.status !== "awaiting_approval" ||
       run.approval?.state !== "pending"
@@ -516,6 +682,32 @@ export default function LiveRunWorkspace() {
               : "The plan decision couldn’t be saved. Try again."),
         );
       }
+      // Retire the decided plan locally so its controls cannot be submitted twice
+      // while the refreshed run is loading.
+      setRun((previous) =>
+        previous?.approval
+          ? {
+              ...previous,
+              status: decision === "approve" ? "queued" : "cancelled",
+              updatedAt: new Date().toISOString(),
+              approval: {
+                ...previous.approval,
+                state: decision,
+                // Close the wait locally so the clock resumes before the refresh.
+                waitedMs:
+                  (previous.approval.waitedMs ?? 0) +
+                  (previous.approval.waitStartedAt
+                    ? Math.max(
+                        0,
+                        Date.now() -
+                          Date.parse(previous.approval.waitStartedAt),
+                      )
+                    : 0),
+                waitStartedAt: null,
+              },
+            }
+          : previous,
+      );
       setApprovalFeedback(
         decision === "approve"
           ? "Plan approved. Research is queued."
@@ -532,6 +724,79 @@ export default function LiveRunWorkspace() {
       approving.current = false;
       setApprovalDecision(null);
       setBusy(false);
+    }
+  }
+  async function savePlanQuestions() {
+    const approval = run?.approval;
+    if (
+      planSaving ||
+      busy ||
+      run?.status !== "awaiting_approval" ||
+      approval?.state !== "pending" ||
+      editBaseVersion === null ||
+      editBasePlanId === null ||
+      planVersionConflict
+    )
+      return;
+
+    setPlanSaving(true);
+    setPlanEditError("");
+    try {
+      const request = EditResearchPlanRequestSchema.parse({
+        planId: editBasePlanId,
+        expectedPlanVersion: editBaseVersion,
+        questions: draftQuestions,
+      });
+      const response = await fetch(`/api/research/runs/${runId}/plan`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(request),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        if (response.status === 409 || response.status === 412) {
+          setPlanStale(true);
+          setReload((value) => value + 1);
+          throw new Error(
+            "This plan was updated elsewhere. Refresh the run and review the latest questions before saving again.",
+          );
+        }
+        const detail =
+          typeof body.error === "string"
+            ? body.error
+            : typeof body.detail === "string"
+              ? body.detail
+              : "The edited plan could not be saved. Check the question count and wording, then try again.";
+        throw new Error(detail);
+      }
+      const updated = EditResearchPlanResponseSchema.parse(body);
+      if (
+        updated.runId !== runId ||
+        updated.planId === editBasePlanId ||
+        updated.planVersion !== editBaseVersion + 1 ||
+        updated.status !== "awaiting_approval"
+      ) {
+        throw new Error(
+          "The saved plan response did not match this run. Refresh and review the current plan.",
+        );
+      }
+      setDraftQuestions(updated.questions.map(({ question }) => question));
+      setEditingPlan(false);
+      setEditBaseVersion(updated.planVersion);
+      setEditBasePlanId(updated.planId);
+      setSavedPlanVersion(updated.planVersion);
+      setApprovalFeedback(
+        "Plan updated. Review the questions before approving.",
+      );
+      setReload((value) => value + 1);
+    } catch (cause) {
+      setPlanEditError(
+        cause instanceof Error
+          ? cause.message
+          : "The edited plan could not be saved. Please try again.",
+      );
+    } finally {
+      setPlanSaving(false);
     }
   }
   async function copyReport() {
@@ -557,12 +822,58 @@ export default function LiveRunWorkspace() {
     URL.revokeObjectURL(url);
     setFeedback("Report downloaded.");
   }
-  const markdown = run?.report?.markdown.split(/^## Sources\s*$/im)[0] ?? "";
+  const markdown = reportDisplayMarkdown(
+    run?.report?.markdown.split(/^## Sources\s*$/im)[0] ?? "",
+  );
   const sections = useMemo(() => reportSections(markdown), [markdown]);
   const refs = useMemo(
     () => referenceMap(run?.report?.markdown ?? "", run?.sources ?? []),
     [run?.report?.markdown, run?.sources],
   );
+  const references = useMemo(
+    () =>
+      parseSourceList(run?.report?.markdown ?? "").map((item) => {
+        const source = refs.get(item.number);
+        return {
+          number: item.number,
+          title: source?.title || item.title,
+          url: source?.url ?? item.url,
+          publisher: source?.assessment?.publisher,
+          publishedAt: source?.assessment?.publishedAt,
+          retrievedAt: source?.assessment?.retrievedAt,
+          sourceId: source?.id,
+        };
+      }),
+    [run?.report?.markdown, refs],
+  );
+  function citationPreview(number: number): CitationPreviewData | null {
+    const source = refs.get(number);
+    if (!source) return null;
+    const published = (run?.claimChecks ?? []).filter(
+      (claim) => claim.publishedInReport !== false,
+    );
+    const citations = published.flatMap((claim) =>
+      claim.citations.filter((citation) => citation.sourceId === source.id),
+    );
+    const best =
+      citations.find((citation) => citation.exactSpanVerified) ?? citations[0];
+    const publishedAt = source.assessment?.publishedAt;
+    return {
+      title: source.title || domain(source.url),
+      site: source.assessment?.publisher || domain(source.url),
+      kind:
+        source.sourceClass === "unknown"
+          ? "Web source"
+          : source.sourceClass.charAt(0).toUpperCase() +
+            source.sourceClass.slice(1),
+      published: publishedAt ? publicationLabel(publishedAt) : null,
+      quote: best?.quote ?? null,
+      verified: best?.exactSpanVerified ?? false,
+      claims: published.filter((claim) =>
+        claim.citations.some((citation) => citation.sourceId === source.id),
+      ).length,
+    };
+  }
   const selected = run?.sources.find((source) => source.id === activeSource);
   const visibleSources = useMemo(
     () =>
@@ -573,12 +884,58 @@ export default function LiveRunWorkspace() {
       ) ?? [],
     [run?.sources, deferredSourceQuery],
   );
-  const activePhase =
-    run?.status === "awaiting_approval"
-      ? 0
-      : run
-        ? phases.indexOf(run.status)
-        : -1;
+  const layout = useEvidenceLayout(grid, panel, Boolean(run));
+  const sourceRows = useMemo<SourceRow[]>(() => {
+    const numbers = new Map(
+      Array.from(refs, ([number, source]) => [source.id, number]),
+    );
+    const published = (run?.claimChecks ?? []).filter(
+      (claim) => claim.publishedInReport !== false,
+    );
+    return visibleSources.map((source) => {
+      const extracts = published
+        .flatMap((claim) => claim.citations)
+        .filter((citation) => citation.sourceId === source.id && citation.quote)
+        .sort(
+          (a, b) => Number(b.exactSpanVerified) - Number(a.exactSpanVerified),
+        )
+        .map((citation) => ({
+          id: citation.id,
+          quote: citation.quote,
+          verified: citation.exactSpanVerified,
+        }));
+      return {
+        id: source.id,
+        title: source.title || domain(source.url),
+        url: safeUrl(source.url),
+        domain: domain(source.url),
+        citation: numbers.get(source.id) ?? null,
+        publisher: source.assessment?.publisher ?? null,
+        publishedAt: source.assessment?.publishedAt ?? null,
+        kind:
+          source.sourceClass === "unknown"
+            ? "Web source"
+            : source.sourceClass.charAt(0).toUpperCase() +
+              source.sourceClass.slice(1),
+        repeated: (source.assessment?.sameMaterialCount ?? 0) > 1,
+        extracts,
+      };
+    });
+  }, [visibleSources, refs, run?.claimChecks]);
+  const activePhase = run ? runPhaseIndex(run.status) : -1;
+  const planQuestionLimit = Math.min(8, run?.approval?.maxQuestions ?? 8);
+  const planVersionConflict =
+    planStale ||
+    (savedPlanVersion !== null && (run?.planVersion ?? 0) < savedPlanVersion) ||
+    (editingPlan &&
+      editBaseVersion !== null &&
+      (run?.planVersion !== editBaseVersion ||
+        (editBasePlanId !== null && run?.approval?.planId !== editBasePlanId)));
+  const planQuestionsValid = EditResearchPlanRequestSchema.safeParse({
+    planId: run?.approval?.planId ?? "00000000-0000-4000-8000-000000000000",
+    expectedPlanVersion: run?.planVersion ?? 0,
+    questions: draftQuestions,
+  }).success;
   function selectCitation(number: number, origin: HTMLButtonElement) {
     const source = refs.get(number);
     if (!source) {
@@ -600,6 +957,63 @@ export default function LiveRunWorkspace() {
         ?.focus({ preventScroll: true }),
     );
   }
+  const selectCitationRef = useRef(selectCitation);
+  useEffect(() => {
+    selectCitationRef.current = selectCitation;
+  });
+  // Memoised so polling and layout measurement never remount citation chips.
+  const reportBody = useMemo(
+    () => (
+      <ReactMarkdown
+        remarkPlugins={[
+          remarkGfm,
+          [remarkMath, { singleDollarTextMath: false }],
+          remarkCitations,
+          remarkAnswerSections,
+        ]}
+        rehypePlugins={[
+          [
+            rehypeKatex,
+            {
+              throwOnError: false,
+              strict: "ignore",
+              trust: false,
+              maxExpand: 200,
+              maxSize: 20,
+            },
+          ],
+        ]}
+        components={{
+          a: ({ href, children }) =>
+            href?.startsWith("#source-") ? (
+              <button
+                className="citation-chip"
+                data-ref={href.slice(8)}
+                aria-label={`Open source ${href.slice(8)}`}
+                onClick={(event) =>
+                  selectCitationRef.current(
+                    Number(href.slice(8)),
+                    event.currentTarget,
+                  )
+                }
+              >
+                {children}
+              </button>
+            ) : (
+              <a href={safeUrl(href ?? "")} target="_blank" rel="noreferrer">
+                {children}
+              </a>
+            ),
+          table: ({ children, node }) => (
+            <ReportTable node={node}>{children}</ReportTable>
+          ),
+        }}
+      >
+        {markdown}
+      </ReactMarkdown>
+    ),
+    [markdown],
+  );
   function closeSource() {
     restoreCitation.current = true;
     setActiveSource(null);
@@ -655,9 +1069,7 @@ export default function LiveRunWorkspace() {
   const limitedReport =
     run?.status === "completed" &&
     run.report &&
-    (reportDocument?.quality.status === "insufficient_evidence" ||
-      (run.claimChecks !== undefined &&
-        !run.claimChecks.some((claim) => claim.publishedInReport)));
+    hasNoVerifiedFindings(reportDocument, run.claimChecks);
   useEffect(() => {
     if (run)
       publishResearchHistory({
@@ -668,6 +1080,10 @@ export default function LiveRunWorkspace() {
   }, [run?.runId, run?.status, run?.sourceCount]);
   const working =
     run && !terminal.includes(run.status) && run.status !== "awaiting_approval";
+  const settledInsights = run?.insights
+    ? settleInsights(run.insights, run.status)
+    : null;
+
   return (
     <WorkspaceShell
       activeRunId={runId}
@@ -695,6 +1111,22 @@ export default function LiveRunWorkspace() {
           </button>
           {run?.report ? (
             <>
+              <SaveToLibrary
+                key={`save-${run.report.id}`}
+                reportId={run.report.id}
+              />
+              <ReportActions
+                key={`actions-${run.report.id}`}
+                reportId={run.report.id}
+              />
+              <Link
+                className="text-button toolbar-action"
+                href={`/research/compare?leftReportId=${encodeURIComponent(run.report.id)}`}
+                aria-label="Compare with another report"
+              >
+                <Icon name="columns" size={16} />
+                <span className="toolbar-label">Compare</span>
+              </Link>
               <button
                 className="icon-button"
                 onClick={() => void copyReport()}
@@ -710,11 +1142,12 @@ export default function LiveRunWorkspace() {
                 <Icon name="download" size={17} />
               </button>
               <button
-                className="text-button"
+                className="text-button toolbar-action"
                 onClick={() => window.print()}
                 aria-label="Print or save report as PDF"
               >
-                PDF
+                <Icon name="print" size={16} />
+                <span className="toolbar-label">PDF</span>
               </button>
             </>
           ) : null}
@@ -737,7 +1170,7 @@ export default function LiveRunWorkspace() {
                 {error
                   ? "Connection or action problem"
                   : limitedReport
-                    ? "Evidence record ready"
+                    ? "Research finished—answer not established"
                     : run.status === "completed" &&
                         reportDocument?.quality.status === "partial"
                       ? "Research finished — review coverage"
@@ -747,14 +1180,14 @@ export default function LiveRunWorkspace() {
                 {error
                   ? `${error} Last recorded state: ${runStage(run.status)}.`
                   : run.status === "failed"
-                    ? `${runFailure(run.errorCode)} ${run.sourceCount} collected sources remain available.`
+                    ? `${runFailure(run.errorCode)} ${sourceLabel(run.sourceCount).replace(" source", " collected source")} ${run.sourceCount === 1 ? "remains" : "remain"} available.`
                     : run.status === "cancelled"
                       ? "This run was stopped. Collected evidence is preserved."
                       : run.status === "awaiting_approval"
                         ? "Review the plan below to continue. Waiting here does not use the active-time budget."
                         : run.status === "completed"
                           ? limitedReport
-                            ? "No finding passed the complete evidence checks. This is a limited result, not a full answer. Inspect Checks and research gaps before relying on it."
+                            ? "No findings passed the evidence checks. Collected sources are available; review Checks and research gaps to choose a follow-up question."
                             : reportDocument?.quality.status === "partial"
                               ? "Evidence-checked findings are ready. Answer completeness has not been established; review requirements and limitations."
                               : "Your report and recorded evidence are ready."
@@ -784,7 +1217,7 @@ export default function LiveRunWorkspace() {
                 <small>New run; provider costs may apply.</small>
               </div>
             ) : (
-              <span>{run.sourceCount} sources</span>
+              <span>{sourceLabel(run.sourceCount)}</span>
             )}
             {working ? (
               <div className="run-busy-track" aria-hidden="true">
@@ -793,15 +1226,26 @@ export default function LiveRunWorkspace() {
             ) : null}
           </section>
           <div
+            ref={grid}
             className="report-grid"
             data-mobile-view={mobileView}
             data-evidence-visible={evidenceVisible}
+            data-evidence-wide={layout.wide || undefined}
+            style={
+              {
+                "--evidence-width": `${layout.width}px`,
+              } as CSSProperties
+            }
           >
-            <div ref={report} className="report-scroll">
+            <div
+              ref={report}
+              className="report-scroll"
+              data-answer-ready={run.report ? true : undefined}
+            >
               <header className="report-header">
                 <div className="report-meta">
                   <Status status={run.status} />
-                  <span>{run.sourceCount} sources</span>
+                  <span>{sourceLabel(run.sourceCount)}</span>
                   <span>{dateLabel(run.createdAt)}</span>
                   <RunClock
                     startedAt={run.createdAt}
@@ -810,6 +1254,8 @@ export default function LiveRunWorkspace() {
                         ? (run.updatedAt ?? run.report?.publishedAt)
                         : undefined
                     }
+                    pausedMs={run.approval?.waitedMs}
+                    pausedSince={run.approval?.waitStartedAt}
                   />
                 </div>
                 <h1>{run.originalQuestion}</h1>
@@ -849,11 +1295,14 @@ export default function LiveRunWorkspace() {
               {run.report && (
                 <section
                   className="desk-composer report-quality"
+                  data-quality={
+                    reportDocument?.quality.status ?? "not_assessed"
+                  }
                   aria-labelledby="answer-quality-title"
                 >
                   <h2 id="answer-quality-title">
-                    {reportDocument?.quality.status === "insufficient_evidence"
-                      ? "Insufficient evidence"
+                    {limitedReport
+                      ? "Answer not established"
                       : reportDocument?.quality.status === "answered"
                         ? "Answer assessed"
                         : reportDocument
@@ -861,9 +1310,23 @@ export default function LiveRunWorkspace() {
                           : "Coverage not assessed"}
                   </h2>
                   <p className="desk-help">
-                    {reportDocument?.quality.reason ??
-                      "This historical report has no structured coverage assessment. Its existing evidence checks remain available."}
+                    {limitedReport
+                      ? "The collected evidence does not yet support a verified answer to this question. Review the recorded checks before continuing the investigation."
+                      : (reportDocument?.quality.reason ??
+                        "This historical report has no structured coverage assessment. Its existing evidence checks remain available.")}
                   </p>
+                  {limitedReport && (
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setMobileView("evidence");
+                        setEvidenceVisible(true);
+                        changeTab("checks");
+                      }}
+                    >
+                      Review evidence checks
+                    </Button>
+                  )}
                   {reportDocument && (
                     <details>
                       <summary>Question and report requirements</summary>
@@ -895,7 +1358,9 @@ export default function LiveRunWorkspace() {
                       {run.sourceLimit !== undefined &&
                       run.sourceCount <= run.sourceLimit
                         ? ` / ${run.sourceLimit}`
-                        : " sources"}
+                        : run.sourceCount === 1
+                          ? " source"
+                          : " sources"}
                     </small>
                   </strong>
                 </div>
@@ -911,18 +1376,28 @@ export default function LiveRunWorkspace() {
                   </strong>
                 </div>
                 <div>
-                  <span>{run.report ? "Reading time" : "Current step"}</span>
+                  <span>
+                    {limitedReport
+                      ? "Verified findings"
+                      : run.report
+                        ? "Reading time"
+                        : "Current step"}
+                  </span>
                   <strong>
-                    {run.report
-                      ? `${readingMinutes(markdown)} min`
-                      : run.status === "awaiting_approval"
-                        ? "Review plan"
-                        : runStage(run.status)}
+                    {limitedReport
+                      ? "0"
+                      : run.report
+                        ? `${readingMinutes(markdown)} min`
+                        : run.status === "awaiting_approval"
+                          ? "Review plan"
+                          : runStage(run.status)}
                   </strong>
                 </div>
               </div>
               {approvalFeedback &&
-              ["planning", "queued"].includes(run.status) ? (
+              ["planning", "queued", "awaiting_approval"].includes(
+                run.status,
+              ) ? (
                 <p role="status">{approvalFeedback}</p>
               ) : null}
               {run.status === "awaiting_approval" &&
@@ -947,15 +1422,180 @@ export default function LiveRunWorkspace() {
                       </ul>
                     </details>
                   )}
-                  <ul>
-                    {run.approval.questions.map((question) => (
-                      <li key={question.id}>{question.question}</li>
-                    ))}
-                  </ul>
+                  {editingPlan ? (
+                    <div className="desk-plan-editor" aria-busy={planSaving}>
+                      <p className="desk-help">
+                        Edit the questions this run will investigate. Changes
+                        are saved to this plan before approval.
+                      </p>
+                      <ol>
+                        {draftQuestions.map((question, index) => (
+                          <li
+                            key={`${index}-${run.approval?.questions[index]?.id ?? "new"}`}
+                          >
+                            <label htmlFor={`plan-question-${index}`}>
+                              Question {index + 1}
+                            </label>
+                            <textarea
+                              id={`plan-question-${index}`}
+                              value={question}
+                              minLength={5}
+                              maxLength={1000}
+                              rows={3}
+                              disabled={planSaving || busy}
+                              onChange={(event) =>
+                                setDraftQuestions((current) =>
+                                  current.map((item, itemIndex) =>
+                                    itemIndex === index
+                                      ? event.target.value
+                                      : item,
+                                  ),
+                                )
+                              }
+                            />
+                            <Button
+                              type="button"
+                              variant="quiet"
+                              disabled={
+                                planSaving || busy || draftQuestions.length <= 1
+                              }
+                              aria-label={`Remove question ${index + 1}`}
+                              onClick={() =>
+                                setDraftQuestions((current) =>
+                                  current.filter(
+                                    (_, itemIndex) => itemIndex !== index,
+                                  ),
+                                )
+                              }
+                            >
+                              Remove
+                            </Button>
+                          </li>
+                        ))}
+                      </ol>
+                      <p className="desk-help" aria-live="polite">
+                        {draftQuestions.length} of {planQuestionLimit} questions
+                        · Each question must be 5–1,000 characters.
+                      </p>
+                      {planEditError ? (
+                        <div role="alert" className="desk-error">
+                          <p>{planEditError}</p>
+                          {planStale ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              disabled={planSaving || busy}
+                              onClick={() => setReload((value) => value + 1)}
+                            >
+                              Refresh latest plan
+                            </Button>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      <div className="desk-inline-actions">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={
+                            planSaving ||
+                            busy ||
+                            draftQuestions.length >= planQuestionLimit
+                          }
+                          onClick={() =>
+                            setDraftQuestions((current) => [...current, ""])
+                          }
+                        >
+                          Add question
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="quiet"
+                          disabled={planSaving || busy}
+                          onClick={() => {
+                            setDraftQuestions(
+                              run.approval?.questions.map(
+                                ({ question }) => question,
+                              ) ?? [],
+                            );
+                            setEditBaseVersion(run.planVersion);
+                            setEditBasePlanId(run.approval?.planId ?? null);
+                            setPlanEditError("");
+                            if (
+                              run.planVersion !== editBaseVersion ||
+                              run.approval?.planId !== editBasePlanId
+                            )
+                              setPlanStale(false);
+                            else if (planStale) setReload((value) => value + 1);
+                            setEditingPlan(false);
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          type="button"
+                          disabled={
+                            planSaving ||
+                            busy ||
+                            !planQuestionsValid ||
+                            planVersionConflict
+                          }
+                          onClick={() => void savePlanQuestions()}
+                        >
+                          {planSaving ? "Saving plan…" : "Save questions"}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <ol>
+                        {run.approval.questions.map((question) => (
+                          <li key={question.id}>{question.question}</li>
+                        ))}
+                      </ol>
+                      {planEditError ? (
+                        <div role="alert" className="desk-error">
+                          <p>{planEditError}</p>
+                          {planStale ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              disabled={busy}
+                              onClick={() => setReload((value) => value + 1)}
+                            >
+                              Refresh latest plan
+                            </Button>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      {run.approval.editable ? (
+                        <div className="desk-inline-actions">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={busy || planSaving || planStale}
+                            onClick={() => {
+                              setDraftQuestions(
+                                run.approval?.questions.map(
+                                  ({ question }) => question,
+                                ) ?? [],
+                              );
+                              setEditBaseVersion(run.planVersion);
+                              setEditBasePlanId(run.approval?.planId ?? null);
+                              setPlanEditError("");
+                              setPlanStale(false);
+                              setEditingPlan(true);
+                            }}
+                          >
+                            Edit questions
+                          </Button>
+                        </div>
+                      ) : null}
+                    </>
+                  )}
                   <div className="desk-inline-actions">
                     <Button
                       variant="outline"
-                      disabled={busy}
+                      disabled={busy || planSaving || planVersionConflict}
                       onClick={() => void decidePlan("reject")}
                     >
                       {approvalDecision === "reject"
@@ -963,7 +1603,7 @@ export default function LiveRunWorkspace() {
                         : "Reject plan"}
                     </Button>
                     <Button
-                      disabled={busy}
+                      disabled={busy || planSaving || planVersionConflict}
                       onClick={() => void decidePlan("approve")}
                     >
                       {approvalDecision === "approve"
@@ -978,39 +1618,42 @@ export default function LiveRunWorkspace() {
                 aria-label="Research progress"
                 role="status"
                 aria-live="polite"
+                data-stopped={stopped || undefined}
               >
-                {phases.map((phase, index) => (
-                  <span
-                    key={phase}
-                    className={
-                      run.status === "completed" ||
-                      (activePhase >= 0 && index < activePhase)
-                        ? "phase-done"
-                        : index === activePhase
-                          ? "phase-current"
-                          : ""
-                    }
-                  >
-                    <i>
-                      {run.status === "completed" ||
-                      (activePhase >= 0 && index < activePhase) ? (
-                        <Icon name="check" size={12} />
-                      ) : (
-                        index + 1
-                      )}
-                    </i>
-                    {labels[index]}
-                  </span>
-                ))}
+                {runPhases.map((phase, index) => {
+                  const done =
+                    run.status === "completed" ||
+                    (activePhase >= 0 && index < activePhase);
+                  const current = !done && index === activePhase;
+                  const last = index === runPhases.length - 1;
+                  return (
+                    <span
+                      key={phase}
+                      className={
+                        done ? "phase-done" : current ? "phase-current" : ""
+                      }
+                      aria-current={current ? "step" : undefined}
+                    >
+                      <i>
+                        {done ? <Icon name="check" size={12} /> : index + 1}
+                      </i>
+                      {last && stopped
+                        ? run.status === "cancelled"
+                          ? "Stopped"
+                          : "Failed"
+                        : labels[index]}
+                    </span>
+                  );
+                })}
               </div>
-              {run.insights && (
+              {settledInsights && (
                 <details className="report-orchestration">
                   <summary>
-                    Inspect live orchestration · {run.insights.tasks.length}{" "}
-                    recorded tasks
+                    <OrchestrationSummary insights={settledInsights} />
                   </summary>
+                  <h2 className="sr-only">Live orchestration</h2>
                   <ExecutionView
-                    insights={run.insights}
+                    insights={settledInsights}
                     inspectSource={(id) => {
                       setEvidenceVisible(true);
                       setMobileView("evidence");
@@ -1055,8 +1698,8 @@ export default function LiveRunWorkspace() {
                 </div>
               )}
               {run.report ? (
-                <article className="report-article">
-                  {sections.length > 1 && (
+                <article className="report-article" id="report-article">
+                  {!limitedReport && sections.length > 1 && (
                     <nav
                       className="report-outline"
                       aria-label="Report sections"
@@ -1092,52 +1735,56 @@ export default function LiveRunWorkspace() {
                       </div>
                     </nav>
                   )}
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm, remarkCitations]}
-                    components={{
-                      a: ({ href, children }) =>
-                        href?.startsWith("#source-") ? (
-                          <button
-                            className="citation-chip"
-                            aria-label={`Open source ${href.slice(8)}`}
-                            onClick={(event) =>
-                              selectCitation(
-                                Number(href.slice(8)),
-                                event.currentTarget,
-                              )
-                            }
-                          >
-                            {children}
-                          </button>
-                        ) : (
-                          <a
-                            href={safeUrl(href ?? "")}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            {children}
-                          </a>
-                        ),
-                      table: ({ children }) => (
-                        <div
-                          className="report-table-wrap"
-                          tabIndex={0}
-                          role="region"
-                          aria-label="Research comparison table"
-                        >
-                          <table>{children}</table>
-                        </div>
-                      ),
-                    }}
-                  >
-                    {markdown}
-                  </ReactMarkdown>
+                  {limitedReport ? (
+                    <details>
+                      <summary>Collected sources ({run.sourceCount})</summary>
+                      <ReferenceList
+                        references={references}
+                        onOpen={selectCitation}
+                      />
+                    </details>
+                  ) : (
+                    <>
+                      {reportBody}
+                      <ReferenceList
+                        references={references}
+                        onOpen={selectCitation}
+                      />
+                    </>
+                  )}
                   <div className="report-end">
                     <span className="end-mark">
-                      <Icon name="check" size={15} />
+                      <Icon
+                        name={limitedReport ? "layers" : "check"}
+                        size={15}
+                      />
                     </span>
-                    <span>End of research brief</span>
-                    <span>{run.sourceCount} sources collected</span>
+                    <span>
+                      {limitedReport
+                        ? "Evidence record preserved"
+                        : "End of research brief"}
+                    </span>
+                    <span className="report-end-actions">
+                      <button
+                        type="button"
+                        className="answer-icon"
+                        onClick={() => void copyReport()}
+                        aria-label="Copy answer"
+                        title="Copy answer"
+                      >
+                        <Icon name="copy" size={15} />
+                      </button>
+                      <button
+                        type="button"
+                        className="answer-icon"
+                        onClick={downloadReport}
+                        aria-label="Download answer as Markdown"
+                        title="Download Markdown"
+                      >
+                        <Icon name="download" size={15} />
+                      </button>
+                    </span>
+                    <span>{sourceLabel(run.sourceCount)} collected</span>
                   </div>
                 </article>
               ) : !stopped && run.status !== "awaiting_approval" ? (
@@ -1186,15 +1833,30 @@ export default function LiveRunWorkspace() {
                   )}
                 </div>
               ) : null}
-              {run.report && run.insights && (
-                <GapView
-                  gaps={run.insights.gaps}
-                  busy={busy}
-                  investigate={(question, gapId) =>
-                    void investigate(question, gapId)
-                  }
-                />
-              )}
+              {run.report &&
+                run.insights &&
+                (limitedReport ? (
+                  <details>
+                    <summary>
+                      Review {run.insights.gaps.length} research gaps
+                    </summary>
+                    <GapView
+                      gaps={run.insights.gaps}
+                      busy={busy}
+                      investigate={(question, gapId) =>
+                        void investigate(question, gapId)
+                      }
+                    />
+                  </details>
+                ) : (
+                  <GapView
+                    gaps={run.insights.gaps}
+                    busy={busy}
+                    investigate={(question, gapId) =>
+                      void investigate(question, gapId)
+                    }
+                  />
+                ))}
               {run.status === "completed" && (
                 <form
                   className="report-followup"
@@ -1203,6 +1865,34 @@ export default function LiveRunWorkspace() {
                     void investigate(followupQuestion);
                   }}
                 >
+                  <FollowupSuggestions
+                    suggestions={followupSuggestions({
+                      gaps: limitedReport ? undefined : run.insights?.gaps,
+                      questionCoverage:
+                        reportDocument?.questionCoverage ??
+                        (limitedReport
+                          ? run.subQuestions.map((item) => ({
+                              text: item.question,
+                              status: "unresolved",
+                            }))
+                          : undefined),
+                    })}
+                    disabled={busy}
+                    choose={(question) => {
+                      setFollowupQuestion(question.slice(0, 1000));
+                      const field =
+                        document.getElementById("followup-question");
+                      field?.focus({ preventScroll: true });
+                      field?.scrollIntoView({
+                        block: "nearest",
+                        behavior: window.matchMedia(
+                          "(prefers-reduced-motion: reduce)",
+                        ).matches
+                          ? "instant"
+                          : "smooth",
+                      });
+                    }}
+                  />
                   <label htmlFor="followup-question">
                     Continue this research
                   </label>
@@ -1257,12 +1947,25 @@ export default function LiveRunWorkspace() {
                 </section>
               )}
             </div>
+            {evidenceVisible && (
+              <EvidenceResizer
+                grid={grid}
+                panelWidth={layout.panelWidth}
+                gridWidth={layout.gridWidth}
+                onCommit={layout.commit}
+              />
+            )}
             <aside
               id="research-evidence"
               className="evidence-panel"
               ref={panel}
               aria-label="Research evidence"
             >
+              <EvidencePresets
+                active={layout.preset}
+                onPreset={layout.applyPreset}
+                onCollapse={() => setEvidenceVisible(false)}
+              />
               <Tabs
                 value={tab}
                 onValueChange={changeTab}
@@ -1334,6 +2037,10 @@ export default function LiveRunWorkspace() {
                           This source was collected during the research. Open
                           the original to inspect its contents.
                         </div>
+                        <SaveToLibrary
+                          key={selected.id}
+                          sourceId={selected.id}
+                        />
                         {run.claimChecks?.flatMap((claim) =>
                           claim.citations
                             .filter(
@@ -1399,68 +2106,79 @@ export default function LiveRunWorkspace() {
                             No sources match. Try a title or publisher.
                           </p>
                         )}
-                        <ul className="evidence-list">
-                          {visibleSources.map((source) => {
-                            const citation = Array.from(refs).find(
-                              ([, item]) => item.id === source.id,
-                            )?.[0];
-                            return (
-                              <li
-                                key={source.id}
-                                className={
-                                  activeSource === source.id
-                                    ? "source-selected"
-                                    : ""
-                                }
-                              >
-                                <button
-                                  onClick={() => setActiveSource(source.id)}
-                                  aria-label={`Inspect ${source.title || domain(source.url)}`}
-                                  aria-pressed={activeSource === source.id}
+                        {layout.wide ? (
+                          <SourcesTable
+                            rows={sourceRows}
+                            activeSource={activeSource}
+                            onSelect={setActiveSource}
+                          />
+                        ) : (
+                          <ul className="evidence-list">
+                            {visibleSources.map((source) => {
+                              const citation = Array.from(refs).find(
+                                ([, item]) => item.id === source.id,
+                              )?.[0];
+                              return (
+                                <li
+                                  key={source.id}
+                                  className={
+                                    activeSource === source.id
+                                      ? "source-selected"
+                                      : ""
+                                  }
                                 >
-                                  <span className="source-domain">
-                                    <span className="source-monogram">
-                                      {domain(source.url)[0]?.toUpperCase()}
-                                    </span>
-                                    {domain(source.url)}
-                                    {citation && (
-                                      <span className="source-citation-number">
-                                        [{citation}]
+                                  <button
+                                    onClick={() => setActiveSource(source.id)}
+                                    aria-label={`Inspect ${source.title || domain(source.url)}`}
+                                    aria-pressed={activeSource === source.id}
+                                  >
+                                    <span className="source-domain">
+                                      <span className="source-monogram">
+                                        {domain(source.url)[0]?.toUpperCase()}
                                       </span>
-                                    )}
-                                  </span>
-                                  <strong>{source.title || source.url}</strong>
-                                  <span className="source-kind">
-                                    {source.sourceClass === "unknown"
-                                      ? "Web source"
-                                      : source.sourceClass}
-                                    <span>
-                                      {citation
-                                        ? "Cited in brief"
-                                        : "Collected"}
+                                      {domain(source.url)}
+                                      {citation && (
+                                        <span className="source-citation-number">
+                                          [{citation}]
+                                        </span>
+                                      )}
                                     </span>
-                                  </span>
-                                  {source.assessment &&
-                                    source.assessment.sameMaterialCount > 1 && (
-                                      <small className="source-correlation">
-                                        Repeated material · not independent
-                                        corroboration
-                                      </small>
-                                    )}
-                                </button>
-                                <a
-                                  className="source-external"
-                                  href={safeUrl(source.url)}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  aria-label={`Open ${source.title || domain(source.url)} in a new tab`}
-                                >
-                                  <Icon name="external" size={14} />
-                                </a>
-                              </li>
-                            );
-                          })}
-                        </ul>
+                                    <strong>
+                                      {source.title || source.url}
+                                    </strong>
+                                    <span className="source-kind">
+                                      {source.sourceClass === "unknown"
+                                        ? "Web source"
+                                        : source.sourceClass}
+                                      <span>
+                                        {citation
+                                          ? "Cited in brief"
+                                          : "Collected"}
+                                      </span>
+                                    </span>
+                                    {source.assessment &&
+                                      source.assessment.sameMaterialCount >
+                                        1 && (
+                                        <small className="source-correlation">
+                                          Repeated material · not independent
+                                          corroboration
+                                        </small>
+                                      )}
+                                  </button>
+                                  <a
+                                    className="source-external"
+                                    href={safeUrl(source.url)}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    aria-label={`Open ${source.title || domain(source.url)} in a new tab`}
+                                  >
+                                    <Icon name="external" size={14} />
+                                  </a>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        )}
                       </>
                     ) : (
                       <div className="panel-empty">
@@ -1608,35 +2326,25 @@ export default function LiveRunWorkspace() {
                       <h2>How the research unfolded.</h2>
                       <p>The plan and activity recorded for this question.</p>
                     </div>
-                    <div className="method-budget">
-                      <span>Provider calls (search + extraction)</span>
-                      <strong>
-                        {run.usage.searchCalls} / {run.budget.maxSearchCalls}
-                      </strong>
-                    </div>
-                    {run.insights && (
+                    <MethodSummary
+                      sources={run.sources}
+                      subQuestions={run.subQuestions}
+                      calls={run.usage.searchCalls}
+                      callLimit={run.budget.maxSearchCalls}
+                      statusLabel={(status) => <Status status={status} />}
+                      inspect={(id) => {
+                        setActiveSource(id);
+                        changeTab("sources");
+                      }}
+                    />
+                    {settledInsights && (
                       <ExecutionView
-                        insights={run.insights}
+                        insights={settledInsights}
                         inspectSource={(id) => {
                           setActiveSource(id);
                           changeTab("sources");
                         }}
                       />
-                    )}
-                    <h3 className="panel-section-title">Questions explored</h3>
-                    {run.subQuestions.length ? (
-                      <ol className="question-plan">
-                        {run.subQuestions.map((item) => (
-                          <li key={item.id}>
-                            <p>{item.question}</p>
-                            <Status status={item.status} />
-                          </li>
-                        ))}
-                      </ol>
-                    ) : (
-                      <p className="panel-empty">
-                        No research plan has been recorded yet.
-                      </p>
                     )}
                     <h3 className="panel-section-title">Research activity</h3>
                     <ol className="activity-list">
@@ -1660,6 +2368,7 @@ export default function LiveRunWorkspace() {
               </Tabs>
             </aside>
           </div>
+          <CitationPreview root={report} resolve={citationPreview} />
         </>
       ) : (
         <div className="run-opening">

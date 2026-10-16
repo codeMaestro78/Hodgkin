@@ -1,0 +1,883 @@
+/* Live orchestration: persisted task states as a calm, legible flow. Ink for state, copper stays with citations. */
+html .execution-view,
+html .report-orchestration {
+  --orch-ink: #252522;
+  --orch-paper: #fffcfa;
+  --orch-sand: #f7f2ed;
+  --orch-line: #ece3d9;
+  --orch-line-strong: #ddd1c4;
+  --orch-muted: #756f67;
+  --orch-done: #347865;
+  --orch-done-soft: #e8f1ed;
+  --orch-fail: #a3361f;
+  --orch-fail-soft: #fbece6;
+  --orch-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --orch-raised:
+    0 0 0 1px rgb(37 37 34 / 7%), 0 1px 2px -1px rgb(37 37 34 / 8%),
+    0 2px 4px rgb(37 37 34 / 4%);
+}
+
+/* Collapsible shell */
+html .report-orchestration {
+  margin-block: 22px;
+  border: 0;
+  border-radius: 18px;
+  background: var(--orch-paper);
+  box-shadow: var(--orch-raised);
+  overflow: hidden;
+}
+html .report-orchestration > summary {
+  list-style: none;
+  padding: 14px 18px;
+  color: var(--orch-ink);
+  transition: background-color 200ms var(--orch-out);
+}
+html .report-orchestration > summary::-webkit-details-marker {
+  display: none;
+}
+html .report-orchestration > summary:hover {
+  background: rgb(247 242 237 / 60%);
+}
+html .report-orchestration > summary:focus-visible {
+  outline: 2px solid var(--orch-ink);
+  outline-offset: -2px;
+  border-radius: 18px;
+}
+html .report-orchestration[open] > summary {
+  border-bottom: 1px solid var(--orch-line);
+}
+.orch-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 14px;
+}
+.orch-summary-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.orch-summary-pulse {
+  position: relative;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--orch-done);
+}
+.orch-summary-pulse[data-live="true"] {
+  background: var(--orch-ink);
+}
+.orch-summary-pulse[data-live="true"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: inherit;
+  animation: orch-ping 1.8s var(--orch-out) infinite;
+}
+.orch-summary-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--orch-muted);
+  font-variant-numeric: tabular-nums;
+}
+.orch-summary-rail {
+  position: relative;
+  width: 64px;
+  height: 4px;
+  border-radius: 4px;
+  background: var(--orch-line);
+  overflow: hidden;
+}
+.orch-summary-rail::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--orch-done);
+  transform-origin: left;
+  transform: scaleX(var(--orch-progress, 0));
+  transition: transform 600ms var(--orch-out);
+}
+.orch-summary-chevron {
+  fill: none;
+  stroke: var(--orch-muted);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 260ms var(--orch-out);
+}
+html .report-orchestration[open] .orch-summary-chevron {
+  transform: rotate(180deg);
+}
+@media (max-width: 560px) {
+  .orch-summary {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .orch-summary-meta {
+    grid-row: 2;
+    grid-column: 1 / -1;
+  }
+}
+
+/* Body */
+html .execution-view {
+  container-type: inline-size;
+  padding: 18px;
+  border-block: 0;
+}
+html .report-orchestration[open] .execution-view {
+  animation: orch-rise 360ms var(--orch-out) both;
+}
+html .execution-view > .desk-help {
+  max-width: 68ch;
+  margin-block: 12px 4px;
+}
+.orch-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* Segmented switch with a sliding thumb */
+html .execution-view-switch {
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  margin: 0;
+  padding: 3px;
+  border-radius: 100px;
+  background: var(--orch-sand);
+  box-shadow: inset 0 0 0 1px var(--orch-line);
+}
+html .execution-view-switch::before {
+  content: "";
+  position: absolute;
+  inset: 3px auto 3px 3px;
+  width: calc(50% - 3px);
+  border-radius: 100px;
+  background: #fff;
+  box-shadow: var(--orch-raised);
+  transition: transform 320ms var(--orch-out);
+}
+html .execution-view-switch[data-view="list"]::before {
+  transform: translateX(100%);
+}
+html .execution-view-switch button {
+  position: relative;
+  min-width: 84px;
+  padding: 6px 14px;
+  border: 0;
+  border-radius: 100px;
+  background: transparent;
+  color: var(--orch-muted);
+  font-size: 13px;
+  font-weight: 500;
+  transition: color 200ms var(--orch-out);
+}
+html .execution-view-switch button[aria-pressed="true"] {
+  color: var(--orch-ink);
+  border-color: transparent;
+}
+html .execution-view-switch button:focus-visible {
+  outline: 2px solid var(--orch-ink);
+  outline-offset: 1px;
+}
+
+/* Status counts */
+.orch-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+}
+.orch-stats > div {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 8px;
+  border-radius: 100px;
+  background: #fff;
+  box-shadow: inset 0 0 0 1px var(--orch-line);
+  font-size: 12px;
+  transition: opacity 200ms var(--orch-out);
+}
+.orch-stats > div[data-empty="true"] {
+  opacity: 0.55;
+}
+.orch-stats > div::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--orch-line-strong);
+}
+.orch-stats > [data-status="completed"]::before {
+  background: var(--orch-done);
+}
+.orch-stats > [data-status="running"]::before {
+  background: var(--orch-ink);
+}
+.orch-stats > [data-status="failed"]::before {
+  background: var(--orch-fail);
+}
+.orch-stats > [data-status="sources"]::before {
+  border-radius: 2px;
+  background: #a96142;
+}
+.orch-stats dt {
+  color: var(--orch-muted);
+}
+.orch-stats dd {
+  margin: 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--orch-ink);
+}
+
+/* Status glyph */
+.orch-glyph {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--orch-sand);
+}
+.orch-glyph svg {
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke: var(--orch-muted);
+}
+.orch-glyph-track {
+  stroke: var(--orch-line-strong);
+  stroke-dasharray: 2.4 2.4;
+}
+.orch-glyph[data-status="completed"] {
+  background: var(--orch-done-soft);
+}
+.orch-glyph[data-status="completed"] svg {
+  stroke: var(--orch-done);
+}
+.orch-glyph[data-status="completed"] .orch-glyph-track,
+.orch-glyph[data-status="failed"] .orch-glyph-track,
+.orch-glyph[data-status="running"] .orch-glyph-track {
+  stroke-dasharray: none;
+}
+.orch-glyph[data-status="completed"] .orch-glyph-track {
+  stroke: var(--orch-done);
+}
+.orch-glyph[data-status="failed"],
+.orch-glyph[data-status="cancelled"] {
+  background: var(--orch-fail-soft);
+}
+.orch-glyph[data-status="failed"] svg,
+.orch-glyph[data-status="cancelled"] svg {
+  stroke: var(--orch-fail);
+}
+.orch-glyph[data-status="running"] {
+  background: #fff;
+}
+.orch-glyph[data-status="running"] .orch-glyph-track {
+  stroke: var(--orch-line);
+}
+.orch-glyph-arc {
+  stroke: var(--orch-ink);
+  stroke-dasharray: 12 40.8;
+  transform-origin: 8px 8px;
+  animation: orch-spin 1.1s linear infinite;
+}
+
+/* Graph */
+html .execution-graph {
+  display: block;
+  margin-block: 16px 0;
+  padding: 16px;
+  border-radius: 14px;
+  background-color: var(--orch-sand);
+  background-image: radial-gradient(rgb(37 37 34 / 9%) 1px, transparent 1.2px);
+  background-size: 14px 14px;
+  box-shadow: inset 0 0 0 1px var(--orch-line);
+}
+html .report-orchestration .execution-graph {
+  grid-template-columns: none;
+}
+.orch-lanes {
+  display: grid;
+  gap: 22px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+html .execution-stage,
+html .report-orchestration .execution-stage {
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding: 12px;
+  border: 0;
+  border-radius: 12px;
+  background: rgb(255 252 250 / 82%);
+  box-shadow: inset 0 0 0 1px var(--orch-line);
+  animation: orch-rise 420ms var(--orch-out) both;
+  animation-delay: calc(var(--n, 0) * 70ms);
+  transition: box-shadow 260ms var(--orch-out);
+}
+html .execution-stage + .execution-stage::before,
+html .report-orchestration .execution-stage + .execution-stage::before {
+  content: none;
+}
+html .execution-stage[data-state="active"] {
+  box-shadow:
+    inset 0 0 0 1px var(--orch-line-strong),
+    0 10px 24px -18px rgb(84 62 38 / 45%);
+}
+html .execution-stage[data-state="idle"] {
+  background: rgb(255 252 250 / 50%);
+  box-shadow: inset 0 0 0 1px var(--orch-line);
+}
+.execution-stage > header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+html .execution-stage h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--orch-ink);
+}
+.orch-step {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--orch-line);
+  color: var(--orch-muted);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  transition:
+    background-color 260ms var(--orch-out),
+    color 260ms var(--orch-out);
+}
+[data-state="active"] .orch-step {
+  background: var(--orch-ink);
+  color: var(--orch-paper);
+}
+[data-state="done"] .orch-step {
+  background: var(--orch-done);
+  color: #fff;
+}
+[data-state="failed"] .orch-step {
+  background: var(--orch-fail);
+  color: #fff;
+}
+.orch-stage-count {
+  font-size: 11px;
+  color: var(--orch-muted);
+  font-variant-numeric: tabular-nums;
+}
+html .execution-stage > .orch-stage-nodes {
+  display: grid;
+  gap: 8px;
+}
+.orch-waiting {
+  margin: 0;
+  padding: 14px 12px;
+  border: 1px dashed var(--orch-line-strong);
+  border-radius: 10px;
+  color: var(--orch-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+/* Connectors: vertical when stacked, horizontal once lanes sit side by side. */
+.orch-connector {
+  position: absolute;
+  left: 22px;
+  top: 100%;
+  width: 2px;
+  height: 22px;
+  background-image: linear-gradient(
+    to bottom,
+    var(--orch-line-strong) 50%,
+    transparent 50%
+  );
+  background-size: 2px 6px;
+}
+.orch-connector[data-flow="done"] {
+  background: var(--orch-done);
+}
+.orch-connector[data-flow="active"] {
+  background-image: linear-gradient(
+    to bottom,
+    var(--orch-ink) 50%,
+    transparent 50%
+  );
+  animation: orch-flow-y 700ms linear infinite;
+}
+.orch-connector::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -1px;
+  width: 6px;
+  height: 6px;
+  border-right: 2px solid var(--orch-line-strong);
+  border-bottom: 2px solid var(--orch-line-strong);
+  transform: translateX(-50%) rotate(45deg);
+}
+.orch-connector[data-flow="done"]::after {
+  border-color: var(--orch-done);
+}
+.orch-connector[data-flow="active"]::after {
+  border-color: var(--orch-ink);
+}
+
+/* Loop-back for coverage repair */
+.orch-loop {
+  display: none;
+  position: relative;
+  margin-top: 6px;
+}
+.orch-loop svg {
+  display: block;
+  width: 100%;
+  height: 28px;
+  overflow: visible;
+  fill: none;
+  stroke: var(--orch-line-strong);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 4;
+  vector-effect: non-scaling-stroke;
+}
+.orch-loop svg path {
+  vector-effect: non-scaling-stroke;
+}
+.orch-loop .orch-loop-head {
+  stroke-dasharray: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.orch-loop span {
+  position: absolute;
+  left: 50%;
+  bottom: -4px;
+  transform: translateX(-50%);
+  padding: 0 10px;
+  background: var(--orch-sand);
+  color: var(--orch-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.orch-loop[data-taken="true"] svg {
+  stroke: var(--orch-ink);
+  animation: orch-loop-flow 1.2s linear infinite;
+}
+.orch-loop[data-taken="true"] .orch-loop-head {
+  animation: none;
+}
+.orch-loop[data-taken="true"] span {
+  color: var(--orch-ink);
+  font-weight: 600;
+}
+
+@container (min-width: 620px) {
+  .orch-lanes {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 28px;
+  }
+  .orch-connector {
+    left: 100%;
+    top: 22px;
+    width: 28px;
+    height: 2px;
+    background-image: linear-gradient(
+      to right,
+      var(--orch-line-strong) 50%,
+      transparent 50%
+    );
+    background-size: 6px 2px;
+  }
+  .orch-connector[data-flow="active"] {
+    background-image: linear-gradient(
+      to right,
+      var(--orch-ink) 50%,
+      transparent 50%
+    );
+    animation-name: orch-flow-x;
+  }
+  .orch-connector::after {
+    left: auto;
+    right: 0;
+    top: 50%;
+    bottom: auto;
+    transform: translateY(-50%) rotate(-45deg);
+  }
+  .orch-loop {
+    display: block;
+    margin-inline: 22px;
+  }
+}
+
+/* Task nodes */
+html .execution-node {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  column-gap: 10px;
+  row-gap: 4px;
+  width: 100%;
+  padding: 11px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: var(--orch-raised);
+  color: var(--orch-ink);
+  text-align: left;
+  overflow-wrap: anywhere;
+  animation: orch-rise 380ms var(--orch-out) both;
+  animation-delay: calc(80ms + var(--n, 0) * 50ms);
+  transition:
+    transform 200ms var(--orch-out),
+    box-shadow 220ms var(--orch-out),
+    opacity 200ms var(--orch-out);
+}
+html .execution-node > .orch-glyph {
+  grid-row: span 2;
+  margin-top: -1px;
+}
+.execution-node-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+html .execution-node small {
+  display: block;
+  line-height: 1.45;
+  font-size: 11.5px;
+  color: var(--orch-muted);
+  font-variant-numeric: tabular-nums;
+}
+@media (hover: hover) {
+  html .execution-node:hover {
+    transform: translateY(-1px);
+    box-shadow:
+      var(--orch-raised),
+      0 10px 20px -14px rgb(84 62 38 / 40%);
+  }
+}
+html .execution-node:active {
+  transform: scale(0.985);
+}
+html .execution-node:focus-visible {
+  outline: 2px solid var(--orch-ink);
+  outline-offset: 2px;
+}
+html .execution-node[data-status],
+html .execution-node[data-status="completed"],
+html .execution-node[data-status="failed"],
+html .execution-node[data-status="running"] {
+  border: 0;
+}
+html .execution-node[data-status="running"] {
+  box-shadow:
+    0 0 0 1px rgb(37 37 34 / 22%),
+    0 8px 18px -14px rgb(37 37 34 / 40%);
+}
+html .execution-node[data-status="failed"] {
+  box-shadow: 0 0 0 1px rgb(163 54 31 / 30%);
+  background: #fffaf8;
+}
+html .execution-node[data-status="queued"],
+html .execution-node[data-status="skipped"] {
+  opacity: 0.72;
+}
+html .execution-node[aria-pressed="true"] {
+  background: #fff;
+  box-shadow:
+    0 0 0 2px var(--orch-ink),
+    0 12px 22px -16px rgb(37 37 34 / 50%);
+}
+
+/* Task list as a timeline */
+html .execution-list {
+  position: relative;
+  display: grid;
+  gap: 10px;
+  margin: 16px 0 0;
+  padding: 0 0 0 30px;
+  list-style: none;
+}
+html .execution-list::before {
+  content: "";
+  position: absolute;
+  left: 9px;
+  top: 14px;
+  bottom: 14px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--orch-line);
+}
+html .execution-list > li {
+  position: relative;
+}
+html .execution-list > li::before {
+  content: "";
+  position: absolute;
+  left: -25px;
+  top: 17px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--orch-paper);
+  box-shadow: 0 0 0 2px var(--orch-line-strong);
+}
+html .execution-list > li[data-status="completed"]::before {
+  background: var(--orch-done);
+  box-shadow: 0 0 0 2px var(--orch-done-soft);
+}
+html .execution-list > li[data-status="running"]::before {
+  background: var(--orch-ink);
+  box-shadow: 0 0 0 3px rgb(37 37 34 / 12%);
+}
+html .execution-list > li[data-status="failed"]::before {
+  background: var(--orch-fail);
+  box-shadow: 0 0 0 2px var(--orch-fail-soft);
+}
+
+/* Selected task detail */
+html .execution-detail {
+  margin-top: 16px;
+  padding: 16px;
+  border: 0;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: var(--orch-raised);
+  font-size: 13px;
+  animation: orch-rise 320ms var(--orch-out) both;
+}
+html .execution-detail > header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--orch-line);
+}
+html .execution-detail > header h3 {
+  margin: 0;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+html .execution-detail > header p {
+  margin: 2px 0 0;
+  color: var(--orch-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.orch-detail-close {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--orch-muted);
+  transition:
+    background-color 180ms var(--orch-out),
+    transform 160ms var(--orch-out);
+}
+.orch-detail-close svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+.orch-detail-close:hover {
+  background: var(--orch-sand);
+  color: var(--orch-ink);
+}
+.orch-detail-close:active {
+  transform: scale(0.94);
+}
+.orch-detail-close:focus-visible {
+  outline: 2px solid var(--orch-ink);
+  outline-offset: 1px;
+}
+.orch-timeline {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 14px 0;
+  padding: 0;
+  list-style: none;
+}
+.orch-timeline li {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--orch-sand);
+}
+.orch-timeline li[data-done="false"] {
+  background: transparent;
+  outline: 1px dashed var(--orch-line-strong);
+  outline-offset: -1px;
+}
+.orch-timeline span {
+  font-size: 11px;
+  color: var(--orch-muted);
+}
+.orch-timeline time {
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+html .execution-detail dl {
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 10px;
+  margin: 0;
+}
+.orch-deps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.orch-deps > * {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 0;
+  border-radius: 100px;
+  background: var(--orch-sand);
+  color: var(--orch-ink);
+  font-size: 12px;
+}
+.orch-deps > button::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--orch-line-strong);
+}
+.orch-deps > button[data-status="completed"]::before {
+  background: var(--orch-done);
+}
+.orch-deps > button[data-status="running"]::before {
+  background: var(--orch-ink);
+}
+.orch-deps > button[data-status="failed"]::before {
+  background: var(--orch-fail);
+}
+.orch-deps > button {
+  transition:
+    background-color 180ms var(--orch-out),
+    transform 160ms var(--orch-out);
+}
+.orch-deps > button:hover {
+  background: var(--orch-line);
+}
+.orch-deps > button:active {
+  transform: scale(0.97);
+}
+.orch-error {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--orch-fail-soft);
+  color: var(--orch-fail);
+}
+.orch-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 12px;
+}
+.orch-calls {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--orch-line);
+}
+.orch-calls > summary {
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--orch-ink);
+}
+.orch-calls ul {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.orch-calls li {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--orch-sand);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+@keyframes orch-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@keyframes orch-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes orch-ping {
+  to {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+@keyframes orch-flow-x {
+  to {
+    background-position: 6px 0;
+  }
+}
+@keyframes orch-loop-flow {
+  to {
+    stroke-dashoffset: -8;
+  }
+}
+@keyframes orch-flow-y {
+  to {
+    background-position: 0 6px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html .execution-view *,
+  html .execution-view,
+  html .report-orchestration * {
+    animation: none !important;
+    transition-duration: 0s !important;
+  }
+}

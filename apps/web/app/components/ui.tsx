@@ -18,7 +18,17 @@ export function Icon({
     | "check"
     | "copy"
     | "download"
-    | "eye";
+    | "eye"
+    | "file"
+    | "folder"
+    | "columns"
+    | "clock"
+    | "sliders"
+    | "print"
+    | "logout"
+    | "link"
+    | "spark"
+    | "quote";
   size?: number;
 }) {
   const paths = {
@@ -35,6 +45,17 @@ export function Icon({
     copy: "M9 9h12v12H9V9ZM15 9V3H3v12h6",
     download: "M12 3v12m-5-5 5 5 5-5M4 17v4h16v-4",
     eye: "M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Zm13 0a3 3 0 1 1-6 0 3 3 0 0 1 6 0",
+    file: "M6 3h8l4 4v14H6V3Zm8 0v4h4M9 12h6M9 16h6",
+    folder: "M3 6h6l2 2h10v11H3V6Z",
+    columns: "M4 4h16v16H4V4Zm8 0v16",
+    clock: "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM12 7v5l3 2",
+    sliders: "M4 7h10m4 0h2M4 17h4m4 0h8M14 5v4M8 15v4",
+    print: "M7 9V3h10v6M7 17H4V9h16v8h-3M7 14h10v7H7v-7Z",
+    logout: "M15 4h5v16h-5M10 8l-4 4 4 4M6 12h10",
+    spark:
+      "M12 3v4m0 10v4M3 12h4m10 0h4M6.3 6.3l2.4 2.4m6.6 6.6 2.4 2.4m0-11.4-2.4 2.4m-6.6 6.6-2.4 2.4",
+    quote: "M5 17c2.5 0 4-1.8 4-4.4V7H4v6h3M15 17c2.5 0 4-1.8 4-4.4V7h-5v6h3",
+    link: "M10 14a4.2 4.2 0 0 0 6 0l3-3a4.2 4.2 0 0 0-6-6l-1 1M14 10a4.2 4.2 0 0 0-6 0l-3 3a4.2 4.2 0 0 0 6 6l1-1",
   };
   return (
     <svg
@@ -53,6 +74,26 @@ export function Icon({
   );
 }
 
+/**
+ * The cited H: two stems (a source and the claim it supports), the crossbar
+ * that links them, and a copper footnote mark over the claim.
+ */
+export function BrandMark({ size = 24 }: { size?: number }) {
+  return (
+    <svg
+      className="brand-mark"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <path className="brand-mark-stems" d="M5 4.5v15M15 9.5v10" />
+      <path className="brand-mark-link" d="M5 13h10" pathLength={1} />
+      <circle className="brand-mark-cite" cx="19.75" cy="4.75" r="2.75" />
+    </svg>
+  );
+}
+
 export function Brand({ light = false }: { light?: boolean }) {
   return (
     <Link
@@ -60,12 +101,10 @@ export function Brand({ light = false }: { light?: boolean }) {
       className={`brand-lockup${light ? " brand-light" : ""}`}
       aria-label="HogsKin home"
     >
-      <span className="brand-symbol" aria-hidden="true">
-        <i />
-        <i />
-        <i />
+      <BrandMark />
+      <span className="brand-word">
+        HogsKin<span className="brand-period">.</span>
       </span>
-      HogsKin<span className="brand-period">.</span>
     </Link>
   );
 }

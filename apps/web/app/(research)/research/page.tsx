@@ -4,6 +4,7 @@ import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { WorkspaceShell } from "../../components/workspace-shell";
 import { Icon } from "../../components/ui";
+import { Critter } from "../../components/crew/critter";
 import { onboardingProfileSchema } from "../../../lib/onboarding";
 import {
   clearResearchDraft,
@@ -296,6 +297,11 @@ export default function ResearchPage() {
         </header>
         <div className="desk-composer-layout">
           <div className="desk-composer-main">
+            <div className="desk-perch" aria-hidden="true">
+              <Critter kind="lens" size={44} delay={400} />
+              <Critter kind="folio" size={48} />
+              <Critter kind="quill" size={40} delay={900} />
+            </div>
             <form
               className="desk-composer"
               onSubmit={start}

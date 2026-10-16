@@ -5,6 +5,8 @@ import {
   runFailure,
   snapshotRefreshDelay,
   createSnapshotRefresh,
+  runPhaseIndex,
+  runPhases,
 } from "../lib/run-status";
 
 it("coalesces source bursts without delaying terminal snapshots", () => {
@@ -60,4 +62,14 @@ it.each([
   [20, 600_000],
 ])("keeps mode %i bounded at %i", (calls, ms) => {
   expect(modeDeadline(calls)).toBe(ms);
+});
+
+it("maps every recorded status to an honest progress phase", () => {
+  expect(runPhases).toHaveLength(5);
+  expect(runPhaseIndex("awaiting_approval")).toBe(0);
+  expect(runPhaseIndex("reflecting")).toBe(runPhaseIndex("researching"));
+  expect(runPhaseIndex("verifying")).toBe(2);
+  expect(runPhaseIndex("completed")).toBe(4);
+  for (const status of ["queued", "failed", "cancelled"])
+    expect(runPhaseIndex(status)).toBe(-1);
 });
