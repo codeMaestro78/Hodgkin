@@ -36,6 +36,8 @@
     "ReportComparisonSchema",
     "ReportDocumentV1Schema",
     "ResearchGapSchema",
+    "ResearchModeResolutionSchema",
+    "ResearchModeSchema",
     "ResearchPlanSchema",
     "ResearchRunProjectionSchema",
     "ResearchStateSchema",

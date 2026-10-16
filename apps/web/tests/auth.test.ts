@@ -395,6 +395,64 @@ describe("research BFF identity", () => {
     expect((await forwardResearch(req, path, "POST")).status).toBe(200);
     expect(fetch.mock.calls[0]![1].body).toBe(body);
   });
+  it.each(["focused", "balanced", "deep", null, undefined])(
+    "forwards mode %s and independent budgets opaquely with verified auth",
+    async (mode) => {
+      auth.getUser.mockResolvedValue({
+        data: { user: { id: "verified", email_confirmed_at: "2026-01-01" } },
+        error: null,
+      });
+      auth.getSession.mockResolvedValue({
+        data: {
+          session: { user: { id: "verified" }, access_token: "fixture-access" },
+        },
+      });
+      const upstream = JSON.stringify({
+        runId: "fixture",
+        mode,
+        modePolicyVersion: "research-mode-policy-v1",
+        modeResolution: mode == null ? "legacy-inferred" : "explicit",
+      });
+      const fetch = vi
+        .fn()
+        .mockResolvedValue(new Response(upstream, { status: 202 }));
+      vi.stubGlobal("fetch", fetch);
+      const body = JSON.stringify({
+        question: "What is a database?",
+        mode,
+        budgetOverrides: {
+          maxProviderOperations: 4,
+          maxSources: 2,
+          maxWallClockMs: 60_000,
+        },
+      });
+      const req = new NextRequest("http://localhost:3000/api/research/runs", {
+        method: "POST",
+        body,
+        headers: {
+          origin: "http://localhost:3000",
+          "x-research-account-id": "verified",
+          "idempotency-key": "fixture-mode-request",
+          authorization: "Bearer forged",
+        },
+      });
+      const response = await forwardResearch(req, "/research/runs", "POST");
+      expect(response.status).toBe(202);
+      expect(await response.text()).toBe(upstream);
+      const forwarded = fetch.mock.calls[0]![1];
+      expect(forwarded.body).toBe(body);
+      expect(forwarded.headers.get("authorization")).toBe(
+        "Bearer fixture-access",
+      );
+      expect(forwarded.headers.get("idempotency-key")).toBe(
+        "fixture-mode-request",
+      );
+      expect(forwarded.headers.get("x-internal-service-auth")).toBe(
+        "fixture-service",
+      );
+      expect(forwarded.headers.has("x-research-account-id")).toBe(false);
+    },
+  );
   it("rejects oversized research bodies before authentication or upstream dispatch", async () => {
     const fetch = vi.fn();
     vi.stubGlobal("fetch", fetch);

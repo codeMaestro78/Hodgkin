@@ -8,6 +8,8 @@ output_dir="$service_dir/src/research_api/schemas/generated"
 mkdir -p "$output_dir"
 
 contracts=(
+  "ResearchModeSchema:research_mode:ResearchMode"
+  "ResearchModeResolutionSchema:research_mode_resolution:ResearchModeResolution"
   "EditResearchPlanRequestSchema:edit_research_plan_request:EditResearchPlanRequest"
   "EditResearchPlanResponseSchema:edit_research_plan_response:EditResearchPlanResponse"
   "CreateProjectRequestSchema:create_project_request:CreateProjectRequest"

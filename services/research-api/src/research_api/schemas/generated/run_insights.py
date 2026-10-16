@@ -9,6 +9,17 @@ from uuid import UUID
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, RootModel, conint, constr
 
 
+class Mode(StrEnum):
+    focused = "focused"
+    balanced = "balanced"
+    deep = "deep"
+
+
+class ModeResolution(StrEnum):
+    explicit = "explicit"
+    legacy_inferred = "legacy-inferred"
+
+
 class SchemaVersion(StrEnum):
     field_1_1 = "1.1"
     field_1_2 = "1.2"
@@ -118,6 +129,11 @@ class RunInsights(BaseModel):
         extra="forbid",
         populate_by_name=True,
     )
+    mode: Mode | None = None
+    mode_policy_version: constr(min_length=1, max_length=100) | None = Field(
+        None, alias="modePolicyVersion"
+    )
+    mode_resolution: ModeResolution | None = Field(None, alias="modeResolution")
     schema_version: SchemaVersion = Field(..., alias="schemaVersion")
     tasks: list[Task] = Field(..., max_length=100)
     provider_calls: list[ProviderCall] = Field(..., alias="providerCalls", max_length=100)

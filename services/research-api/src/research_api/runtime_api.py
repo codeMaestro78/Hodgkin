@@ -26,9 +26,9 @@ from research_api.events.outbox import EventOutbox
 from research_api.graph.builder import PlannedQuestion, PlannerOutput
 from research_api.jobs import enqueue, lock_registry, refresh_due
 from research_api.lifecycle import lock_run
-from research_api.query_intelligence import is_quick_explainer
-from research_api.reports import report_policy
+from research_api.mode_reports import policy_for_mode
 from research_api.repositories.runs import RunBudgetDefaults, RunRepository
+from research_api.research_limits import is_run_quick, operation_limit, run_source_limit
 from research_api.schemas.generated.approval_request import ApprovalRequest
 from research_api.schemas.generated.batch_request import BatchRequest
 from research_api.schemas.generated.create_research_run_request import CreateResearchRunRequest
@@ -57,7 +57,9 @@ def budget_from(request: BatchRequest | ScheduleRequest) -> RunBudgetDefaults:
             require_approval=request.require_approval,
             report_requirements=[],
             budget_overrides=(
-                request.budget_overrides.model_dump(by_alias=True, exclude_none=True)
+                request.budget_overrides.model_dump(
+                    by_alias=True, exclude_none=True, exclude_unset=True
+                )
                 if request.budget_overrides
                 else None
             ),
@@ -135,9 +137,12 @@ async def edit_plan(
             raise HTTPException(409, "this research plan format cannot be edited") from exc
         maximum = (
             1
-            if is_quick_explainer(run.original_question)
+            if is_run_quick(run)
             else min(
-                report_policy(budget.max_search_calls).question_count, budget.max_search_calls // 2
+                policy_for_mode(
+                    operation_limit(budget), mode=run.mode, max_sources=run_source_limit(budget)
+                ).question_count,
+                operation_limit(budget) // 2,
             )
         )
         if len(questions) > maximum:
@@ -146,21 +151,24 @@ async def edit_plan(
                 f"this run's budget supports at most {maximum} research question(s)",
             )
 
-        template = original.sub_questions[0]
-        edited = PlannerOutput(
-            sub_questions=[
-                PlannedQuestion.model_validate(
-                    template.model_dump()
-                    | {
-                        "question": question,
-                        "rationale": "Researcher-edited scope.",
-                        "success_criteria": [
-                            "Collect directly relevant, verifiable evidence for this question."
-                        ],
-                    }
-                )
-                for question in questions
-            ]
+        edited = original.model_copy(
+            update={
+                "sub_questions": [
+                    PlannedQuestion.model_validate(
+                        original.sub_questions[
+                            min(index, len(original.sub_questions) - 1)
+                        ].model_dump()
+                        | {
+                            "question": question,
+                            "rationale": "Researcher-edited scope.",
+                            "success_criteria": [
+                                "Collect directly relevant, verifiable evidence for this question."
+                            ],
+                        }
+                    )
+                    for index, question in enumerate(questions)
+                ]
+            }
         )
         version = run.plan_version + 1
         replacement = ResearchPlan(
@@ -168,7 +176,7 @@ async def edit_plan(
             run_id=run_id,
             plan_version=version,
             parent_plan_version=run.plan_version,
-            plan=edited.model_dump(mode="json"),
+            plan=current.plan | edited.model_dump(mode="json"),
         )
         session.add(replacement)
         await session.flush()

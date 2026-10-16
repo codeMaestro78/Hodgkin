@@ -1,0 +1,11 @@
+{
+  "$id": "https://schemas.research.local/1.5/ResearchModeSchema.json",
+  "title": "ResearchModeSchema",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "string",
+  "enum": [
+    "focused",
+    "balanced",
+    "deep"
+  ]
+}

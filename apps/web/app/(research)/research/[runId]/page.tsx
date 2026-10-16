@@ -28,7 +28,7 @@ import type { z } from "zod";
 import { publishResearchHistory } from "../../../../lib/research-history-events";
 import { reportExport } from "../../../../lib/report-export";
 import {
-  modeDeadline,
+  retryDeadline,
   runStage,
   runFailure,
   snapshotRefreshDelay,
@@ -115,6 +115,8 @@ type RunEvent = {
 };
 type Run = {
   runId: string;
+  mode?: "focused" | "balanced" | "deep" | null;
+  modePolicyVersion?: string | null;
   status: string;
   originalQuestion: string;
   reportRequirements?: string[];
@@ -159,6 +161,8 @@ type Run = {
   }[];
   budget: {
     maxSearchCalls: number;
+    maxProviderOperations?: number | null;
+    maxSources?: number | null;
     maxEstimatedCostUsd: number;
     maxWallClockMs?: number;
   };
@@ -622,7 +626,7 @@ export default function LiveRunWorkspace() {
     try {
       const updatedLimit =
         action === "retry" && run?.errorCode === "wall_clock_limit_exceeded"
-          ? `?maxWallClockMs=${Math.max(run.budget.maxWallClockMs ?? 0, modeDeadline(run.budget.maxSearchCalls))}`
+          ? `?maxWallClockMs=${retryDeadline(run)}`
           : "";
       const response = await fetch(
         `/api/research/runs/${runId}/${action}${updatedLimit}`,
@@ -1211,7 +1215,7 @@ export default function LiveRunWorkspace() {
                   {busy
                     ? "Starting…"
                     : run.errorCode === "wall_clock_limit_exceeded"
-                      ? `Retry · ${Math.max(run.budget.maxWallClockMs ?? 0, modeDeadline(run.budget.maxSearchCalls)) / 60_000}-min limit`
+                      ? `Retry · ${retryDeadline(run) / 60_000}-min limit`
                       : "Start fresh attempt"}
                 </Button>
                 <small>New run; provider costs may apply.</small>
@@ -2330,7 +2334,10 @@ export default function LiveRunWorkspace() {
                       sources={run.sources}
                       subQuestions={run.subQuestions}
                       calls={run.usage.searchCalls}
-                      callLimit={run.budget.maxSearchCalls}
+                      callLimit={
+                        run.budget.maxProviderOperations ??
+                        run.budget.maxSearchCalls
+                      }
                       statusLabel={(status) => <Status status={status} />}
                       inspect={(id) => {
                         setActiveSource(id);

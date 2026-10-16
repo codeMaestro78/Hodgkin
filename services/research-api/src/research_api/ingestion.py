@@ -44,7 +44,7 @@ from research_api.reliability import content_signature
 from research_api.repositories.budgets import BudgetReservationRepository, ReservationReplayError
 from research_api.repositories.extraction import ExtractionAdmissionRepository
 from research_api.repositories.sources import SourceRepository
-from research_api.research_limits import source_limit
+from research_api.research_limits import run_source_limit
 from research_api.telemetry import dependency_event
 
 _METADATA_BATCH_SIZE = 8
@@ -467,7 +467,7 @@ class TavilyEvidenceIngestor:
             )
             if budget is None:
                 raise LookupError("run budget missing")
-            ceiling = source_limit(budget.max_search_calls, quick_mode)
+            ceiling = run_source_limit(budget, quick_mode)
             count = (
                 await session.scalar(
                     select(func.count())

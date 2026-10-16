@@ -4,6 +4,47 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "properties": {
+    "mode": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "focused",
+            "balanced",
+            "deep"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "modePolicyVersion": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "modeResolution": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "explicit",
+            "legacy-inferred"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "schemaVersion": {
       "type": "string",
       "enum": [
@@ -265,6 +306,16 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 50
+        },
+        "maxProviderOperations": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 50
+        },
+        "maxSources": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
         },
         "maxBrowserSessions": {
           "default": 0,

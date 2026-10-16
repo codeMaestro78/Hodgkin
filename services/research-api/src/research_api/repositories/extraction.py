@@ -8,8 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from research_api.db.models import Budget, ExtractionSlot, ResearchRun, Source
-from research_api.query_intelligence import is_quick_explainer
-from research_api.research_limits import source_limit
+from research_api.research_limits import is_run_quick, run_source_limit
 
 
 class ExtractionAdmissionRepository:
@@ -79,9 +78,7 @@ class ExtractionAdmissionRepository:
         await self.session.flush()
         remaining = max(
             0,
-            source_limit(
-                budget.max_search_calls, quick_mode or is_quick_explainer(run.original_question)
-            )
+            run_source_limit(budget, run.mode is None and (quick_mode or is_run_quick(run)))
             - sum(slot.state != "released" for slot in slots.values()),
         )
         cached = {source.canonical_url: source for source in reversed(sources)}

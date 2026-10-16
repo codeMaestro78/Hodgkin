@@ -9,6 +9,17 @@ from uuid import UUID
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, confloat, conint, constr
 
 
+class Mode(StrEnum):
+    focused = "focused"
+    balanced = "balanced"
+    deep = "deep"
+
+
+class ModeResolution(StrEnum):
+    explicit = "explicit"
+    legacy_inferred = "legacy-inferred"
+
+
 class SchemaVersion(StrEnum):
     field_1_1 = "1.1"
     field_1_2 = "1.2"
@@ -37,6 +48,8 @@ class Budget(BaseModel):
     )
     max_wall_clock_ms: conint(le=1800000, gt=0) = Field(..., alias="maxWallClockMs")
     max_search_calls: conint(ge=1, le=50) = Field(12, alias="maxSearchCalls")
+    max_provider_operations: conint(ge=2, le=50) | None = Field(None, alias="maxProviderOperations")
+    max_sources: conint(ge=1, le=20) | None = Field(None, alias="maxSources")
     max_browser_sessions: conint(ge=0, le=5) = Field(0, alias="maxBrowserSessions")
     max_reflection_rounds: conint(ge=0, le=3) = Field(1, alias="maxReflectionRounds")
     max_input_tokens: conint(le=9007199254740991, gt=0) = Field(..., alias="maxInputTokens")
@@ -65,6 +78,11 @@ class ResearchRunProjection(BaseModel):
         extra="forbid",
         populate_by_name=True,
     )
+    mode: Mode | None = None
+    mode_policy_version: constr(min_length=1, max_length=100) | None = Field(
+        None, alias="modePolicyVersion"
+    )
+    mode_resolution: ModeResolution | None = Field(None, alias="modeResolution")
     schema_version: SchemaVersion = Field(..., alias="schemaVersion")
     run_id: UUID = Field(..., alias="runId")
     tenant_id: UUID = Field(..., alias="tenantId")

@@ -10,7 +10,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 
-from research_api.reports import report_policy
+from research_api.mode_reports import policy_for_mode
 from research_api.schemas.generated.report_document_v1 import ReportDocumentV1
 
 _Text = Annotated[str, Field(min_length=1, max_length=1000)]
@@ -44,6 +44,7 @@ class _Input(BaseModel):
     model_config = ConfigDict(extra="forbid")
     question: Annotated[str, Field(min_length=1, max_length=10000)]
     max_search_calls: Annotated[StrictInt, Field(ge=0)]
+    mode: Literal["focused", "balanced", "deep"] | None = None
     requirements: Annotated[
         list[Annotated[str, Field(min_length=1, max_length=500, pattern=r"\S")]],
         Field(max_length=20),
@@ -135,6 +136,7 @@ def build_report_document(
     findings: list[dict[str, Any]],
     questions: list[dict[str, Any]],
     excluded: int,
+    mode: Literal["focused", "balanced", "deep"] | None = None,
 ) -> dict[str, Any]:
     """Build V1 from caller-verified findings; never infer fulfillment from links.
 
@@ -150,9 +152,10 @@ def build_report_document(
             "findings": findings,
             "questions": questions,
             "excluded": excluded,
+            "mode": mode,
         }
     )
-    policy = report_policy(data.max_search_calls)
+    policy = policy_for_mode(data.max_search_calls, mode=data.mode)
     projected = [
         f.model_dump(mode="json", by_alias=True, exclude={"sub_question_id", "requirement_indices"})
         for f in data.findings

@@ -15,6 +15,16 @@
       "minimum": 1,
       "maximum": 50
     },
+    "maxProviderOperations": {
+      "type": "integer",
+      "minimum": 2,
+      "maximum": 50
+    },
+    "maxSources": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 20
+    },
     "maxBrowserSessions": {
       "default": 0,
       "type": "integer",

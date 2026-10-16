@@ -1,0 +1,10 @@
+{
+  "$id": "https://schemas.research.local/1.5/ResearchModeResolutionSchema.json",
+  "title": "ResearchModeResolutionSchema",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "string",
+  "enum": [
+    "explicit",
+    "legacy-inferred"
+  ]
+}

@@ -15,6 +15,8 @@ export const BudgetSchema = z
       .positive()
       .max(30 * 60_000),
     maxSearchCalls: z.number().int().min(1).max(50).default(12),
+    maxProviderOperations: z.number().int().min(2).max(50).optional(),
+    maxSources: z.number().int().min(1).max(20).optional(),
     maxBrowserSessions: z.number().int().min(0).max(5).default(0),
     maxReflectionRounds: z.number().int().min(0).max(3).default(1),
     maxInputTokens: z.number().int().positive(),

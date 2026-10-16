@@ -13,6 +13,8 @@ class BudgetOverrides(BaseModel):
     )
     max_wall_clock_ms: conint(le=1800000, gt=0) | None = Field(None, alias="maxWallClockMs")
     max_search_calls: conint(ge=1, le=50) | None = Field(12, alias="maxSearchCalls")
+    max_provider_operations: conint(ge=2, le=50) | None = Field(None, alias="maxProviderOperations")
+    max_sources: conint(ge=1, le=20) | None = Field(None, alias="maxSources")
     max_browser_sessions: conint(ge=0, le=5) | None = Field(0, alias="maxBrowserSessions")
     max_reflection_rounds: conint(ge=0, le=3) | None = Field(1, alias="maxReflectionRounds")
     max_input_tokens: conint(le=9007199254740991, gt=0) | None = Field(None, alias="maxInputTokens")

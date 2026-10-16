@@ -43,7 +43,9 @@ from research_api.events.outbox import EventOutbox
 from research_api.execution import close_open_nodes, finish_node, start_node
 from research_api.grounding import grounded_writer_request, restore_passage_quotes
 from research_api.ingestion import TavilyEvidenceIngestor
+from research_api.jobs import MODE_SERPER_GRAPH_VERSION, SERPER_GRAPH_VERSION
 from research_api.lifecycle import TERMINAL_RUN_STATUSES, ensure_active, lock_run
+from research_api.mode_reports import policy_for_mode
 from research_api.model_budget import model_response, model_run, request_fingerprint
 from research_api.model_routing import ModelProvider, ModelRole, ModelRoute, pin_run_model_routing
 from research_api.providers.http_clients import get_provider_http_client
@@ -60,12 +62,11 @@ from research_api.report_document import build_report_document
 from research_api.reports import (
     ReportFinding,
     render_report,
-    report_policy,
     select_passages,
     verified_figures,
 )
 from research_api.repositories.budgets import BudgetExceededError
-from research_api.research_limits import source_allocations, source_limit
+from research_api.research_limits import run_source_limit, source_allocations
 from research_api.runtime_context import LeaseLostError
 from research_api.telemetry import dependency_run, operation_event
 
@@ -225,6 +226,8 @@ class RunState(TypedDict):
     sub_question_ids: list[str]
     source_ids: Annotated[list[str], merge_source_ids]
     quick_mode: bool
+    mode: NotRequired[str | None]
+    mode_policy_version: NotRequired[str | None]
     discovery_provider: NotRequired[Literal["tavily", "serper"]]
     error: NotRequired[str]
     reflection_round: NotRequired[int]
@@ -357,7 +360,13 @@ async def _plan_with_openai(
 
 
 async def _read_source_context(
-    settings: Settings, *, sources: list[Source], max_search_calls: int = 12, question: str = ""
+    settings: Settings,
+    *,
+    sources: list[Source],
+    max_search_calls: int = 12,
+    question: str = "",
+    mode: str | None = None,
+    max_sources: int | None = None,
 ) -> tuple[list[SourceMaterial], str]:
     """Load a bounded, untrusted evidence bundle for the synthesizer."""
     store = S3ArtifactStore(
@@ -388,7 +397,7 @@ async def _read_source_context(
         if source.content_hash not in seen_hashes:
             independent.append(source)
             seen_hashes.add(source.content_hash)
-    policy = report_policy(max_search_calls)
+    policy = policy_for_mode(max_search_calls, mode=mode, max_sources=max_sources)
     materials = await asyncio.gather(
         *(read(source) for source in independent[: policy.source_count])
     )
@@ -437,12 +446,13 @@ async def _synthesize_with_openai(
     max_search_calls: int = 12,
     report_requirements: Sequence[str] = (),
     materials: Sequence[SourceMaterial] = (),
+    mode: str | None = None,
 ) -> ReportDraft:
     if not _model_role_available(settings, "writer"):
         route = _active_model_route(settings, "writer")
         raise RuntimeError(f"{route.provider.upper()}_API_KEY is required to synthesize")
-    if max_search_calls >= 3:
-        policy = report_policy(max_search_calls)
+    if mode is not None or max_search_calls >= 3:
+        policy = policy_for_mode(max_search_calls, mode=mode)
         schema_model: type[ReportAssertions] = (
             FocusedAssertions
             if policy.mode == "focused"
@@ -955,7 +965,7 @@ def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
                 1
                 if state["quick_mode"]
                 else min(
-                    report_policy(budget.max_search_calls).question_count,
+                    policy_for_mode(budget.max_search_calls, mode=state.get("mode")).question_count,
                     budget.max_search_calls // 2,
                 )
             )
@@ -1129,7 +1139,7 @@ def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
             if budget is None:
                 raise LookupError("run budget not found")
             allocations = source_allocations(
-                source_limit(budget.max_search_calls, state["quick_mode"]),
+                run_source_limit(budget, state["quick_mode"]),
                 len(state["sub_question_ids"]),
                 existing or 0,
             )
@@ -1307,7 +1317,7 @@ def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
                 .select_from(Source)
                 .where(Source.tenant_id == tenant_id, Source.run_id == run_id)
             )
-        if not source_count:
+        if not source_count and state.get("mode") is None:
             raise RuntimeError("no preserved sources are available for synthesis")
         await _transition(
             tenant_id=tenant_id,
@@ -1350,7 +1360,7 @@ def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
             and not state["quick_mode"]
             and state.get("reflection_round", 0) < min(1, budget.max_reflection_rounds)
             and budget.max_search_calls - usage.search_calls - usage.reserved_search_calls >= 2
-            and (count or 0) < source_limit(budget.max_search_calls, False)
+            and (count or 0) < run_source_limit(budget, False)
         )
         return {"expand": expand}
 
@@ -1432,9 +1442,9 @@ def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
         async with tenant_session(str(tenant_id)) as session:
             run = await lock_run(session, tenant_id, run_id)
             ensure_active(run)
-            existing, max_search_calls = (
+            existing, synthesis_budget = (
                 await session.execute(
-                    select(Report, Budget.max_search_calls)
+                    select(Report, Budget)
                     .select_from(Budget)
                     .outerjoin(
                         Report,
@@ -1455,22 +1465,38 @@ def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
                     .order_by(Source.retrieved_at.desc())
                 )
             )
+            max_search_calls = synthesis_budget.max_search_calls
             requirements = list(run.report_requirements or [])
+            explicit_mode = run.mode
+            explicit_source_limit = synthesis_budget.max_sources
         usable_sources, source_context = await _read_source_context(
             settings,
             sources=sources,
             max_search_calls=max_search_calls,
             question=state["question"] + ("\n" + "\n".join(requirements) if requirements else ""),
+            **(
+                {"mode": explicit_mode, "max_sources": explicit_source_limit}
+                if explicit_mode
+                else {}
+            ),
         )
-        if not usable_sources:
+        if not usable_sources and explicit_mode is None:
             raise RuntimeError("no readable source artifacts are available for synthesis")
-        answer = await _synthesize_with_openai(
-            settings,
-            question=state["question"],
-            source_context=source_context,
-            max_search_calls=max_search_calls,
-            materials=usable_sources,
-            **({"report_requirements": requirements} if requirements else {}),
+        answer = (
+            await _synthesize_with_openai(
+                settings,
+                question=state["question"],
+                source_context=source_context,
+                max_search_calls=max_search_calls,
+                materials=usable_sources,
+                **({"report_requirements": requirements} if requirements else {}),
+                **({"mode": explicit_mode} if explicit_mode else {}),
+            )
+            if usable_sources
+            else EvidenceReportDraft(
+                answer_markdown="No usable evidence was collected.",
+                assertions=ReportAssertions(claims=[]),
+            )
         )
         assertions = (
             answer.assertions
@@ -1537,9 +1563,11 @@ def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
             rejectionCounts=dict(rejection_counts),
             claimStatuses=dict(Counter(check for _, check, _ in audited)),
             sourceCount=len(usable_sources),
-            mode=report_policy(max_search_calls).mode,
+            mode=policy_for_mode(max_search_calls, mode=explicit_mode).mode,
         )
-        policy = report_policy(max_search_calls)
+        policy = policy_for_mode(
+            max_search_calls, mode=explicit_mode, max_sources=explicit_source_limit
+        )
         findings = [
             ReportFinding(
                 claim.claim,
@@ -1778,6 +1806,7 @@ def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
                         {"id": str(item.id), "question": item.question} for item in questions
                     ],
                     excluded=len(audited) - len(publishable),
+                    **({"mode": explicit_mode} if explicit_mode else {}),
                 )
                 # Mark publication only after every report field and linked claim
                 # is ready. The database trigger then freezes this exact version.
@@ -1990,7 +2019,17 @@ async def run_graph(
         async with tenant_session(str(tenant_id)) as session:
             budget_row = (
                 await session.execute(
-                    select(Budget, RuntimeJob.graph_version)
+                    select(
+                        Budget,
+                        RuntimeJob.graph_version,
+                        ResearchRun.mode,
+                        ResearchRun.mode_policy_version,
+                    )
+                    .join(
+                        ResearchRun,
+                        (ResearchRun.tenant_id == Budget.tenant_id)
+                        & (ResearchRun.id == Budget.run_id),
+                    )
                     .outerjoin(
                         RuntimeJob,
                         (RuntimeJob.tenant_id == Budget.tenant_id)
@@ -2001,8 +2040,10 @@ async def run_graph(
             ).first()
             budget = budget_row[0] if budget_row else None
             job_version = budget_row[1] if budget_row else None
+            run_mode = budget_row[2] if budget_row else None
+            run_policy_version = budget_row[3] if budget_row else None
             use_serper = (
-                job_version == "research-v5-serper"
+                job_version in {SERPER_GRAPH_VERSION, MODE_SERPER_GRAPH_VERSION}
                 if job_version
                 else settings.SERPER_DISCOVERY_ENABLED
             )
@@ -2027,7 +2068,12 @@ async def run_graph(
                     "question": question,
                     "sub_question_ids": [],
                     "source_ids": [],
-                    "quick_mode": is_quick_explainer(question),
+                    "quick_mode": run_mode is None and is_quick_explainer(question),
+                    **(
+                        {"mode": run_mode, "mode_policy_version": run_policy_version}
+                        if run_mode
+                        else {}
+                    ),
                     "discovery_provider": "serper" if use_serper else "tavily",
                 }
             )

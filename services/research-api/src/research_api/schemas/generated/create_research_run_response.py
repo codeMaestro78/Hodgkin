@@ -3,10 +3,22 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, constr
+
+
+class Mode(StrEnum):
+    focused = "focused"
+    balanced = "balanced"
+    deep = "deep"
+
+
+class ModeResolution(StrEnum):
+    explicit = "explicit"
+    legacy_inferred = "legacy-inferred"
 
 
 class CreateResearchRunResponse(BaseModel):
@@ -14,5 +26,10 @@ class CreateResearchRunResponse(BaseModel):
         extra="forbid",
         populate_by_name=True,
     )
+    mode: Mode | None = None
+    mode_policy_version: constr(min_length=1, max_length=100) | None = Field(
+        None, alias="modePolicyVersion"
+    )
+    mode_resolution: ModeResolution | None = Field(None, alias="modeResolution")
     run_id: UUID = Field(..., alias="runId")
     status: Literal["queued"]

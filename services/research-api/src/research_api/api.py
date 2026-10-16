@@ -33,15 +33,20 @@ from research_api.events.outbox import EventOutbox
 from research_api.events.wakeups import event_wakeups
 from research_api.execution import prior_dependencies, task_projection
 from research_api.jobs import enqueue, lock_registry, refresh_due
-from research_api.query_intelligence import is_quick_explainer
+from research_api.mode_policy import resolve_mode_budget
+from research_api.mode_reports import policy_for_mode
 from research_api.reliability import claim_status, source_assessments
-from research_api.reports import report_policy
 from research_api.repositories.runs import (
     IdempotencyConflictError,
     RunBudgetDefaults,
     RunRepository,
 )
-from research_api.research_limits import active_time_limit, source_limit
+from research_api.research_limits import (
+    active_time_limit,
+    is_run_quick,
+    operation_limit,
+    run_source_limit,
+)
 from research_api.schemas.generated.create_research_run_request import CreateResearchRunRequest
 from research_api.schemas.generated.followup_request import FollowupRequest
 from research_api.schemas.generated.public_claim_check import PublicClaimCheck
@@ -50,6 +55,30 @@ from research_api.snapshots import load_collections
 
 router = APIRouter(prefix="/research", tags=["research"])
 AfterSequenceQuery = Annotated[int, Query(ge=0, alias="after")]
+
+
+def _created_projection(run: ResearchRun, budget: RunBudgetDefaults) -> dict[str, object]:
+    result: dict[str, object] = {"runId": str(run.id), "status": "queued"}
+    if run.mode is not None:
+        result.update(
+            {
+                "mode": run.mode,
+                "modePolicyVersion": run.mode_policy_version,
+                "modeResolution": "explicit",
+                "budget": {
+                    "maxSearchCalls": budget.max_search_calls,
+                    "maxProviderOperations": operation_limit(budget),
+                    "maxSources": run_source_limit(budget),
+                    "maxWallClockMs": budget.max_wall_clock_ms,
+                    "maxBrowserSessions": budget.max_browser_sessions,
+                    "maxReflectionRounds": budget.max_reflection_rounds,
+                    "maxInputTokens": budget.max_input_tokens,
+                    "maxOutputTokens": budget.max_output_tokens,
+                    "maxEstimatedCostUsd": float(budget.max_estimated_cost_usd),
+                },
+            }
+        )
+    return result
 
 
 def _public_claim_checks(
@@ -120,7 +149,17 @@ def _public_claim_checks(
     ]
 
 
-def _budget_from_request(request: CreateResearchRunRequest) -> RunBudgetDefaults:
+def _budget_from_request(
+    request: CreateResearchRunRequest, policy_version: str | None = None
+) -> RunBudgetDefaults:
+    mode = getattr(request, "mode", None)
+    if mode is not None:
+        try:
+            return resolve_mode_budget(
+                mode, request.budget_overrides, policy_version=policy_version
+            )
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
     defaults = RunBudgetDefaults()
     overrides = request.budget_overrides
     if overrides is None:
@@ -152,7 +191,7 @@ async def create_research_run(
     x_internal_service_auth: str | None = Header(default=None),
     x_development_tenant_id: str | None = Header(default=None),
     x_development_user_id: str | None = Header(default=None),
-) -> dict[str, str]:
+) -> dict[str, object]:
     settings = get_settings()
     caller = await _caller(
         settings,
@@ -162,8 +201,10 @@ async def create_research_run(
         authorization=authorization,
     )
     idempotency_key = payload.idempotency_key or idempotency_key_header
-    selected_budget = _budget_from_request(payload)
-    if selected_budget.max_search_calls < 2:
+    selected_budget = (
+        _budget_from_request(payload) if getattr(payload, "mode", None) is None else None
+    )
+    if selected_budget is not None and operation_limit(selected_budget) < 2:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="the Tavily research slice requires at least two search-call budget units",
@@ -178,19 +219,23 @@ async def create_research_run(
                 budget=selected_budget,
                 idempotency_key=idempotency_key,
                 approval_required=payload.require_approval,
+                mode=getattr(payload, "mode", None),
+                budget_resolver=(lambda version: _budget_from_request(payload, version))
+                if getattr(payload, "mode", None) is not None
+                else None,
             )
         except IdempotencyConflictError as exc:
             raise HTTPException(409, "idempotency key belongs to another request") from exc
+        response = _created_projection(run, _budget_from_request(payload, run.mode_policy_version))
         if not created:
-            return {"runId": str(run.id), "status": "queued"}
+            return response
         await EventOutbox(session, caller.tenant_id).append(
             run_id=run.id,
             event_type="run.created",
             payload={"status": "queued", "questionLength": len(run.original_question)},
         )
-        run_id = run.id
         await enqueue(session, run, settings)
-    return {"runId": str(run_id), "status": "queued"}
+    return response
 
 
 @router.get("/runs")
@@ -249,7 +294,10 @@ async def list_research_runs(
                     # Pre-fast-path runs are still in the ledger. The compact
                     # evidence footprint distinguishes a new fast run from an
                     # older definition query that used the full planner.
-                    "quickMode": is_quick_explainer(run.original_question) and count <= 2,
+                    "quickMode": is_run_quick(run) and count <= 2,
+                    "mode": run.mode,
+                    "modePolicyVersion": run.mode_policy_version,
+                    "modeResolution": "explicit" if run.mode is not None else "legacy-inferred",
                     "createdAt": run.created_at.isoformat(),
                 }
                 for run, count in rows
@@ -384,10 +432,12 @@ async def get_research_run(
             )
             maximum_questions = (
                 1
-                if is_quick_explainer(run.original_question)
+                if is_run_quick(run)
                 else min(
-                    report_policy(budget.max_search_calls).question_count,
-                    budget.max_search_calls // 2,
+                    policy_for_mode(
+                        operation_limit(budget), mode=run.mode, max_sources=run_source_limit(budget)
+                    ).question_count,
+                    operation_limit(budget) // 2,
                 )
                 if budget is not None
                 else 1
@@ -590,24 +640,33 @@ async def get_research_run(
             "runId": str(run.id),
             "status": run.status,
             "originalQuestion": run.original_question,
+            "mode": getattr(run, "mode", None),
+            "modePolicyVersion": getattr(run, "mode_policy_version", None),
+            "modeResolution": "explicit"
+            if getattr(run, "mode", None) is not None
+            else "legacy-inferred",
             "reportRequirements": run.report_requirements or [],
             "approval": approval,
             "planVersion": run.plan_version,
             "sourceCount": source_count or 0,
             "claimChecks": claim_checks,
-            "sourceLimit": source_limit(
-                budget.max_search_calls if budget else 0,
-                is_quick_explainer(run.original_question),
-            ),
+            "sourceLimit": run_source_limit(budget, is_run_quick(run)) if budget else 0,
             "errorCode": run.error_code,
             "createdAt": run.created_at.isoformat(),
             "updatedAt": run.updated_at.isoformat(),
             "budget": {
                 "maxSearchCalls": budget.max_search_calls if budget else 0,
+                "maxProviderOperations": operation_limit(budget) if budget else 0,
+                "maxSources": run_source_limit(budget, is_run_quick(run)) if budget else 0,
                 "maxWallClockMs": budget.max_wall_clock_ms if budget else 0,
                 "maxEstimatedCostUsd": float(budget.max_estimated_cost_usd) if budget else 0,
             },
-            "usage": {"searchCalls": usage.search_calls if usage else 0},
+            "usage": {
+                "searchCalls": usage.search_calls if usage else 0,
+                "providerOperations": usage.search_calls if usage else 0,
+                "reservedProviderOperations": getattr(usage, "reserved_search_calls", 0),
+                "sources": source_count or 0,
+            },
             "report": (
                 {
                     "id": str(report.id),
@@ -622,7 +681,7 @@ async def get_research_run(
                 if report
                 else None
             ),
-            "quickMode": is_quick_explainer(run.original_question) and (source_count or 0) <= 2,
+            "quickMode": is_run_quick(run) and (source_count or 0) <= 2,
             "sources": [
                 {
                     "id": str(source.id),
@@ -764,6 +823,8 @@ async def retry_research_run(
         )
         if budget is None:
             raise RuntimeError("run budget not found")
+        if prior.mode is not None and max_wall_clock_ms not in {None, budget.max_wall_clock_ms}:
+            raise HTTPException(422, "explicit-mode retries inherit the original time limit")
         fresh = await RunRepository(session, caller.tenant_id).create(
             user_id=caller.user_id,
             question=prior.original_question,
@@ -776,7 +837,12 @@ async def retry_research_run(
                 max_input_tokens=budget.max_input_tokens,
                 max_output_tokens=budget.max_output_tokens,
                 max_estimated_cost_usd=budget.max_estimated_cost_usd,
+                max_provider_operations=budget.max_provider_operations,
+                max_sources=budget.max_sources,
             ),
+            mode=prior.mode,
+            mode_policy_version=prior.mode_policy_version,
+            approval_required=prior.approval_required,
         )
         await EventOutbox(session, caller.tenant_id).append(
             run_id=fresh.id,
@@ -787,7 +853,6 @@ async def retry_research_run(
             },
         )
         fresh_id = fresh.id
-        fresh.approval_required = prior.approval_required
         await enqueue(session, fresh, settings)
     return {"runId": str(fresh_id), "status": "queued"}
 
@@ -854,6 +919,9 @@ async def followup_research_run(
             if gap.details.get("reportId") not in {None, str(parent_report_id)}:
                 raise HTTPException(409, "gap belongs to another report version")
         repository = RunRepository(session, caller.tenant_id)
+        requested_mode = getattr(body, "mode", None)
+        inherited_mode = requested_mode if requested_mode is not None else prior.mode
+        changed_mode = requested_mode is not None and requested_mode != prior.mode
         fresh = await repository.get_by_idempotency_key(
             user_id=caller.user_id, idempotency_key=body.idempotency_key
         )
@@ -864,6 +932,8 @@ async def followup_research_run(
             if (
                 fresh.parent_report_id != parent_report_id
                 or fresh.original_question != expected_question
+                or fresh.mode != inherited_mode
+                or (not changed_mode and fresh.mode_policy_version != prior.mode_policy_version)
             ):
                 raise HTTPException(409, "idempotency key belongs to another request")
             linked_gap = await session.scalar(
@@ -894,6 +964,13 @@ async def followup_research_run(
                 report_requirements=prior.report_requirements,
                 parent_report_id=parent_report_id,
                 approval_required=prior.approval_required,
+                mode=inherited_mode,
+                mode_policy_version=None if changed_mode else prior.mode_policy_version,
+                budget_resolver=(
+                    lambda version: resolve_mode_budget(str(inherited_mode), policy_version=version)
+                )
+                if changed_mode
+                else None,
                 budget=RunBudgetDefaults(
                     **{
                         field: getattr(budget, field)

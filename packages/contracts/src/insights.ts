@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { DateTimeSchema, SchemaVersionSchema, UuidSchema } from "./common";
+import { ResearchModeSchema, ResearchModeResolutionSchema } from "./mode";
 
 export const ClaimStatusSchema = z.enum([
   "supported",
@@ -32,6 +33,7 @@ export const ExecutionTaskSchema = z
   .strict();
 export const FollowupRequestSchema = z
   .object({
+    mode: ResearchModeSchema.optional(),
     question: z.string().trim().min(5).max(1000),
     gapId: UuidSchema.optional(),
     reportVersion: z.number().int().positive().max(10000).optional(),
@@ -51,6 +53,9 @@ export const PublicGapSchema = z
   .strict();
 export const RunInsightsSchema = z
   .object({
+    mode: ResearchModeSchema.nullable().optional(),
+    modePolicyVersion: z.string().min(1).max(100).nullable().optional(),
+    modeResolution: ResearchModeResolutionSchema.nullable().optional(),
     schemaVersion: SchemaVersionSchema,
     tasks: z.array(ExecutionTaskSchema).max(100),
     providerCalls: z

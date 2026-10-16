@@ -30,6 +30,8 @@ GRAPH_VERSION = "research-v4"
 # Older binaries reject this version instead of resuming a Serper receipt with
 # Tavily. Existing v3/v4 jobs retain their original discovery semantics.
 SERPER_GRAPH_VERSION = "research-v5-serper"
+MODE_GRAPH_VERSION = "research-v6-modes"
+MODE_SERPER_GRAPH_VERSION = "research-v6-modes-serper"
 
 
 async def lock_registry(session: AsyncSession, tenant: uuid.UUID) -> DispatchRegistry:
@@ -68,9 +70,13 @@ async def enqueue(
             tenant_id=run.tenant_id,
             user_id=run.user_id,
             batch_id=batch_id,
-            graph_version=SERPER_GRAPH_VERSION
-            if settings.SERPER_DISCOVERY_ENABLED
-            else GRAPH_VERSION,
+            graph_version=(
+                MODE_SERPER_GRAPH_VERSION
+                if settings.SERPER_DISCOVERY_ENABLED
+                else MODE_GRAPH_VERSION
+            )
+            if run.mode is not None
+            else (SERPER_GRAPH_VERSION if settings.SERPER_DISCOVERY_ENABLED else GRAPH_VERSION),
         )
     )
     registry.next_due_at = datetime.now(UTC)
@@ -267,8 +273,11 @@ async def claim(tenant: uuid.UUID, owner: uuid.UUID, settings: Settings) -> JobF
         # Empty-brief v3 jobs retain their exact model request/parser contracts.
         # Consult the locked, immutable run brief, never checkpoint/model output;
         # do not upgrade the stored version or redispatch incompatible receipts.
-        graph_compatible = job.graph_version in {GRAPH_VERSION, SERPER_GRAPH_VERSION} or (
-            job.graph_version == "research-v3" and run.report_requirements == []
+        graph_compatible = (
+            job.graph_version in {MODE_GRAPH_VERSION, MODE_SERPER_GRAPH_VERSION}
+            if run.mode is not None
+            else job.graph_version in {GRAPH_VERSION, SERPER_GRAPH_VERSION}
+            or (job.graph_version == "research-v3" and run.report_requirements == [])
         )
         if not graph_compatible or job.attempts >= 5:
             job.state, run.status = "failed", "failed"

@@ -8,11 +8,13 @@ import { Critter } from "../../components/crew/critter";
 import { onboardingProfileSchema } from "../../../lib/onboarding";
 import {
   clearResearchDraft,
+  createResearchRequest,
   emptyResearchDraft,
   MAX_REQUIREMENTS_TEXT,
-  parseReportRequirements,
   readResearchDraft,
   researchDraftAccount,
+  researchDraftSchema,
+  researchModes,
   writeResearchDraft,
   type ResearchDraft,
 } from "../../../lib/research-draft";
@@ -31,29 +33,6 @@ import {
   ToggleGroupItem,
 } from "../../components/workbench-ui";
 
-const depths = [
-  {
-    name: "Focused",
-    sources: 6,
-    minutes: 3,
-    description:
-      "A decision brief with analysis, trade-offs and cited findings.",
-  },
-  {
-    name: "Balanced",
-    sources: 12,
-    minutes: 5,
-    description:
-      "A structured comparison with mechanisms, risks and implications.",
-  },
-  {
-    name: "Deep",
-    sources: 20,
-    minutes: 10,
-    description:
-      "A detailed investigation with broader evidence and cross-source analysis.",
-  },
-] as const;
 const examples = [
   {
     type: "Compare options",
@@ -92,7 +71,7 @@ export default function ResearchPage() {
   }
   const setQuestion = (question: string) => updateDraft({ question });
   const setDepth = (depth: string) => {
-    if (depth === "Focused" || depth === "Balanced" || depth === "Deep")
+    if (depth === "focused" || depth === "balanced" || depth === "deep")
       updateDraft({ depth });
   };
   const setRequireApproval = (requireApproval: boolean) =>
@@ -171,7 +150,10 @@ export default function ResearchPage() {
         const profile = onboardingProfileSchema.safeParse(body?.profile).data;
         if (profile?.status === "completed" && !recovered) {
           const patch: Partial<ResearchDraft> = {};
-          if (!editedDepth.current) patch.depth = profile.depth;
+          if (!editedDepth.current)
+            patch.depth = researchDraftSchema.shape.depth.parse(
+              profile.depth.toLowerCase(),
+            );
           if (handoff && !editedQuestion.current)
             patch.question = profile.topic;
           updateDraft(patch, false);
@@ -194,14 +176,8 @@ export default function ResearchPage() {
       window.removeEventListener("focus", hydrate);
     };
   }, []);
-  const scope = depths.find((item) => item.name === depth) ?? depths[1];
-  const simple =
-    /^(what is|who is|define|explain)\s+.+\??$/i.test(question.trim()) &&
-    question.trim().length <= 160 &&
-    !/\b(latest|current|today|recent|news|price|stock|law|policy|\d{4})\b/i.test(
-      question,
-    );
-  const limit = simple ? 2 : scope.sources;
+  const scope =
+    researchModes.find((item) => item.mode === depth) ?? researchModes[1];
 
   async function start(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -221,9 +197,9 @@ export default function ResearchPage() {
       textarea.current?.focus();
       return;
     }
-    let reportRequirements: string[];
+    let request: ReturnType<typeof createResearchRequest>;
     try {
-      reportRequirements = parseReportRequirements(requirementsText);
+      request = createResearchRequest(draft);
     } catch (error) {
       setNotice(
         error instanceof Error ? error.message : "Check report requirements.",
@@ -239,15 +215,7 @@ export default function ResearchPage() {
     try {
       submission.current = researchSubmission(
         submission.current,
-        JSON.stringify({
-          question: question.trim(),
-          reportRequirements,
-          requireApproval,
-          budgetOverrides: {
-            maxSearchCalls: limit,
-            maxWallClockMs: (simple ? 2 : scope.minutes) * 60_000,
-          },
-        }),
+        JSON.stringify(request),
       );
       const response = await fetch("/api/research/runs", {
         method: "POST",
@@ -370,8 +338,8 @@ export default function ResearchPage() {
                     }}
                     label="Research depth"
                   >
-                    {depths.map((item) => (
-                      <ToggleGroupItem key={item.name} value={item.name}>
+                    {researchModes.map((item) => (
+                      <ToggleGroupItem key={item.mode} value={item.mode}>
                         <span className="depth-title">
                           {item.name}
                           <Icon
@@ -383,18 +351,18 @@ export default function ResearchPage() {
                           {item.description}
                         </span>
                         <span className="depth-limit">
-                          Up to {item.sources} sources · {item.minutes}-minute
-                          active limit
+                          Up to {item.sources} sources · {item.operations}{" "}
+                          provider operations · {item.minutes}-minute active
+                          limit
                         </span>
                       </ToggleGroupItem>
                     ))}
                   </ToggleGroup>
                   <p id="scope-note" className="desk-help">
                     Planning, collection and verification share this active-time
-                    limit; waiting for approval does not count.{" "}
-                    {simple
-                      ? "This evergreen question uses a fast explainer with up to two sources, regardless of the selected depth."
-                      : "Limits are ceilings, not quotas. Search and extraction both count toward the provider-call budget."}
+                    limit; waiting for approval does not count. Limits are
+                    ceilings, not quotas. Search and extraction both count
+                    toward the provider-operation budget.
                   </p>
                 </Field>
                 <Field>
@@ -468,26 +436,26 @@ export default function ResearchPage() {
               <Icon name="layers" size={20} />
               <h2>Research scope</h2>
             </div>
-            <Badge>{simple ? "Fast explainer" : scope.name}</Badge>
+            <Badge>{scope.name}</Badge>
             <dl>
               <div>
                 <dt>Source ceiling</dt>
-                <dd>{limit}</dd>
+                <dd>{scope.sources} sources</dd>
               </div>
               <div>
-                <dt>Provider-call ceiling</dt>
-                <dd>{limit}</dd>
+                <dt>Provider-operation ceiling</dt>
+                <dd>{scope.operations} operations</dd>
+              </div>
+              <div>
+                <dt>Active-time ceiling</dt>
+                <dd>{scope.minutes} minutes</dd>
               </div>
               <div>
                 <dt>Search provider</dt>
                 <dd>Tavily</dd>
               </div>
             </dl>
-            <p>
-              {simple
-                ? "A compact evidence pass for an evergreen explanation."
-                : scope.description}
-            </p>
+            <p>{scope.description}</p>
             <section>
               <h3>A traceable answer</h3>
               <ol>
