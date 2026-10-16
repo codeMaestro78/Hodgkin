@@ -1,7 +1,7 @@
 import asyncio
 import uuid
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from time import monotonic
 
 from fastapi import FastAPI, HTTPException
@@ -15,6 +15,7 @@ from research_api.config import get_settings
 from research_api.db.runtime_security import validate_runtime_role
 from research_api.db.session import engine
 from research_api.dispatcher import dispatch_loop
+from research_api.events.wakeups import event_wakeups
 from research_api.runtime_api import router as runtime_router
 from research_api.telemetry import dependency_logging, operation_event, request_id
 
@@ -84,8 +85,16 @@ class RequestTiming:
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     with dependency_logging():
-        async with identity_transport():
+        async with AsyncExitStack() as stack:
+            await stack.enter_async_context(identity_transport())
             settings = get_settings()
+            await stack.enter_async_context(
+                event_wakeups.transport(
+                    settings.REDIS_URL
+                    if settings.SSE_REDIS_WAKEUPS_ENABLED and settings.APP_ENV != "test"
+                    else None
+                )
+            )
             if settings.APP_ENV != "test":
                 await validate_runtime_role(engine)
             if settings.DISPATCHER_ENABLED and settings.APP_ENV != "test":

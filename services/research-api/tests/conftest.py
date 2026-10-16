@@ -10,6 +10,7 @@ _defaults = {
         "postgresql+psycopg://research_owner:research_owner@localhost:55432/research"
     ),
     "OBJECT_STORAGE_ENDPOINT": "http://localhost:54566",
+    "TEST_REDIS_URL": "redis://localhost:56379/0",
 }
 for name, default in _defaults.items():
     value = os.environ.get(name, default)

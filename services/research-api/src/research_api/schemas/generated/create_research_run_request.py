@@ -6,8 +6,8 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field, RootModel, confloat, conint, constr
 
 
-class ReportRequirement(RootModel[constr(max_length=500)]):
-    root: constr(max_length=500)
+class ReportRequirement(RootModel[constr(pattern=r"\S", min_length=1, max_length=500)]):
+    root: constr(pattern=r"\S", min_length=1, max_length=500)
 
 
 class BudgetOverrides(BaseModel):

@@ -111,6 +111,7 @@ def dependency_event(
     attempt: int = 1,
     started: float | None = None,
     reason: str | None = None,
+    remote_duration_ms: float | None = None,
 ) -> None:
     logger.info(
         json.dumps(
@@ -124,6 +125,11 @@ def dependency_event(
                 "runId": str(dependency_run.get()) if dependency_run.get() else None,
                 "durationMs": round((monotonic() - started) * 1000, 2) if started else None,
                 "reason": reason,
+                **(
+                    {"remoteDurationMs": round(remote_duration_ms, 2)}
+                    if remote_duration_ms is not None
+                    else {}
+                ),
             },
             sort_keys=True,
         )

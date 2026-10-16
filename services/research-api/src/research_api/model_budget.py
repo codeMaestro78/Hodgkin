@@ -259,6 +259,7 @@ async def model_response(client: Any, *, max_attempts: int = 3, **request: Any) 
         try:
             response = await client.responses.create(**request)
         except BaseException as error:
+            remote_ms = (monotonic() - started) * 1000
             state = "released" if rejected_without_usage(error) else "uncertain"
             async with tenant_session(str(tenant)) as session:
                 call = await session.scalar(
@@ -298,6 +299,7 @@ async def model_response(client: Any, *, max_attempts: int = 3, **request: Any) 
                 attempt=attempt,
                 started=started,
                 reason=type(error).__name__,
+                remote_duration_ms=remote_ms,
             )
             if (
                 state == "released"
@@ -309,6 +311,7 @@ async def model_response(client: Any, *, max_attempts: int = 3, **request: Any) 
                 continue
             raise
 
+        remote_ms = (monotonic() - started) * 1000
         actual = getattr(response, "usage", None)
         actual_cost: Decimal | None = None
         if actual is not None:
@@ -388,6 +391,7 @@ async def model_response(client: Any, *, max_attempts: int = 3, **request: Any) 
             attempt=attempt,
             started=started,
             reason=basis,
+            remote_duration_ms=remote_ms,
         )
         if overspent:
             # Commit real usage first. Failing now prevents any subsequent paid dispatch.

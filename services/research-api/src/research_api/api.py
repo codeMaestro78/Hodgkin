@@ -28,6 +28,7 @@ from research_api.db.models import (
 )
 from research_api.db.session import tenant_session
 from research_api.events.outbox import EventOutbox
+from research_api.events.wakeups import event_wakeups
 from research_api.execution import prior_dependencies, task_projection
 from research_api.jobs import enqueue, lock_registry, refresh_due
 from research_api.query_intelligence import is_quick_explainer
@@ -507,11 +508,12 @@ async def get_research_run(
         )
         assessments = source_assessments(sources, run.original_question)
         return {
-            "schemaVersion": "1.3",
+            "schemaVersion": "1.4",
             "insights": insights.model_dump(mode="json", by_alias=True),
             "runId": str(run.id),
             "status": run.status,
             "originalQuestion": run.original_question,
+            "reportRequirements": run.report_requirements or [],
             "approval": approval,
             "planVersion": run.plan_version,
             "sourceCount": source_count or 0,
@@ -534,6 +536,10 @@ async def get_research_run(
                     "id": str(report.id),
                     "version": report.version,
                     "markdown": report.markdown,
+                    "document": report.document,
+                    "answerQuality": (
+                        report.document["quality"]["status"] if report.document else "not_assessed"
+                    ),
                     "publishedAt": report.updated_at.isoformat(),
                 }
                 if report
@@ -874,11 +880,14 @@ async def stream_research_run_events(
             raise HTTPException(422, "invalid event cursor")
         after = max(after, int(cursor))
 
-    async def event_stream() -> AsyncIterable[ServerSentEvent]:
+    async def event_stream(wake: asyncio.Event) -> AsyncIterable[ServerSentEvent]:
         watermark = after
         terminal_statuses = {"completed", "failed", "cancelled"}
         idle_polls = 0
         while not await request.is_disconnected():
+            # Register before reading, then clear before each transaction: commits
+            # during/after the read stay signalled until the next read.
+            wake.clear()
             async with tenant_session(str(caller.tenant_id)) as session:
                 rows = list(
                     await session.execute(
@@ -926,7 +935,14 @@ async def stream_research_run_events(
                 yield ServerSentEvent(comment="keepalive")
             idle_polls = 0 if events else min(idle_polls + 1, 5)
             # Quiet tabs should not compete continuously with graph persistence.
-            await asyncio.sleep(5 if current_status == "awaiting_approval" else max(1, idle_polls))
+            try:
+                await asyncio.wait_for(
+                    wake.wait(),
+                    timeout=5 if current_status == "awaiting_approval" else max(1, idle_polls),
+                )
+            except TimeoutError:
+                pass  # Lost hints and Redis outages still resynchronize from PostgreSQL.
 
-    async for event in event_stream():
-        yield event
+    with event_wakeups.watch(caller.tenant_id, run_id) as wake:
+        async for event in event_stream(wake):
+            yield event

@@ -55,6 +55,8 @@ async def test_tavily_retries_only_pre_dispatch_failures(monkeypatch, error, cap
     assert "private-key" not in caplog.text and "private question" not in caplog.text
     events = [json.loads(record.message) for record in caplog.records]
     assert [item["attempt"] for item in events] == [1, 2, 3]
+    assert all(type(item["remoteDurationMs"]) is float for item in events)
+    assert all(item["remoteDurationMs"] >= 0 for item in events)
 
 
 @pytest.mark.parametrize("status", [400, 401, 429, 500])

@@ -1,5 +1,5 @@
 {
-  "$id": "https://schemas.research.local/1.3/ExecutionTaskSchema.json",
+  "$id": "https://schemas.research.local/1.4/ExecutionTaskSchema.json",
   "title": "ExecutionTaskSchema",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",

@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import uuid
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
@@ -36,6 +37,47 @@ from research_api.repositories.budgets import (
 from research_api.repositories.runs import RunBudgetDefaults, RunRepository
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.mark.parametrize("failed", [False, True])
+async def test_remote_timing_excludes_slow_accounting_and_replay(monkeypatch, failed):
+    identity = await seed()
+    sdk = client()
+    clock = [10.0]
+    returned = False
+    emitted = []
+    original_session = model_budget.tenant_session
+
+    async def remote(**_):
+        nonlocal returned
+        clock[0] += 0.25
+        returned = True
+        if failed:
+            raise ValueError("private remote failure")
+        return sdk.responses.create.return_value
+
+    @asynccontextmanager
+    async def slow_settlement(tenant):
+        async with original_session(tenant) as session:
+            yield session
+        if returned:
+            clock[0] += 5.0  # Deterministic accounting delay, no real sleep.
+
+    sdk.responses.create.side_effect = remote
+    monkeypatch.setattr(model_budget, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(model_budget, "tenant_session", slow_settlement)
+    monkeypatch.setattr(model_budget, "dependency_event", lambda **facts: emitted.append(facts))
+    if failed:
+        with pytest.raises(ValueError, match="private remote failure"):
+            await invoke(identity, sdk)
+    else:
+        await invoke(identity, sdk)
+        await invoke(identity, sdk)  # Replay must not count as a new remote observation.
+    assert sdk.responses.create.await_count == 1
+    assert len(emitted) == 1
+    assert emitted[0]["remote_duration_ms"] == 250
+    assert clock[0] >= 15.25
+
 
 TEXT = json.dumps(
     {

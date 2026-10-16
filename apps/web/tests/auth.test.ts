@@ -282,6 +282,59 @@ describe("account flows", () => {
 });
 
 describe("research BFF identity", () => {
+  it("rejects an account-switched submission before upstream dispatch", async () => {
+    auth.getUser.mockResolvedValue({
+      data: { user: { id: "verified", email_confirmed_at: "2026-01-01" } },
+      error: null,
+    });
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    const request = new NextRequest("http://localhost:3000/api/research/runs", {
+      method: "POST",
+      headers: {
+        origin: "http://localhost:3000",
+        "x-research-account-id": "previous-account",
+      },
+      body: JSON.stringify({ question: "Private draft" }),
+    });
+    expect(
+      (await forwardResearch(request, "/research/runs", "POST")).status,
+    ).toBe(409);
+    expect(auth.getSession).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it("accepts the matching account hint without forwarding it as identity", async () => {
+    auth.getUser.mockResolvedValue({
+      data: { user: { id: "verified", email_confirmed_at: "2026-01-01" } },
+      error: null,
+    });
+    auth.getSession.mockResolvedValue({
+      data: {
+        session: { user: { id: "verified" }, access_token: "fixture-access" },
+      },
+    });
+    const fetch = vi.fn().mockResolvedValue(new Response("{}"));
+    vi.stubGlobal("fetch", fetch);
+    const body = JSON.stringify({ question: "Current account draft" });
+    const request = new NextRequest("http://localhost:3000/api/research/runs", {
+      method: "POST",
+      headers: {
+        origin: "http://localhost:3000",
+        "x-research-account-id": "verified",
+      },
+      body,
+    });
+    const response = await forwardResearch(request, "/research/runs", "POST");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("server-timing")).toMatch(
+      /^auth;dur=\d+\.\d, upstream_headers;dur=\d+\.\d, proxy;dur=\d+\.\d$/,
+    );
+    expect(auth.getUser).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0]![1].body).toBe(body);
+    expect(
+      (fetch.mock.calls[0]![1].headers as Headers).has("x-research-account-id"),
+    ).toBe(false);
+  });
   it("treats an aborted browser request as disconnect rather than upstream failure", async () => {
     auth.getUser.mockResolvedValue({
       data: { user: { id: "verified", email_confirmed_at: "2026-01-01" } },

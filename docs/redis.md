@@ -6,6 +6,17 @@ does not replace.
 
 ## What Redis is used for
 
+Implemented: optional cross-process **event wake-up hints** in
+`services/research-api/src/research_api/events/wakeups.py`. They publish only
+after PostgreSQL commit and contain tenant/run UUIDs, not research content.
+One shared publisher/subscriber pair per API process uses at most two connections
+and a 1,024-entry coalescing queue; no Redis operation is awaited by a database
+writer. PostgreSQL replay and periodic polling remain sufficient for correctness.
+Disable the bridge with `SSE_REDIS_WAKEUPS_ENABLED=false` if necessary.
+
+The following table describes broader architecture targets, not confirmation
+that every Redis coordination mechanism is implemented:
+
 | Use | Detail |
 |---|---|
 | Rate limiting | Per-tenant and global-per-provider request counters (see [provider-routing.md](./provider-routing.md#rate-limits)) |
@@ -44,5 +55,5 @@ slower rate-limit checks) — it must never corrupt or lose a run's actual
 state. This is why architecture invariant #9 in
 [agent.md](./agent.md#2-architecture-invariants-non-negotiable) exists.
 
-The Redis container and `REDIS_URL` are confirmed. Coordination code is `PLANNED` at
-`services/research-api/src/research_api/coordination/` and cannot become business truth.
+The Redis container, `REDIS_URL`, and the optional event hint bridge are confirmed.
+Other coordination code remains `PLANNED` and cannot become business truth.

@@ -67,6 +67,7 @@ async def test_run_projection_queries_evidence_for_verified_tenant_and_requested
         id=run_id,
         status="completed",
         original_question="Compare evidence platforms",
+        report_requirements=[],
         plan_version=1,
         error_code=None,
         created_at=now,

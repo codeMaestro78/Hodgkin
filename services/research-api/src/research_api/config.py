@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     MAX_PENDING_RUNS_PER_TENANT: int = Field(default=32, ge=1, le=100)
     DISPATCHER_ENABLED: bool = True
     REDIS_URL: str = "redis://localhost:56379/0"
+    SSE_REDIS_WAKEUPS_ENABLED: bool = True
     LLM_PROVIDER: Literal["openai"] = "openai"
     LLM_MODEL_NAME: str = "gpt-4o-mini"
     PROVIDER_MAX_ATTEMPTS: int = Field(default=3, ge=1, le=3)

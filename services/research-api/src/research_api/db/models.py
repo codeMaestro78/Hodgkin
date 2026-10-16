@@ -572,6 +572,8 @@ class Report(Base, TenantScopedMixin, TimestampMixin):
     run_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("research_runs.id"), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     markdown: Mapped[str] = mapped_column(Text, nullable=False)
+    # Nullable for historical Markdown reports; never infer a retrospective assessment.
+    document: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 

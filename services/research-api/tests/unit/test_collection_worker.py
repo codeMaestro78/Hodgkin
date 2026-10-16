@@ -21,8 +21,16 @@ async def test_real_worker_bounds_sources_and_concurrency(monkeypatch, calls, qu
     }
     slots_used = []
     active = peak = 0
+    collection_started = False
+    session_count = 0
+    setup_sessions = set()
 
     class Session:
+        def __init__(self):
+            nonlocal session_count
+            session_count += 1
+            self.number = session_count
+
         def add(self, _record):
             pass
 
@@ -30,7 +38,10 @@ async def test_real_worker_bounds_sources_and_concurrency(monkeypatch, calls, qu
             pass
 
         async def scalar(self, statement):
+            nonlocal collection_started
             entity = statement.column_descriptions[0].get("entity")
+            if not collection_started and entity in {Budget, ResearchRun}:
+                setup_sessions.add(self.number)
             if entity is Budget:
                 return SimpleNamespace(max_search_calls=calls)
             if entity is ResearchRun:
@@ -38,6 +49,7 @@ async def test_real_worker_bounds_sources_and_concurrency(monkeypatch, calls, qu
                 # lifecycle lock; this fixture models an active, uncancelled run.
                 return SimpleNamespace(concurrency_limit=3, cancellation_requested_at=None)
             if entity is SubQuestion:
+                collection_started = True
                 key = str(statement.compile().params["id_1"])
                 return records[key]
             return 0 if entity is None else None
@@ -87,3 +99,4 @@ async def test_real_worker_bounds_sources_and_concurrency(monkeypatch, calls, qu
     assert sum(slots_used) == calls
     assert peak == 3
     assert all(record.status == "complete" for record in records.values())
+    assert len(setup_sessions) == 1, "Worker setup must reuse one tenant transaction"

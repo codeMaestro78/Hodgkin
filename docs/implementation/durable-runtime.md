@@ -44,7 +44,10 @@ polling. Existing failed runs and their paid-call records remain unchanged.
 
 The later [mode-specific reports](./mode-specific-research-reports.md) supersede
 the synthesis and evidence-bundle ceilings recorded below. Current jobs use
-`research-v3`; completed reports remain immutable and v2 recovery fails closed.
+`research-v4` after [Phase 1 quality foundations](./phase1-quality-foundations.md).
+V3 jobs with empty report requirements retain their unchanged request contract;
+v3 jobs with requirements and v2/unknown recovery fail closed. Completed reports
+remain unchanged.
 
 - Requests commit the job together with the run and first event. No request-local
   fire-and-forget graph invocation remains. API lifespan drains jobs; use a
@@ -63,7 +66,8 @@ the synthesis and evidence-bundle ceilings recorded below. Current jobs use
 - Checkpoints use `tenantUUID:runUUID`, root namespace, compact string/ID state,
   synchronous node-boundary durability, no pickle fallback or arbitrary module
   allowlist, 1 MiB serialization/database bounds. Migration metadata is owner-only.
-  Graph version `research-v3` must match; incompatible recovery fails closed.
+  Graph version must be compatible with `research-v4` (only empty-requirement v3
+  jobs retain compatibility); incompatible recovery fails closed.
 - Active milliseconds accumulate through heartbeat and final settlement. A crash
   conservatively adds one lease interval for its unobserved tail. Human approval
   waiting does not consume active runtime. Restart does not reset the budget.

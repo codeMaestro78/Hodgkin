@@ -3500,6 +3500,93 @@ details[open] .details-plus {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
+.research-activity {
+  width: 100%;
+  margin-top: 24px;
+  padding: 18px;
+  border: 1px solid var(--steel);
+  border-radius: 12px;
+  background: var(--surface);
+  text-align: left;
+}
+.evidence-desk .report-pending {
+  padding: 16px 0;
+}
+.report-pending .research-activity {
+  margin-top: 0;
+}
+.report-pending .research-activity p {
+  color: var(--muted);
+  margin-top: 8px;
+  font-size: 12px;
+}
+.research-activity-heading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 24px;
+}
+.research-activity-heading small {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+.research-activity-dot {
+  flex: 0 0 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ink);
+}
+.research-activity ol {
+  list-style: none;
+  padding: 0;
+  margin: 14px 0;
+  min-height: 144px;
+}
+.research-activity li {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-height: 48px;
+  border-top: 1px solid var(--steel);
+  font-size: 12px;
+}
+.research-activity li > span {
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.research-activity time {
+  margin-left: auto;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.research-activity > small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .research-stage-label,
+  .research-activity li,
+  .evidence-list > li {
+    transition: opacity 180ms var(--ease);
+    @starting-style {
+      opacity: 0.65;
+    }
+  }
+  .report-progress > span,
+  .report-progress i {
+    transition:
+      color 180ms var(--ease),
+      background-color 180ms var(--ease);
+  }
+}
 .report-article {
   transition: opacity 180ms var(--ease);
   @starting-style {

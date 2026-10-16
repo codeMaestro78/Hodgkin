@@ -22,6 +22,7 @@ class SchemaVersion(StrEnum):
     field_1_1 = "1.1"
     field_1_2 = "1.2"
     field_1_3 = "1.3"
+    field_1_4 = "1.4"
 
 
 class Status(StrEnum):
@@ -37,8 +38,8 @@ class Status(StrEnum):
     cancelled = "cancelled"
 
 
-class ReportRequirement(RootModel[constr(max_length=500)]):
-    root: constr(max_length=500)
+class ReportRequirement(RootModel[constr(pattern=r"\S", min_length=1, max_length=500)]):
+    root: constr(pattern=r"\S", min_length=1, max_length=500)
 
 
 class SubQuestionId(RootModel[UUID]):

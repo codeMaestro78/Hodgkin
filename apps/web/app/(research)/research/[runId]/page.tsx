@@ -6,16 +6,21 @@ import {
 } from "../../../../lib/report-presentation";
 import { useParams, useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
+import { ReportDocumentV1Schema } from "@research/contracts";
+import type { z } from "zod";
+import { publishResearchHistory } from "../../../../lib/research-history-events";
 import { reportExport } from "../../../../lib/report-export";
 import {
   modeDeadline,
   runStage,
   runFailure,
   snapshotRefreshDelay,
+  createSnapshotRefresh,
 } from "../../../../lib/run-status";
 import remarkGfm from "remark-gfm";
 import { WorkspaceShell } from "../../../components/workspace-shell";
 import { RunClock } from "../../../components/run-clock";
+import { ResearchActivity } from "../../../components/research-activity";
 import {
   Badge,
   Button,
@@ -71,6 +76,7 @@ type Run = {
   runId: string;
   status: string;
   originalQuestion: string;
+  reportRequirements?: string[];
   approval?: {
     planId: string;
     state: "pending" | "approve" | "reject";
@@ -113,6 +119,9 @@ type Run = {
     version: number;
     markdown: string;
     publishedAt: string;
+    document?: z.infer<typeof ReportDocumentV1Schema> | null;
+    answerQuality?:
+      "answered" | "partial" | "insufficient_evidence" | "not_assessed";
   } | null;
   sources: Source[];
   subQuestions: { id: string; question: string; status: string }[];
@@ -282,7 +291,6 @@ export default function LiveRunWorkspace() {
     let stream: EventSource | undefined;
     let fetching = false;
     let pending = false;
-    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
     let terminalRetries = 0;
     const controller = new AbortController();
     watermark.current = 0;
@@ -393,30 +401,22 @@ export default function LiveRunWorkspace() {
                     : previous,
                 );
                 stream?.close();
-                clearTimeout(refreshTimer);
-                refreshTimer = undefined;
+                refresh.cancel();
               }
             } catch {
               /* Keep the last valid snapshot. */
             }
             // Coalesce source bursts instead of refetching the full report per event.
-            if (!refreshTimer)
-              refreshTimer = setTimeout(() => {
-                refreshTimer = undefined;
-                void load();
-              }, refreshDelay);
+            refresh.schedule(refreshDelay);
           };
           stream.onerror = () => {
             // Native EventSource reconnects; refresh once to catch a missed terminal event.
             if (
               active &&
               terminalSnapshot.current?.runId !== runId &&
-              !refreshTimer
+              !refresh.scheduled
             )
-              refreshTimer = setTimeout(() => {
-                refreshTimer = undefined;
-                void load();
-              }, 1000);
+              refresh.schedule(1000);
           };
         }
         if (terminal.includes(body.status)) stream?.close();
@@ -437,18 +437,16 @@ export default function LiveRunWorkspace() {
           void load();
         } else if (active && retryTerminalSnapshot && terminalRetries < 3) {
           const delay = 1000 * 2 ** terminalRetries++;
-          refreshTimer = setTimeout(() => {
-            refreshTimer = undefined;
-            void load();
-          }, delay);
+          refresh.schedule(delay);
         }
       }
     };
+    const refresh = createSnapshotRefresh(() => void load());
     void load();
     return () => {
       active = false;
       controller.abort();
-      clearTimeout(refreshTimer);
+      refresh.cancel();
       stream?.close();
     };
   }, [runId, reload, reportVersion]);
@@ -648,12 +646,26 @@ export default function LiveRunWorkspace() {
       setBusy(false);
     }
   }
+  const documentResult = useMemo(
+    () => ReportDocumentV1Schema.safeParse(run?.report?.document),
+    [run?.report?.document],
+  );
+  const reportDocument = documentResult.success ? documentResult.data : null;
   const stopped = run?.status === "failed" || run?.status === "cancelled";
   const limitedReport =
     run?.status === "completed" &&
     run.report &&
-    run.claimChecks !== undefined &&
-    !run.claimChecks.some((claim) => claim.publishedInReport);
+    (reportDocument?.quality.status === "insufficient_evidence" ||
+      (run.claimChecks !== undefined &&
+        !run.claimChecks.some((claim) => claim.publishedInReport)));
+  useEffect(() => {
+    if (run)
+      publishResearchHistory({
+        runId: run.runId,
+        status: run.status,
+        sourceCount: run.sourceCount,
+      });
+  }, [run?.runId, run?.status, run?.sourceCount]);
   const working =
     run && !terminal.includes(run.status) && run.status !== "awaiting_approval";
   return (
@@ -726,7 +738,10 @@ export default function LiveRunWorkspace() {
                   ? "Connection or action problem"
                   : limitedReport
                     ? "Evidence record ready"
-                    : runStage(run.status)}
+                    : run.status === "completed" &&
+                        reportDocument?.quality.status === "partial"
+                      ? "Research finished — review coverage"
+                      : runStage(run.status)}
               </strong>
               <p>
                 {error
@@ -740,7 +755,9 @@ export default function LiveRunWorkspace() {
                         : run.status === "completed"
                           ? limitedReport
                             ? "No finding passed the complete evidence checks. This is a limited result, not a full answer. Inspect Checks and research gaps before relying on it."
-                            : "Your report and recorded evidence are ready."
+                            : reportDocument?.quality.status === "partial"
+                              ? "Evidence-checked findings are ready. Answer completeness has not been established; review requirements and limitations."
+                              : "Your report and recorded evidence are ready."
                           : "Progress and sources below reflect recorded activity, not estimated completion."}
               </p>
             </div>
@@ -829,6 +846,46 @@ export default function LiveRunWorkspace() {
                   </p>
                 )}
               </header>
+              {run.report && (
+                <section
+                  className="desk-composer report-quality"
+                  aria-labelledby="answer-quality-title"
+                >
+                  <h2 id="answer-quality-title">
+                    {reportDocument?.quality.status === "insufficient_evidence"
+                      ? "Insufficient evidence"
+                      : reportDocument?.quality.status === "answered"
+                        ? "Answer assessed"
+                        : reportDocument
+                          ? "Partial answer — review coverage"
+                          : "Coverage not assessed"}
+                  </h2>
+                  <p className="desk-help">
+                    {reportDocument?.quality.reason ??
+                      "This historical report has no structured coverage assessment. Its existing evidence checks remain available."}
+                  </p>
+                  {reportDocument && (
+                    <details>
+                      <summary>Question and report requirements</summary>
+                      <p className="desk-help">
+                        Evidence links are not proof that a requirement is fully
+                        satisfied.
+                      </p>
+                      <ul>
+                        {reportDocument.requirements.map((requirement) => (
+                          <li key={requirement.id}>
+                            <strong>{requirement.text}</strong>
+                            {" — "}
+                            {requirement.status === "addressed"
+                              ? "Evidence linked; completeness not established"
+                              : "Unresolved"}
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+                </section>
+              )}
               <div className="research-signal" aria-label="Research overview">
                 <div>
                   <span>Evidence collected</span>
@@ -880,6 +937,16 @@ export default function LiveRunWorkspace() {
                     Approve these questions to queue research. Rejecting the
                     plan cancels this run.
                   </p>
+                  {!!run.reportRequirements?.length && (
+                    <details>
+                      <summary>Requested report requirements</summary>
+                      <ul>
+                        {run.reportRequirements.map((requirement, index) => (
+                          <li key={index}>{requirement}</li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
                   <ul>
                     {run.approval.questions.map((question) => (
                       <li key={question.id}>{question.question}</li>
@@ -1075,24 +1142,7 @@ export default function LiveRunWorkspace() {
                 </article>
               ) : !stopped && run.status !== "awaiting_approval" ? (
                 <div className="report-pending">
-                  <span className="pending-symbol">
-                    <Icon name="search" size={26} />
-                  </span>
-                  <h2>
-                    {run.status === "writing"
-                      ? "Bringing the findings together."
-                      : "Following the evidence."}
-                  </h2>
-                  <p>
-                    {run.status === "verifying"
-                      ? "Reviewing the research before writing. Sources are available in the evidence panel."
-                      : "Your answer will appear here when it’s ready. You can explore the sources and methodology as research develops."}
-                  </p>
-                  <div className="report-skeleton" aria-hidden="true">
-                    <Skeleton />
-                    <Skeleton />
-                    <Skeleton />
-                  </div>
+                  <ResearchActivity status={run.status} events={run.events} />
                   {run.subQuestions.length > 0 && (
                     <ol
                       className="desk-working-questions"

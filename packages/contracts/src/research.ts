@@ -73,7 +73,7 @@ export const ResearchStateSchema = z
     status: RunStatusSchema,
     originalQuestion: z.string().min(5).max(10_000),
     normalizedQuestion: z.string().min(5).max(5_000),
-    reportRequirements: z.array(z.string().max(500)).max(20),
+    reportRequirements: z.array(z.string().min(1).max(500).regex(/\S/)).max(20),
     activePlanId: UuidSchema.nullable(),
     planVersion: z.number().int().nonnegative(),
     subQuestionIds: z.array(UuidSchema).max(16),
@@ -126,7 +126,10 @@ export const WatermarkedRunProjectionSchema = z
 export const CreateResearchRunRequestSchema = z
   .object({
     question: z.string().min(5).max(10_000),
-    reportRequirements: z.array(z.string().max(500)).max(20).default([]),
+    reportRequirements: z
+      .array(z.string().min(1).max(500).regex(/\S/))
+      .max(20)
+      .default([]),
     budgetOverrides: BudgetSchema.partial().optional(),
     idempotencyKey: z.string().min(16).max(200).optional(),
     requireApproval: z.boolean().default(true),

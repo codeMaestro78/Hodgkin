@@ -8,6 +8,7 @@ output_dir="$service_dir/src/research_api/schemas/generated"
 mkdir -p "$output_dir"
 
 contracts=(
+  "ReportDocumentV1Schema:report_document_v1:ReportDocumentV1"
   "ApprovalRequestSchema:approval_request:ApprovalRequest"
   "BatchRequestSchema:batch_request:BatchRequest"
   "ScheduleRequestSchema:schedule_request:ScheduleRequest"
@@ -38,6 +39,10 @@ contracts=(
 
 for contract in "${contracts[@]}"; do
   IFS=: read -r schema module class_name <<< "$contract"
+  # Optional exact schema selection preserves unrelated generated work in shared checkouts.
+  if [[ $# -gt 0 && "$schema" != "$1" ]]; then
+    continue
+  fi
   uv run datamodel-codegen \
     --input "$schema_dir/$schema.json" \
     --input-file-type jsonschema \

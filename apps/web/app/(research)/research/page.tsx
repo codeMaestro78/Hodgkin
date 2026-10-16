@@ -6,6 +6,16 @@ import { WorkspaceShell } from "../../components/workspace-shell";
 import { Icon } from "../../components/ui";
 import { onboardingProfileSchema } from "../../../lib/onboarding";
 import {
+  clearResearchDraft,
+  emptyResearchDraft,
+  MAX_REQUIREMENTS_TEXT,
+  parseReportRequirements,
+  readResearchDraft,
+  researchDraftAccount,
+  writeResearchDraft,
+  type ResearchDraft,
+} from "../../../lib/research-draft";
+import {
   researchSubmission,
   type ResearchSubmission,
 } from "../../../lib/research-submission";
@@ -60,9 +70,32 @@ const examples = [
 ];
 
 export default function ResearchPage() {
-  const [question, setQuestion] = useState("");
-  const [depth, setDepth] = useState("Balanced");
-  const [requireApproval, setRequireApproval] = useState(true);
+  const [draft, setDraft] = useState<ResearchDraft>(emptyResearchDraft);
+  const { question, depth, requireApproval, requirementsText } = draft;
+  const draftRef = useRef(draft);
+  const accountId = useRef<string | null>(null);
+  const accountGeneration = useRef(0);
+  const checkingAccount = useRef(true);
+  const [draftReady, setDraftReady] = useState(false);
+  const editedFields = useRef(new Set<keyof ResearchDraft>());
+  const created = useRef(false);
+  function updateDraft(patch: Partial<ResearchDraft>, userEdit = true) {
+    if (userEdit) {
+      for (const key of Object.keys(patch) as (keyof ResearchDraft)[])
+        editedFields.current.add(key);
+    }
+    draftRef.current = { ...draftRef.current, ...patch };
+    setDraft(draftRef.current);
+    if (accountId.current && !created.current)
+      writeResearchDraft(accountId.current, draftRef.current);
+  }
+  const setQuestion = (question: string) => updateDraft({ question });
+  const setDepth = (depth: string) => {
+    if (depth === "Focused" || depth === "Balanced" || depth === "Deep")
+      updateDraft({ depth });
+  };
+  const setRequireApproval = (requireApproval: boolean) =>
+    updateDraft({ requireApproval });
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const textarea = useRef<HTMLTextAreaElement>(null);
@@ -73,27 +106,92 @@ export default function ResearchPage() {
   const submitting = useRef(false);
   const defaultsFrozen = useRef(false);
   useEffect(() => {
-    const controller = new AbortController();
+    let controller = new AbortController();
     const handoff =
       new URLSearchParams(window.location.search).get("setup") === "ready";
-    void fetch("/api/onboarding", {
-      cache: "no-store",
-      signal: controller.signal,
-    })
-      .then(async (response) => (response.ok ? response.json() : null))
-      .then((body: { profile?: unknown } | null) => {
-        if (controller.signal.aborted || defaultsFrozen.current) return;
+    const hydrate = async () => {
+      controller.abort();
+      controller = new AbortController();
+      const { signal } = controller;
+      checkingAccount.current = true;
+      setDraftReady(false);
+      try {
+        const response = await fetch("/api/auth/session", {
+          cache: "no-store",
+          signal,
+        });
+        const id = response.ok
+          ? researchDraftAccount(await response.json())
+          : null;
+        if (signal.aborted) return;
+        const previousId = accountId.current;
+        if (previousId && previousId === id) return;
+        if (previousId !== id) accountGeneration.current++;
+        accountId.current = id;
+        if (previousId) {
+          // Never carry the previous account's in-memory text into a new scope.
+          draftRef.current = { ...emptyResearchDraft };
+          editedFields.current.clear();
+          editedQuestion.current = false;
+          editedDepth.current = false;
+          defaultsFrozen.current = false;
+          submission.current = null;
+          created.current = false;
+          submitting.current = false;
+          setBusy(false);
+          setNotice("");
+          setDraft(draftRef.current);
+        }
+        if (!id) return;
+        const recovered = readResearchDraft(id);
+        if (recovered) {
+          const patch: Partial<ResearchDraft> = {};
+          for (const key of Object.keys(recovered) as (keyof ResearchDraft)[]) {
+            if (!editedFields.current.has(key))
+              Object.assign(patch, { [key]: recovered[key] });
+          }
+          updateDraft(patch, false);
+        } else writeResearchDraft(id, draftRef.current);
+        // Identity and account-scoped draft are ready. Optional defaults must not
+        // keep the composer locked behind another network round trip.
+        checkingAccount.current = false;
+        setDraftReady(true);
+        const defaults = await fetch("/api/onboarding", {
+          cache: "no-store",
+          signal,
+        });
+        const body = defaults.ok ? await defaults.json() : null;
+        if (
+          signal.aborted ||
+          defaultsFrozen.current ||
+          accountId.current !== id
+        )
+          return;
         const profile = onboardingProfileSchema.safeParse(body?.profile).data;
-        if (!profile || profile.status !== "completed") return;
-        if (!editedDepth.current) setDepth(profile.depth);
-        if (handoff && !editedQuestion.current) setQuestion(profile.topic);
+        if (profile?.status === "completed" && !recovered) {
+          const patch: Partial<ResearchDraft> = {};
+          if (!editedDepth.current) patch.depth = profile.depth;
+          if (handoff && !editedQuestion.current)
+            patch.question = profile.topic;
+          updateDraft(patch, false);
+        }
         if (handoff)
           window.history.replaceState(window.history.state, "", "/research");
-      })
-      .catch(() => {
-        /* Optional defaults never block the composer. */
-      });
-    return () => controller.abort();
+      } catch {
+        // Unavailable identity/storage/defaults must not block composing.
+      } finally {
+        if (!signal.aborted) {
+          checkingAccount.current = false;
+          setDraftReady(true);
+        }
+      }
+    };
+    void hydrate();
+    window.addEventListener("focus", hydrate);
+    return () => {
+      controller.abort();
+      window.removeEventListener("focus", hydrate);
+    };
   }, []);
   const scope = depths.find((item) => item.name === depth) ?? depths[1];
   const simple =
@@ -106,7 +204,15 @@ export default function ResearchPage() {
 
   async function start(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy || submitting.current) return;
+    if (busy || submitting.current || !draftReady || checkingAccount.current)
+      return;
+    if (!accountId.current) {
+      setNotice(
+        "Verify your account before starting research. Please try again.",
+      );
+      window.dispatchEvent(new Event("focus"));
+      return;
+    }
     if (question.trim().length < 5) {
       setNotice(
         "Add a little more detail—your question needs at least five characters.",
@@ -114,16 +220,27 @@ export default function ResearchPage() {
       textarea.current?.focus();
       return;
     }
+    let reportRequirements: string[];
+    try {
+      reportRequirements = parseReportRequirements(requirementsText);
+    } catch (error) {
+      setNotice(
+        error instanceof Error ? error.message : "Check report requirements.",
+      );
+      return;
+    }
     defaultsFrozen.current = true;
     submitting.current = true;
     setBusy(true);
     setNotice("");
+    const submissionAccountId = accountId.current;
+    const submissionGeneration = accountGeneration.current;
     try {
       submission.current = researchSubmission(
         submission.current,
         JSON.stringify({
           question: question.trim(),
-          reportRequirements: [],
+          reportRequirements,
           requireApproval,
           budgetOverrides: {
             maxSearchCalls: limit,
@@ -136,6 +253,7 @@ export default function ResearchPage() {
         headers: {
           "content-type": "application/json",
           "idempotency-key": submission.current.key,
+          "x-research-account-id": submissionAccountId,
         },
         body: submission.current.body,
       });
@@ -144,6 +262,9 @@ export default function ResearchPage() {
         error?: string;
         detail?: unknown;
       };
+      // A previous account's request must never mutate a newly hydrated composer.
+      if (submissionGeneration !== accountGeneration.current) return;
+      if (response.status === 409) window.dispatchEvent(new Event("focus"));
       if (!response.ok || !body.runId)
         throw new Error(
           body.error ??
@@ -151,8 +272,11 @@ export default function ResearchPage() {
               ? body.detail
               : "The research couldn’t be started. Please try again."),
         );
+      created.current = true;
+      if (submissionAccountId) clearResearchDraft(submissionAccountId);
       router.push(`/research/${body.runId}`);
     } catch (error) {
+      if (submissionGeneration !== accountGeneration.current) return;
       submitting.current = false;
       setNotice(
         error instanceof Error
@@ -208,6 +332,27 @@ export default function ResearchPage() {
                     aria-invalid={Boolean(notice)}
                     aria-describedby="scope-note"
                   />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="report-requirements">
+                    Report requirements
+                  </FieldLabel>
+                  <textarea
+                    id="report-requirements"
+                    value={requirementsText}
+                    onChange={(event) =>
+                      updateDraft({ requirementsText: event.target.value })
+                    }
+                    maxLength={MAX_REQUIREMENTS_TEXT}
+                    rows={4}
+                    disabled={busy}
+                    aria-describedby="requirements-note"
+                    placeholder="Compare costs and trade-offs\nInclude implementation risks"
+                  />
+                  <p id="requirements-note" className="desk-help">
+                    Optional. One requirement per line, up to 20 requirements
+                    and 500 characters each.
+                  </p>
                 </Field>
                 <Field>
                   <span className="desk-field-label">Research depth</span>
@@ -273,7 +418,7 @@ export default function ResearchPage() {
                 </span>
                 <Button
                   type="submit"
-                  disabled={busy || question.trim().length < 5}
+                  disabled={busy || !draftReady || question.trim().length < 5}
                 >
                   {busy ? (
                     <span className="motion-spinner" aria-hidden="true" />

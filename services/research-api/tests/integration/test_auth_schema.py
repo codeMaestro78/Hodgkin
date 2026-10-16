@@ -60,6 +60,7 @@ def test_signup_provisioning_and_user_isolation() -> None:
                         "0005_evidence_reliability",
                         "0006_extraction_admission",
                         "0007_durable_runtime",
+                        "0008_structured_reports",
                     ]:
                         importlib.import_module(
                             f"research_api.db.migrations.versions.{version}"

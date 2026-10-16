@@ -26,7 +26,7 @@ from research_api.repositories.runs import RunBudgetDefaults, RunRepository
 from research_api.runtime_context import JobFence
 from research_api.telemetry import operation_event
 
-GRAPH_VERSION = "research-v3"
+GRAPH_VERSION = "research-v4"
 
 
 async def lock_registry(session: AsyncSession, tenant: uuid.UUID) -> DispatchRegistry:
@@ -246,13 +246,17 @@ async def claim(tenant: uuid.UUID, owner: uuid.UUID, settings: Settings) -> JobF
             await session.flush()
             await refresh_due(session, registry)
             return None
-        if job.graph_version != GRAPH_VERSION or job.attempts >= 5:
+        # Empty-brief v3 jobs retain their exact model request/parser contracts.
+        # Consult the locked, immutable run brief, never checkpoint/model output;
+        # do not upgrade the stored version or redispatch incompatible receipts.
+        graph_compatible = job.graph_version == GRAPH_VERSION or (
+            job.graph_version == "research-v3" and run.report_requirements == []
+        )
+        if not graph_compatible or job.attempts >= 5:
             job.state, run.status = "failed", "failed"
             job.owner_id, job.lease_expires_at = None, None
             run.error_code = (
-                "graph_version_incompatible"
-                if job.graph_version != GRAPH_VERSION
-                else "recovery_limit"
+                "graph_version_incompatible" if not graph_compatible else "recovery_limit"
             )
             await EventOutbox(session, tenant).append(
                 run_id=run.id,

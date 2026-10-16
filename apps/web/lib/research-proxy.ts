@@ -79,12 +79,29 @@ export async function forwardResearch(
       return authJson({ error: "Sign in to access your research." }, 401);
     if (!identity.user.email_confirmed_at)
       return authJson({ error: "Confirm your email before researching." }, 403);
+    // This is only a consistency hint, never an identity/authorization source.
+    // Check against the identity already verified for this exact request, avoiding
+    // both an extra client preflight round trip and a cross-tab account-change race.
+    const expectedAccount = request.headers.get("x-research-account-id");
+    if (
+      method === "POST" &&
+      expectedAccount &&
+      expectedAccount !== identity.user.id
+    )
+      return authJson(
+        {
+          error:
+            "Your account changed. Review the current account's draft before starting research.",
+        },
+        409,
+      );
     const {
       data: { session },
     } = await supabase.auth.getSession();
     if (!session || session.user.id !== identity.user.id)
       return authJson({ error: "Your session has expired." }, 401);
     timing("auth", authStarted);
+    const authDuration = performance.now() - authStarted;
     const apiUrl = process.env.RESEARCH_API_URL;
     const serviceKey = process.env.INTERNAL_SERVICE_AUTH;
     if (!apiUrl || !serviceKey)
@@ -114,6 +131,10 @@ export async function forwardResearch(
       signal: request.signal,
     });
     timing("upstream.headers", upstreamStarted, response.status);
+    const upstreamDuration = performance.now() - upstreamStarted;
+    // Numeric only; SSE measurements end at response headers, not stream closure.
+    const serverTiming = () =>
+      `auth;dur=${authDuration.toFixed(1)}, upstream_headers;dur=${upstreamDuration.toFixed(1)}, proxy;dur=${(performance.now() - started).toFixed(1)}`;
     if (events && response.ok && response.body)
       return new Response(response.body, {
         headers: {
@@ -121,6 +142,7 @@ export async function forwardResearch(
           "content-type": "text/event-stream",
           "x-accel-buffering": "no",
           "x-request-id": requestId,
+          "server-timing": serverTiming(),
         },
       });
     const body = await response.text();
@@ -131,6 +153,7 @@ export async function forwardResearch(
         "content-type": "application/json",
         "cache-control": "private, no-store",
         "x-request-id": requestId,
+        "server-timing": serverTiming(),
       },
     });
   } catch {

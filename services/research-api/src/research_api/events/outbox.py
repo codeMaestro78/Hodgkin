@@ -62,6 +62,9 @@ class EventOutbox:
         )
         self._session.add(event)
         await self._session.flush()
+        # Keep ORM references until the outer transaction commits. Rolled-back
+        # savepoint rows become transient and cannot produce a committed hint.
+        self._session.info.setdefault("outbox_wakeups", []).append(event)
         return event
 
     async def replay_after(self, *, run_id: uuid.UUID, sequence: int) -> list[RunEvent]:

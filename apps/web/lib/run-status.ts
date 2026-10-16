@@ -14,6 +14,7 @@ export function runStage(status: string) {
     planning: "Planning",
     awaiting_approval: "Review plan",
     researching: "Collecting evidence",
+    reflecting: "Reviewing coverage",
     verifying: "Checking evidence",
     writing: "Writing report",
     completed: "Complete",
@@ -25,11 +26,42 @@ export function runStage(status: string) {
 
 /** Coalesce routine evidence bursts; terminal feedback must not wait. */
 export function snapshotRefreshDelay(eventType?: string) {
-  return ["run.failed", "run.cancelled", "run.completed"].includes(
-    eventType ?? "",
-  )
+  return [
+    "run.failed",
+    "run.cancelled",
+    "run.completed",
+    "node.started",
+  ].includes(eventType ?? "")
     ? 0
     : 1500;
+}
+
+/** One pending refresh. Important state changes can preempt a source burst. */
+export function createSnapshotRefresh(refresh: () => void) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let due = Infinity;
+  const cancel = () => {
+    clearTimeout(timer);
+    timer = undefined;
+    due = Infinity;
+  };
+  return {
+    get scheduled() {
+      return timer !== undefined;
+    },
+    schedule(delay: number) {
+      const next = Date.now() + delay;
+      if (timer !== undefined && next >= due) return;
+      cancel();
+      due = next;
+      timer = setTimeout(() => {
+        timer = undefined;
+        due = Infinity;
+        refresh();
+      }, delay);
+    },
+    cancel,
+  };
 }
 
 export function runFailure(code: string | null) {

@@ -197,6 +197,7 @@ class TavilyAdapter:
                     outcome="succeeded",
                     attempt=attempt,
                     started=started,
+                    remote_duration_ms=(monotonic() - started) * 1000,
                 )
                 break
             except httpx.HTTPError as exc:
@@ -208,6 +209,7 @@ class TavilyAdapter:
                     attempt=attempt,
                     started=started,
                     reason=type(exc).__name__,
+                    remote_duration_ms=(monotonic() - started) * 1000,
                 )
                 if safe and attempt < self._max_attempts:
                     try:
