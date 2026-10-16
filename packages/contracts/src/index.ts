@@ -6,3 +6,6 @@ export * from "./research";
 export * from "./insights";
 export * from "./runtime";
 export * from "./report";
+export * from "./comparison";
+export * from "./library";
+export * from "./plan-edit";

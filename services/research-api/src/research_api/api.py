@@ -20,10 +20,12 @@ from research_api.db.models import (
     PlanApproval,
     Report,
     ResearchGap,
+    ResearchPlan,
     ResearchRun,
     RunEvent,
     RuntimeJob,
     Source,
+    SubQuestion,
     UsageLedger,
 )
 from research_api.db.session import tenant_session
@@ -33,6 +35,7 @@ from research_api.execution import prior_dependencies, task_projection
 from research_api.jobs import enqueue, lock_registry, refresh_due
 from research_api.query_intelligence import is_quick_explainer
 from research_api.reliability import claim_status, source_assessments
+from research_api.reports import report_policy
 from research_api.repositories.runs import (
     IdempotencyConflictError,
     RunBudgetDefaults,
@@ -347,6 +350,13 @@ async def get_research_run(
         gaps, versions, calls = collections.gaps, collections.versions, collections.calls
         approval = None
         if run.approval_required and run.active_plan_id:
+            active_plan = await session.scalar(
+                select(ResearchPlan).where(
+                    ResearchPlan.tenant_id == caller.tenant_id,
+                    ResearchPlan.run_id == run_id,
+                    ResearchPlan.id == run.active_plan_id,
+                )
+            )
             decision = await session.scalar(
                 select(PlanApproval).where(
                     PlanApproval.tenant_id == caller.tenant_id,
@@ -354,13 +364,80 @@ async def get_research_run(
                     PlanApproval.plan_id == run.active_plan_id,
                 )
             )
+            active_questions = list(
+                (
+                    await session.execute(
+                        select(SubQuestion.id, SubQuestion.question)
+                        .where(
+                            SubQuestion.tenant_id == caller.tenant_id,
+                            SubQuestion.run_id == run_id,
+                            SubQuestion.plan_id == run.active_plan_id,
+                        )
+                        .order_by(
+                            SubQuestion.payload["planIndex"].as_integer().nulls_last(),
+                            SubQuestion.created_at,
+                            SubQuestion.id,
+                        )
+                        .limit(8)
+                    )
+                ).mappings()
+            )
+            maximum_questions = (
+                1
+                if is_quick_explainer(run.original_question)
+                else min(
+                    report_policy(budget.max_search_calls).question_count,
+                    budget.max_search_calls // 2,
+                )
+                if budget is not None
+                else 1
+            )
+            # Time spent waiting for a decision is not research time. Each request
+            # opens a wait and the next recorded decision (or cancellation) closes it;
+            # plan edits replace the plan id without reopening the wait.
+            requested = (
+                await session.scalars(
+                    select(RunEvent.occurred_at).where(
+                        RunEvent.tenant_id == caller.tenant_id,
+                        RunEvent.run_id == run_id,
+                        RunEvent.event_type == "approval.requested",
+                    )
+                )
+            ).all()
+            decided = (
+                await session.scalars(
+                    select(PlanApproval.decided_at).where(
+                        PlanApproval.tenant_id == caller.tenant_id,
+                        PlanApproval.run_id == run_id,
+                    )
+                )
+            ).all()
+            timeline = sorted(
+                [(moment, 0) for moment in requested] + [(moment, 1) for moment in decided]
+            )
+            waited_ms, open_wait = 0, None
+            for moment, closes in timeline:
+                if not closes and open_wait is None:
+                    open_wait = moment
+                elif closes and open_wait is not None:
+                    waited_ms += max(0, int((moment - open_wait).total_seconds() * 1000))
+                    open_wait = None
+            if open_wait is not None and run.status == "cancelled" and run.cancelled_at:
+                waited_ms += max(0, int((run.cancelled_at - open_wait).total_seconds() * 1000))
+                open_wait = None
             approval = {
                 "planId": str(run.active_plan_id),
+                "waitedMs": waited_ms,
+                "waitStartedAt": open_wait.isoformat() if open_wait else None,
+                "planVersion": run.plan_version,
                 "state": decision.decision if decision else "pending",
+                "editable": bool(
+                    active_plan and isinstance(active_plan.plan.get("sub_questions"), list)
+                ),
+                "maxQuestions": maximum_questions,
                 "questions": [
-                    {"id": str(item.id), "question": item.question}
-                    for item in questions
-                    if item.plan_id == run.active_plan_id
+                    {"id": str(item["id"]), "question": item["question"]}
+                    for item in active_questions
                 ],
             }
         if report:
@@ -540,7 +617,7 @@ async def get_research_run(
                     "answerQuality": (
                         report.document["quality"]["status"] if report.document else "not_assessed"
                     ),
-                    "publishedAt": report.updated_at.isoformat(),
+                    "publishedAt": (report.published_at or report.created_at).isoformat(),
                 }
                 if report
                 else None

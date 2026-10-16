@@ -1,11 +1,12 @@
 import { z } from "zod";
 
-export const SCHEMA_VERSION = "1.4" as const;
-// Persisted 1.1/1.2/1.3 snapshots remain readable; new extensions emit 1.4.
+export const SCHEMA_VERSION = "1.5" as const;
+// Persisted 1.1–1.4 snapshots remain readable; new extensions emit 1.5.
 export const SchemaVersionSchema = z.enum([
   "1.1",
   "1.2",
   "1.3",
+  "1.4",
   SCHEMA_VERSION,
 ]);
 export const UuidSchema = z.uuid();
