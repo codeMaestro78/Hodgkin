@@ -20,6 +20,13 @@ engine = create_async_engine(
 session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
 
+def command_category(statement: str | None) -> str:
+    """Only allowlisted SQL verbs; never expose SQL text, identifiers or literals."""
+    first = (statement or "").lstrip().split(None, 1)
+    verb = first[0].upper() if first else ""
+    return verb if verb in {"SELECT", "INSERT", "UPDATE", "DELETE", "WITH", "SET"} else "OTHER"
+
+
 @event.listens_for(engine.sync_engine, "before_cursor_execute")
 def statement_start(
     _conn: Any,
@@ -43,7 +50,12 @@ def statement_finish(
 ) -> None:
     started = context.research_started
     if (monotonic() - started) * 1000 >= settings.DATABASE_SLOW_STATEMENT_MS:
-        operation_event("db.statement.slow", started=started)
+        operation_event(
+            "db.statement.slow",
+            started=started,
+            commandCategory=command_category(_statement),
+            executemany=_executemany,
+        )
 
 
 @event.listens_for(engine.sync_engine, "handle_error")
@@ -55,6 +67,7 @@ def statement_failure(context: Any) -> None:
         started=started,
         outcome="failed",
         error=context.sqlalchemy_exception or context.original_exception,
+        commandCategory=command_category(getattr(context, "statement", None)),
     )
 
 
@@ -63,9 +76,16 @@ async def tenant_session(tenant_id: str) -> AsyncIterator[AsyncSession]:
     """Open a transaction whose PostgreSQL RLS context is fixed to one tenant."""
     started = monotonic()
     setup_ms = None
+    acquire_ms = None
     try:
         async with session_factory() as session:
             async with session.begin():
+                # This checks out the same connection the first execute would
+                # acquire. No extra SQL; includes queue wait, connect and pre-ping.
+                acquired = monotonic()
+                await session.connection()
+                acquire_ms = round((monotonic() - acquired) * 1000, 2)
+                operation_event("db.connection.acquire", started=acquired)
                 await _tenant_transaction(session, tenant_id)
                 setup_ms = round((monotonic() - started) * 1000, 2)
                 yield session
@@ -80,11 +100,16 @@ async def tenant_session(tenant_id: str) -> AsyncIterator[AsyncSession]:
                 event_wakeups.committed(tenant, run)
     except BaseException as exc:
         operation_event(
-            "db.transaction", started=started, outcome="failed", error=exc, setupMs=setup_ms
+            "db.transaction",
+            started=started,
+            outcome="failed",
+            error=exc,
+            setupMs=setup_ms,
+            acquireMs=acquire_ms,
         )
         raise
     else:
-        operation_event("db.transaction", started=started, setupMs=setup_ms)
+        operation_event("db.transaction", started=started, setupMs=setup_ms, acquireMs=acquire_ms)
 
 
 async def _tenant_transaction(session: AsyncSession, tenant_id: str) -> None:

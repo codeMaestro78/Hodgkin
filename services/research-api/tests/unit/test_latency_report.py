@@ -79,6 +79,32 @@ def test_retry_attempts_diagnostics_and_enclosing_nodes_remain_separate():
     assert report["operations"][0]["success"]["count"] == 1
 
 
+def test_model_start_is_not_counted_as_a_second_attempt():
+    report = analyze(
+        event(
+            None,
+            event="dependency.outcome",
+            operation="model",
+            provider="openrouter",
+            outcome="started",
+        ),
+        event(
+            50,
+            event="dependency.outcome",
+            operation="model",
+            provider="openrouter",
+            outcome="consumed",
+            remoteDurationMs=40,
+        ),
+    )
+    assert report["input"]["lifecycle"] == 1
+    group = report["dependencies"][0]
+    assert group["provider"] == "openrouter"
+    assert group["records"] == 1
+    assert group["excluded_durations"] == 0
+    assert group["success"]["count"] == 1
+
+
 @pytest.mark.parametrize(
     "bad", [None, float("nan"), float("inf"), -float("inf"), -1, True, "200", {}, [], 10**400]
 )

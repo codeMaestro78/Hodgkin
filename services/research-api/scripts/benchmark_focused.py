@@ -2,11 +2,14 @@
 
 import argparse
 import asyncio
+import hashlib
 import io
 import json
 import logging
 import os
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from time import monotonic
 from urllib.parse import urlsplit
 
@@ -35,11 +38,28 @@ class Capture(logging.Handler):
             self.dropped += 1
 
 
-async def benchmark(count: int, offset: int = 0) -> None:
+async def benchmark(
+    count: int,
+    offset: int = 0,
+    *,
+    question: str | None = None,
+    discovery_provider: str | None = None,
+    http_client_mode: str = "shared",
+) -> None:
+    if http_client_mode not in {"shared", "worker"}:
+        raise ValueError("unsupported provider HTTP client mode")
+    if question is not None and (count != 1 or not 5 <= len(question.strip()) <= 1000):
+        raise ValueError("a custom question requires one run and 5–1000 characters")
     # Validate destinations BEFORE importing modules that construct application pools.
     from research_api.config import get_settings
 
     settings = get_settings()
+    if discovery_provider is not None:
+        if discovery_provider not in {"tavily", "serper"}:
+            raise ValueError("unsupported discovery provider")
+        settings = settings.model_copy(
+            update={"SERPER_DISCOVERY_ENABLED": discovery_provider == "serper"}
+        )
     targets = [
         settings.DATABASE_URL,
         os.environ.get("TEST_DATABASE_ADMIN_URL", ""),
@@ -54,6 +74,8 @@ async def benchmark(count: int, offset: int = 0) -> None:
         raise ValueError("benchmark requires explicit loopback test infrastructure")
     if not settings.OPENAI_API_KEY or not settings.TAVILY_API_KEY:
         raise ValueError("both live provider credentials must be configured")
+    if settings.SERPER_DISCOVERY_ENABLED and not settings.SERPER_API_KEY:
+        raise ValueError("Serper discovery requires its configured credential")
 
     from sqlalchemy import func, select
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -72,6 +94,7 @@ async def benchmark(count: int, offset: int = 0) -> None:
     from research_api.db.session import engine, tenant_session
     from research_api.dispatcher import execute
     from research_api.events.wakeups import event_wakeups
+    from research_api.providers.http_clients import provider_http_transport
     from research_api.repositories.runs import RunBudgetDefaults, RunRepository
 
     admin = create_async_engine(os.environ["TEST_DATABASE_ADMIN_URL"])
@@ -82,11 +105,32 @@ async def benchmark(count: int, offset: int = 0) -> None:
     logger = logging.getLogger("research_api.dependencies")
     previous = logger.level, logger.handlers[:], logger.propagate
     capture = Capture()
+
+    @asynccontextmanager
+    async def selected_http_transport() -> AsyncIterator[object | None]:
+        if http_client_mode == "worker":
+            # Reproduce the pre-pooling lifecycle: each worker adapter owns its
+            # own HTTP client and closes it after collection.
+            yield None
+            return
+        async with provider_http_transport(
+            timeout_seconds=settings.PROVIDER_TIMEOUT_SECONDS,
+            worker_concurrency=settings.WORKER_CONCURRENCY,
+        ) as clients:
+            yield clients
+
     logger.setLevel(logging.INFO)
     logger.handlers, logger.propagate = [capture], False
     try:
-        async with CheckpointPool(settings) as pool, event_wakeups.transport(settings.REDIS_URL):
-            for index, question in enumerate(QUESTIONS[offset : offset + count], offset + 1):
+        async with (
+            CheckpointPool(settings) as pool,
+            event_wakeups.transport(settings.REDIS_URL),
+            selected_http_transport(),
+        ):
+            questions = (
+                [question.strip()] if question is not None else QUESTIONS[offset : offset + count]
+            )
+            for index, question in enumerate(questions, offset + 1):
                 capture.lines.clear()
                 capture.dropped = 0
                 started = monotonic()
@@ -129,14 +173,19 @@ async def benchmark(count: int, offset: int = 0) -> None:
                             RunEvent.run_id == run.id, RunEvent.event_type == "source.discovered"
                         )
                     )
-                    sources = await session.scalar(
-                        select(func.count()).select_from(Source).where(Source.run_id == run.id)
+                    source_rows = list(
+                        await session.scalars(select(Source).where(Source.run_id == run.id))
                     )
                     result = {
-                        "event": "benchmark.completed",
+                        "event": "benchmark.result",
                         "check": index,
                         "runId": str(run.id),
+                        "mode": report.document["mode"] if report and report.document else None,
                         "status": final.status,
+                        "discoveryProvider": "serper"
+                        if settings.SERPER_DISCOVERY_ENABLED
+                        else "tavily",
+                        "httpClientMode": http_client_mode,
                         "errorCode": final.error_code,
                         "elapsedMs": round(elapsed, 2),
                         "localClaimMs": round(queue_ms, 2),
@@ -145,16 +194,96 @@ async def benchmark(count: int, offset: int = 0) -> None:
                         )
                         if first
                         else None,
-                        "sources": sources,
+                        "sources": len(source_rows),
+                        "sourceDiversity": {
+                            "distinctHosts": len(
+                                {
+                                    (urlsplit(source.canonical_url).hostname or "").lower()
+                                    for source in source_rows
+                                    if urlsplit(source.canonical_url).hostname
+                                }
+                            ),
+                            "distinctPublishers": len(
+                                {
+                                    source.publisher.strip().casefold()
+                                    for source in source_rows
+                                    if source.publisher and source.publisher.strip()
+                                }
+                            ),
+                            "independenceAssessed": False,
+                        },
                         "providerOperations": usage.search_calls,
                         "accountedEstimatedCostUsd": str(usage.estimated_cost_usd),
                         "quality": report.document["quality"]
                         if report and report.document
                         else None,
+                        "coverage": {
+                            "requirementsTotal": len(report.document["requirements"]),
+                            "requirementsAddressed": sum(
+                                row["status"] == "addressed"
+                                for row in report.document["requirements"]
+                            ),
+                            "questionsTotal": len(report.document["questionCoverage"]),
+                            "questionsAddressed": sum(
+                                row["status"] == "addressed"
+                                for row in report.document["questionCoverage"]
+                            ),
+                        }
+                        if report and report.document
+                        else None,
                         "capturedLogRecords": len(capture.lines),
                         "droppedLogRecords": capture.dropped,
+                        "workloadFingerprint": hashlib.sha256(
+                            json.dumps(
+                                {
+                                    "version": "focused-discovery-pair-v1",
+                                    "mode": "focused",
+                                    "question": question,
+                                    "requirements": [
+                                        "Explain operational trade-offs",
+                                        "State evidence limitations",
+                                    ],
+                                    "providerOperations": 6,
+                                    "activeBudgetMs": 180000,
+                                    "modelRouting": final.model_routing,
+                                },
+                                sort_keys=True,
+                                separators=(",", ":"),
+                            ).encode()
+                        ).hexdigest(),
                     }
                 metrics = analyze(io.StringIO("\n".join(capture.lines)))
+                records = [json.loads(line) for line in capture.lines if line.startswith("{")]
+                result["modelCalls"] = [
+                    {
+                        key: row.get(key)
+                        for key in (
+                            "role",
+                            "model",
+                            "provider",
+                            "outcome",
+                            "remoteDurationMs",
+                            "durationMs",
+                        )
+                    }
+                    for row in records
+                    if row.get("event") == "dependency.outcome"
+                    and row.get("operation") == "model"
+                    and row.get("outcome") != "started"
+                ]
+                result["synthesis"] = [
+                    {
+                        key: row.get(key)
+                        for key in (
+                            "candidateCount",
+                            "verifiedClaimCount",
+                            "rejectionCounts",
+                            "claimStatuses",
+                        )
+                    }
+                    for row in records
+                    if row.get("operation") == "synthesis.findings"
+                ]
                 result["dependencies"] = [
                     item for item in metrics["dependencies"] if item["category"] == "attempt"
                 ]
@@ -177,13 +306,65 @@ if __name__ == "__main__":
     parser.add_argument("--confirm-paid", action="store_true")
     parser.add_argument("--runs", type=int, choices=(1, 2, 3), default=1)
     parser.add_argument("--offset", type=int, choices=(0, 1, 2), default=0)
+    parser.add_argument("--question", help="Optional 5–1000 character question; requires --runs 1")
+    parser.add_argument("--discovery-provider", choices=("tavily", "serper"))
+    parser.add_argument(
+        "--compare-discovery",
+        action="store_true",
+        help="Two paid runs of the same single workload; one per discovery route",
+    )
+    parser.add_argument(
+        "--compare-http-clients",
+        action="store_true",
+        help="Two paid Focused runs of one workload; worker-owned clients vs shared pools",
+    )
     args = parser.parse_args()
     if not args.confirm_paid:
         parser.error("explicit --confirm-paid approval required")
     if args.runs + args.offset > 3:
         parser.error("selected checks must stay within the three-question workload")
+    if args.question is not None and (
+        args.runs != 1 or not 5 <= len(args.question.strip()) <= 1000
+    ):
+        parser.error("custom question requires --runs 1 and 5–1000 characters")
+    if args.compare_discovery and (args.runs != 1 or args.discovery_provider is not None):
+        parser.error("discovery comparison requires --runs 1 and no single-provider override")
+    if args.compare_discovery and args.compare_http_clients:
+        parser.error("choose only one comparison")
+    if args.compare_http_clients and (args.runs != 1 or args.discovery_provider is not None):
+        parser.error("HTTP-client comparison requires --runs 1 and no single-provider override")
+
+    async def run_selected() -> None:
+        if args.compare_discovery:
+            # Preflight before either arm can spend. Same question, requirements,
+            # mode, model routes and budgets; each arm gets fresh run/receipts.
+            from research_api.config import get_settings
+
+            if not get_settings().SERPER_API_KEY:
+                raise ValueError("comparison requires the configured Serper credential")
+            for provider in ("tavily", "serper"):
+                await benchmark(1, args.offset, question=args.question, discovery_provider=provider)
+        elif args.compare_http_clients:
+            # Keep all run settings and discovery route fixed; vary only whether
+            # provider HTTP clients are worker-owned or shared by the lifespan.
+            question = args.question or QUESTIONS[args.offset]
+            for mode in ("worker", "shared"):
+                await benchmark(
+                    1,
+                    args.offset,
+                    question=question,
+                    http_client_mode=mode,
+                )
+        else:
+            await benchmark(
+                args.runs,
+                args.offset,
+                question=args.question,
+                discovery_provider=args.discovery_provider,
+            )
+
     try:
-        asyncio.run(benchmark(args.runs, args.offset))
+        asyncio.run(run_selected())
     except Exception as error:
         print(json.dumps({"event": "benchmark.error", "errorType": type(error).__name__}))
         raise SystemExit(1) from None

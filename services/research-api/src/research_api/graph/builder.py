@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import uuid
@@ -26,10 +27,12 @@ from research_api.db.models import (
     Citation,
     EvidenceClaim,
     PlanApproval,
+    ProviderCallReservation,
     Report,
     ResearchGap,
     ResearchPlan,
     ResearchRun,
+    RuntimeJob,
     Source,
     SubQuestion,
     SubQuestionAttempt,
@@ -37,10 +40,14 @@ from research_api.db.models import (
 )
 from research_api.db.session import tenant_session
 from research_api.events.outbox import EventOutbox
-from research_api.execution import finish_node, start_node
+from research_api.execution import close_open_nodes, finish_node, start_node
+from research_api.grounding import grounded_writer_request, restore_passage_quotes
 from research_api.ingestion import TavilyEvidenceIngestor
 from research_api.lifecycle import TERMINAL_RUN_STATUSES, ensure_active, lock_run
-from research_api.model_budget import model_response, model_run
+from research_api.model_budget import model_response, model_run, request_fingerprint
+from research_api.model_routing import ModelProvider, ModelRole, ModelRoute, pin_run_model_routing
+from research_api.providers.http_clients import get_provider_http_client
+from research_api.providers.serper import SerperAdapter
 from research_api.providers.tavily import TavilyAdapter
 from research_api.query_intelligence import is_quick_explainer
 from research_api.reliability import (
@@ -50,7 +57,13 @@ from research_api.reliability import (
     section_for,
 )
 from research_api.report_document import build_report_document
-from research_api.reports import ReportFinding, render_report, report_policy, select_passages
+from research_api.reports import (
+    ReportFinding,
+    render_report,
+    report_policy,
+    select_passages,
+    verified_figures,
+)
 from research_api.repositories.budgets import BudgetExceededError
 from research_api.research_limits import source_allocations, source_limit
 from research_api.runtime_context import LeaseLostError
@@ -65,19 +78,68 @@ logger = logging.getLogger(__name__)
 model_client: ContextVar[Any | None] = ContextVar("model_client", default=None)
 
 
-async def _model_response(settings: Settings, **request: Any) -> Any:
-    client = model_client.get()
-    owned = client is None
-    if client is None:
-        if settings.OPENAI_API_KEY is None:
-            raise RuntimeError("OPENAI_API_KEY is required for model dispatch")
+@dataclass(slots=True)
+class ModelRuntime:
+    routes: dict[ModelRole, ModelRoute]
+    clients: dict[ModelProvider, AsyncOpenAI]
+
+
+def _active_model_route(settings: Settings, role: ModelRole) -> ModelRoute:
+    runtime = model_client.get()
+    return runtime.routes[role] if isinstance(runtime, ModelRuntime) else settings.model_route(role)
+
+
+def _model_role_available(settings: Settings, role: ModelRole) -> bool:
+    runtime = model_client.get()
+    route = _active_model_route(settings, role)
+    if isinstance(runtime, ModelRuntime):
+        return route.provider in runtime.clients
+    return settings.model_api_key(route.provider) is not None or runtime is not None
+
+
+async def _model_response(settings: Settings, *, role: ModelRole = "writer", **request: Any) -> Any:
+    runtime = model_client.get()
+    route = _active_model_route(settings, role)
+    timeout = (
+        settings.MODEL_WRITER_TIMEOUT_SECONDS
+        if role == "writer"
+        else settings.PROVIDER_TIMEOUT_SECONDS
+    )
+    base_client = (
+        runtime.clients.get(route.provider) if isinstance(runtime, ModelRuntime) else runtime
+    )
+    owned = base_client is None
+    if base_client is None:
+        key = settings.model_api_key(route.provider)
+        if key is None:
+            raise RuntimeError(f"{route.provider.upper()}_API_KEY is required for model dispatch")
+        client_options: dict[str, Any] = {}
+        if route.provider == "openrouter":
+            client_options["base_url"] = "https://openrouter.ai/api/v1"
         client = AsyncOpenAI(
-            api_key=settings.OPENAI_API_KEY.get_secret_value(),
+            api_key=key.get_secret_value(),
             max_retries=0,
-            timeout=settings.PROVIDER_TIMEOUT_SECONDS,
+            timeout=timeout,
+            **client_options,
         )
+    elif (
+        role == "writer"
+        and timeout != settings.PROVIDER_TIMEOUT_SECONDS
+        and callable(getattr(base_client, "with_options", None))
+    ):
+        # OpenAI's copy keeps the same pooled HTTP transport while changing only
+        # this request's timeout; the lifespan/run owner still closes the base.
+        client = base_client.with_options(timeout=timeout)
+    else:
+        client = base_client
     try:
-        return await model_response(client, max_attempts=settings.PROVIDER_MAX_ATTEMPTS, **request)
+        return await model_response(
+            client,
+            provider=route.provider,
+            role=role,
+            max_attempts=settings.PROVIDER_MAX_ATTEMPTS,
+            **{**request, "model": route.model},
+        )
     finally:
         if owned:
             await client.close()
@@ -163,6 +225,7 @@ class RunState(TypedDict):
     sub_question_ids: list[str]
     source_ids: Annotated[list[str], merge_source_ids]
     quick_mode: bool
+    discovery_provider: NotRequired[Literal["tavily", "serper"]]
     error: NotRequired[str]
     reflection_round: NotRequired[int]
     expand: NotRequired[bool]
@@ -261,14 +324,15 @@ def _heuristic_plan(question: str, max_sub_questions: int) -> PlannerOutput:
 async def _plan_with_openai(
     settings: Settings, question: str, max_sub_questions: int
 ) -> PlannerOutput:
-    if settings.OPENAI_API_KEY is None:
+    if not _model_role_available(settings, "planner"):
         if settings.APP_ENV == "development":
             return _heuristic_plan(question, max_sub_questions)
-        raise RuntimeError("OPENAI_API_KEY is required outside development")
+        route = _active_model_route(settings, "planner")
+        raise RuntimeError(f"{route.provider.upper()}_API_KEY is required outside development")
 
     response = await _model_response(
         settings,
-        model=settings.LLM_MODEL_NAME,
+        role="planner",
         instructions=(
             f"You are a careful research planner. Produce 1 to {max_sub_questions} "
             "non-overlapping sub-questions. "
@@ -342,6 +406,29 @@ async def _read_source_context(
     return usable, "\n\n---\n\n".join(chunks)
 
 
+async def _has_legacy_writer_request(settings: Settings, request: dict[str, Any]) -> bool:
+    """Replay an existing old request, including ambiguous dispatches, before policy changes."""
+    identity = model_run.get()
+    if identity is None:
+        return False
+    tenant_id, run_id = identity
+    route = _active_model_route(settings, "writer")
+    fingerprint = request_fingerprint(route.provider, {**request, "model": route.model}, "writer")
+    async with tenant_session(str(tenant_id)) as session:
+        return (
+            await session.scalar(
+                select(ProviderCallReservation.id).where(
+                    ProviderCallReservation.tenant_id == tenant_id,
+                    ProviderCallReservation.run_id == run_id,
+                    ProviderCallReservation.provider == "internal",
+                    ProviderCallReservation.operation == "model",
+                    ProviderCallReservation.request_fingerprint == fingerprint,
+                )
+            )
+            is not None
+        )
+
+
 async def _synthesize_with_openai(
     settings: Settings,
     *,
@@ -349,9 +436,11 @@ async def _synthesize_with_openai(
     source_context: str,
     max_search_calls: int = 12,
     report_requirements: Sequence[str] = (),
+    materials: Sequence[SourceMaterial] = (),
 ) -> ReportDraft:
-    if settings.OPENAI_API_KEY is None:
-        raise RuntimeError("OPENAI_API_KEY is required to produce a claim-verified synthesis")
+    if not _model_role_available(settings, "writer"):
+        route = _active_model_route(settings, "writer")
+        raise RuntimeError(f"{route.provider.upper()}_API_KEY is required to synthesize")
     if max_search_calls >= 3:
         policy = report_policy(max_search_calls)
         schema_model: type[ReportAssertions] = (
@@ -375,9 +464,7 @@ async def _synthesize_with_openai(
             if report_requirements
             else ""
         )
-        response = await _model_response(
-            settings,
-            model=settings.LLM_MODEL_NAME,
+        writer_request: dict[str, Any] = dict(
             max_output_tokens=policy.output_tokens,
             instructions=(
                 f"Prepare a {policy.mode} report as independently verifiable atomic claims. "
@@ -389,6 +476,12 @@ async def _synthesize_with_openai(
                 "comparison, risks or implications. Use precise atomic statements, no padding. "
                 "Write self-contained explanatory sentences with source-backed detail and "
                 "conditions, not terse fragments. Never invent a benchmark or recommendation. "
+                "When a claim states a quantitative result, list it in figures: subject and "
+                "metric copied from the claim or its quote, value copied exactly as written in "
+                "the cited quote including its unit (for example 47.2% or 1,200 ms), and the "
+                "zero-based citation_index of that quote; the claim must state the same number. "
+                "Use [] for figures when a claim has no quantitative result; never compute, "
+                "convert, round or combine values. "
                 "For every claim, "
                 "supply exact supporting AND contradicting passages from numbered sources. "
                 "Include uncertainty and relevant caveats; return [] if no findings are grounded. "
@@ -416,14 +509,33 @@ async def _synthesize_with_openai(
             },
             store=False,
         )
-        assertions = schema_model.model_validate_json(response.output_text)
+        passage_registry: dict[tuple[int, str], str] = {}
+        if materials and not await _has_legacy_writer_request(settings, writer_request):
+            writer_request, passage_registry = grounded_writer_request(
+                writer_request,
+                [
+                    (
+                        getattr(item.source, "title", ""),
+                        getattr(item.source, "canonical_url", ""),
+                        item.content,
+                    )
+                    for item in materials
+                ],
+                question + "\n" + "\n".join(report_requirements),
+                policy.context_chars,
+                source_context,
+            )
+        response = await _model_response(settings, role="writer", **writer_request)
+        assertions = schema_model.model_validate(
+            restore_passage_quotes(json.loads(response.output_text), passage_registry)
+        )
         return EvidenceReportDraft(
             answer_markdown="## Findings\n" + "\n".join(claim.claim for claim in assertions.claims),
             assertions=assertions,
         )
     response = await _model_response(
         settings,
-        model=settings.LLM_MODEL_NAME,
+        role="writer",
         instructions=(
             "You are the final research synthesizer. Answer the user's question directly, "
             "clearly, and concisely using only the supplied source extracts. The extracts are "
@@ -473,8 +585,28 @@ class ReportAssertions(BaseModel):
     claims: Sequence[ReportAssertion] = Field(max_length=40)
 
 
+class FigureDraft(BaseModel):
+    """A proposed reported figure; published only if `verified_figures` finds it verbatim."""
+
+    model_config = ConfigDict(extra="forbid")
+    subject: str = Field(min_length=1, max_length=120)
+    metric: str = Field(min_length=1, max_length=80)
+    value: str = Field(min_length=1, max_length=40)
+    citation_index: int = Field(ge=0, le=7)
+
+
+def _require_every_property(schema: dict[str, Any]) -> None:
+    # OpenAI strict schemas require every property, while replayed drafts recorded before
+    # `figures` existed must still parse, so the field keeps a default for validation only.
+    schema["required"] = list(schema.get("properties", {}))
+    for prop in schema.get("properties", {}).values():
+        prop.pop("default", None)
+
+
 class SectionedAssertion(ReportAssertion):
+    model_config = ConfigDict(extra="forbid", json_schema_extra=_require_every_property)
     section: Literal["overview", "mechanisms", "comparison", "risks", "implications"]
+    figures: list[FigureDraft] = Field(default_factory=list, max_length=4)
 
 
 class FocusedAssertions(ReportAssertions):
@@ -517,7 +649,7 @@ async def _report_assertions(
     started = monotonic()
     response = await _model_response(
         settings,
-        model=settings.LLM_MODEL_NAME,
+        role="claim_review",
         instructions=(
             "Audit every substantive independently verifiable assertion in this report. "
             "Copy each assertion verbatim from the report; do not add new assertions. "
@@ -621,7 +753,7 @@ async def _semantic_reviews_with_openai(
 
     from research_api.db.models import ProviderCallReservation
 
-    if settings.OPENAI_API_KEY is None:
+    if not _model_role_available(settings, "claim_review"):
         return []
     if len(claims) > 40 or any(len(claim.citations) > 8 for claim in claims):
         raise ValueError("semantic verification exceeds the report assertion bounds")
@@ -656,7 +788,7 @@ async def _semantic_reviews_with_openai(
     if identity is not None:
         tenant_id, run_id = identity
         legacy_request = {
-            "model": settings.LLM_MODEL_NAME,
+            "model": _active_model_route(settings, "claim_review").model,
             "instructions": instructions,
             "input": str(inputs),
             "text": {"format": format_schema},
@@ -675,7 +807,7 @@ async def _semantic_reviews_with_openai(
                 )
             )
         if existing is not None:
-            response = await _model_response(settings, **legacy_request)
+            response = await _model_response(settings, role="claim_review", **legacy_request)
             return SemanticReviewOutput.model_validate_json(response.output_text).reviews
     # Bound response size by citations, not claims. Keep complete claims in a
     # batch and retain their indices across batches; identical claim text in
@@ -703,7 +835,7 @@ async def _semantic_reviews_with_openai(
         }
         response = await _model_response(
             settings,
-            model=settings.LLM_MODEL_NAME,
+            role="claim_review",
             # Room for the JSON envelope and conservative per-review overhead.
             # Sequential admission settles each batch before reserving the next.
             max_output_tokens=256 + 64 * len(pairs),
@@ -859,13 +991,13 @@ def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
             run.plan_version = 1
             run.status = "researching"
             sub_questions: list[SubQuestion] = []
-            for item in plan.sub_questions:
+            for index, item in enumerate(plan.sub_questions):
                 sub_question = SubQuestion(
                     tenant_id=tenant_id,
                     run_id=run_id,
                     plan_id=persisted_plan.id,
                     question=item.question,
-                    payload=item.model_dump(mode="json", by_alias=True),
+                    payload=item.model_dump(mode="json", by_alias=True) | {"planIndex": index},
                     status="pending",
                     attempts=0,
                 )
@@ -926,7 +1058,24 @@ def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
             ):
                 raise PermissionError("approved decision missing")
             run.status = "researching"
-        return {}
+            question_ids = list(
+                await session.scalars(
+                    select(SubQuestion.id)
+                    .where(
+                        SubQuestion.tenant_id == tenant_id,
+                        SubQuestion.run_id == run_id,
+                        SubQuestion.plan_id == plan_id,
+                    )
+                    .order_by(
+                        SubQuestion.payload["planIndex"].as_integer().nulls_last(),
+                        SubQuestion.created_at,
+                        SubQuestion.id,
+                    )
+                )
+            )
+            if not question_ids:
+                raise RuntimeError("approved plan has no persisted research questions")
+        return {"sub_question_ids": [str(item) for item in question_ids]}
 
     async def research_worker(state: RunState) -> dict[str, list[str]]:
         tenant_id = uuid.UUID(state["tenant_id"])
@@ -944,10 +1093,29 @@ def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
         )
         adapter = TavilyAdapter(
             api_key=settings.TAVILY_API_KEY.get_secret_value(),
+            client=get_provider_http_client("tavily"),
             max_attempts=settings.PROVIDER_MAX_ATTEMPTS,
             timeout=settings.PROVIDER_TIMEOUT_SECONDS,
         )
-        ingestor = TavilyEvidenceIngestor(adapter=adapter, artifact_store=store)
+        # The initial graph input is durably checkpointed before intake. Legacy
+        # checkpoints without a route remain Tavily even if the flag changes.
+        discovery_adapter = None
+        if state.get("discovery_provider", "tavily") == "serper":
+            if settings.SERPER_API_KEY is None:
+                await adapter.aclose()
+                raise RuntimeError("SERPER_API_KEY is required for this pinned discovery route")
+            discovery_adapter = SerperAdapter(
+                api_key=settings.SERPER_API_KEY.get_secret_value(),
+                client=get_provider_http_client("serper"),
+                max_attempts=settings.PROVIDER_MAX_ATTEMPTS,
+                timeout=settings.PROVIDER_TIMEOUT_SECONDS,
+                retry_after_max_s=settings.DISCOVERY_RETRY_AFTER_MAX_SECONDS,
+            )
+        ingestor = TavilyEvidenceIngestor(
+            adapter=adapter,
+            artifact_store=store,
+            discovery_adapter=discovery_adapter,
+        )
         source_ids: list[str] = []
         async with tenant_session(str(tenant_id)) as session:
             budget = await session.scalar(
@@ -1112,6 +1280,8 @@ def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
                     tasks.create_task(collect(sub_question_id, slots))
         finally:
             await adapter.aclose()
+            if discovery_adapter:
+                await discovery_adapter.aclose()
         if await _cancel_if_requested(tenant_id=tenant_id, run_id=run_id):
             return {"source_ids": source_ids}
         await _transition(
@@ -1299,6 +1469,7 @@ def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
             question=state["question"],
             source_context=source_context,
             max_search_calls=max_search_calls,
+            materials=usable_sources,
             **({"report_requirements": requirements} if requirements else {}),
         )
         assertions = (
@@ -1338,12 +1509,33 @@ def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
                 check = "insufficient_evidence"
             audited.append((claim, check, details))
         publishable = [item for item in audited if item[1] == "supported"]
+        rejection_counts: Counter[str] = Counter()
+        claim_failures: dict[int, Counter[str]] = {}
+        for claim, check, details in audited:
+            if check == "supported":
+                continue
+            failures: Counter[str] = Counter()
+            if not claim.citations:
+                failures["missing_citations"] += 1
+            if len(claim.citations) != len(details):
+                failures["invalid_sources"] += len(claim.citations) - len(details)
+            for _, _, start, _, review, _ in details:
+                if start is None:
+                    failures["nonexact_quote"] += 1
+                elif review is None:
+                    failures["missing_review"] += 1
+                elif review.verdict != "supports":
+                    failures[review.verdict] += 1
+            claim_failures[id(claim)] = failures
+            rejection_counts.update(failures)
         operation_event(
             "synthesis.findings",
             started=synthesis_started,
             outcome="succeeded" if publishable else "insufficient_evidence",
             candidateCount=len(assertions.claims),
             verifiedClaimCount=len(publishable),
+            rejectionCounts=dict(rejection_counts),
+            claimStatuses=dict(Counter(check for _, check, _ in audited)),
             sourceCount=len(usable_sources),
             mode=report_policy(max_search_calls).mode,
         )
@@ -1353,6 +1545,11 @@ def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
                 claim.claim,
                 tuple(citation.source_number for citation, *_ in citations),
                 getattr(claim, "section", "mechanisms"),
+                verified_figures(
+                    claim.claim,
+                    getattr(claim, "figures", []),
+                    [(citation.source_number, citation.quote) for citation, *_ in citations],
+                ),
             )
             for claim, _, citations in publishable
         ]
@@ -1398,7 +1595,7 @@ def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
                     run_id=run_id,
                     version=1,
                     markdown=markdown,
-                    published=True,
+                    published=False,
                 )
                 session.add(report)
                 await session.flush()
@@ -1443,10 +1640,13 @@ def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
                         caveats=claim.caveats,
                         provenance={
                             "createdBy": "research-synthesizer",
-                            "model": settings.LLM_MODEL_NAME,
+                            "model": _active_model_route(settings, "writer").model,
                             "verifierVersion": "semantic-review-v1",
                             "sourceIds": ",".join(str(source_id) for source_id in claim_source_ids),
                             "status": check,
+                            "verificationFailures": json.dumps(
+                                dict(claim_failures.get(id(claim), {}))
+                            ),
                             "reportSection": published_sections[id(claim)]
                             if check == "supported"
                             else (section_for(answer.answer_markdown, claim.claim) or "Draft"),
@@ -1481,7 +1681,9 @@ def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
                                     "semanticSupport": {
                                         "verdict": review.verdict if review else "unrelated",
                                         "confidence": review.confidence if review else 0,
-                                        "verifierModel": settings.LLM_MODEL_NAME,
+                                        "verifierModel": _active_model_route(
+                                            settings, "claim_review"
+                                        ).model,
                                         "verifierVersion": "semantic-review-v1",
                                     },
                                     "verifiedAt": datetime.now(UTC).isoformat(),
@@ -1518,8 +1720,45 @@ def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
                                 )[:1000],
                                 details={
                                     "why": (
-                                        "The assertion failed full exact-passage/support checks "
-                                        "and was excluded from the published findings."
+                                        "; ".join(
+                                            f"{count} {reason}"
+                                            for key, reason in (
+                                                (
+                                                    "missing_citations",
+                                                    "assertion has no cited passage",
+                                                ),
+                                                (
+                                                    "invalid_sources",
+                                                    "citation refers to an unavailable source",
+                                                ),
+                                                (
+                                                    "nonexact_quote",
+                                                    "quotation did not match saved source text",
+                                                ),
+                                                (
+                                                    "missing_review",
+                                                    "exact passage has no recorded support review",
+                                                ),
+                                                (
+                                                    "partially_supports",
+                                                    "passage only partially supports the assertion",
+                                                ),
+                                                (
+                                                    "contradicts",
+                                                    "passage contradicts the assertion",
+                                                ),
+                                                (
+                                                    "unrelated",
+                                                    "passage is unrelated to the assertion",
+                                                ),
+                                            )
+                                            if (
+                                                count := claim_failures.get(id(claim), {}).get(
+                                                    key, 0
+                                                )
+                                            )
+                                        )
+                                        + ". Excluded from published findings."
                                     ),
                                     "claimIds": [str(evidence_claim.id)],
                                     "subQuestionIds": [str(evidence_claim.sub_question_id)],
@@ -1540,6 +1779,18 @@ def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
                     ],
                     excluded=len(audited) - len(publishable),
                 )
+                # Mark publication only after every report field and linked claim
+                # is ready. The database trigger then freezes this exact version.
+                report.content_hash = hashlib.sha256(
+                    json.dumps(
+                        {"markdown": report.markdown, "document": report.document},
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                ).hexdigest()
+                report.published_at = datetime.now(UTC)
+                report.published = True
                 if not assertions.claims:
                     session.add(
                         ResearchGap(
@@ -1597,6 +1848,16 @@ def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
                     "sourceCount": len(usable_sources),
                     "verifiedClaimCount": len(publishable),
                 },
+            )
+            # Commit completion with the report: a deadline that fires after this
+            # transaction must not fail a run whose report already exists. The
+            # task closes first so run.completed stays the final event.
+            await close_open_nodes(session, tenant_id, run_id, "completed")
+            run.status = "completed"
+            await EventOutbox(session, tenant_id).append(
+                run_id=run_id,
+                event_type="run.completed",
+                payload={"reportId": str(run.report_id), "label": "Research run completed"},
             )
         return state
 
@@ -1694,19 +1955,56 @@ async def run_graph(
     client_context = model_client.set(None)
     telemetry_context = dependency_run.set(run_id)
     try:
-        # Construct in the parent task. LangGraph nodes inherit context values,
-        # but a lazily assigned child-task value would not return to this owner.
-        if settings.OPENAI_API_KEY is not None:
-            model_client.set(
-                AsyncOpenAI(
-                    api_key=settings.OPENAI_API_KEY.get_secret_value(),
-                    max_retries=0,
-                    timeout=settings.PROVIDER_TIMEOUT_SECONDS,
-                )
+        routes = await pin_run_model_routing(
+            tenant_id,
+            run_id,
+            settings.model_routing_snapshot(),
+            settings.legacy_model_routing_snapshot(),
+        )
+        for role, route in routes.items():
+            operation_event(
+                "model.route.selected",
+                started=monotonic(),
+                role=role,
+                provider=route.provider,
+                model=route.model,
+                routeSource="run_snapshot",
+                configuredRouteDiffers=route != settings.model_route(role),
             )
+        # Construct clients in the parent task; graph nodes inherit this runtime.
+        clients: dict[ModelProvider, AsyncOpenAI] = {}
+        for provider in {route.provider for route in routes.values()}:
+            key = settings.model_api_key(provider)
+            if key is None:
+                continue
+            options: dict[str, Any] = {}
+            if provider == "openrouter":
+                options["base_url"] = "https://openrouter.ai/api/v1"
+            clients[provider] = AsyncOpenAI(
+                api_key=key.get_secret_value(),
+                max_retries=0,
+                timeout=settings.PROVIDER_TIMEOUT_SECONDS,
+                **options,
+            )
+        model_client.set(ModelRuntime(routes=routes, clients=clients))
         async with tenant_session(str(tenant_id)) as session:
-            budget = await session.scalar(
-                select(Budget).where(Budget.tenant_id == tenant_id, Budget.run_id == run_id)
+            budget_row = (
+                await session.execute(
+                    select(Budget, RuntimeJob.graph_version)
+                    .outerjoin(
+                        RuntimeJob,
+                        (RuntimeJob.tenant_id == Budget.tenant_id)
+                        & (RuntimeJob.run_id == Budget.run_id),
+                    )
+                    .where(Budget.tenant_id == tenant_id, Budget.run_id == run_id)
+                )
+            ).first()
+            budget = budget_row[0] if budget_row else None
+            job_version = budget_row[1] if budget_row else None
+            use_serper = (
+                job_version == "research-v5-serper"
+                if job_version
+                else settings.SERPER_DISCOVERY_ENABLED
             )
         config = (
             checkpointer.config()
@@ -1730,6 +2028,7 @@ async def run_graph(
                     "sub_question_ids": [],
                     "source_ids": [],
                     "quick_mode": is_quick_explainer(question),
+                    "discovery_provider": "serper" if use_serper else "tavily",
                 }
             )
         )
@@ -1767,10 +2066,12 @@ async def run_graph(
             run = await lock_run(session, tenant_id, run_id)
             if run is not None:
                 if run.status in TERMINAL_RUN_STATUSES:
+                    await close_open_nodes(session, tenant_id, run_id, run.status)
                     return
                 if run.cancellation_requested_at is not None:
                     run.status = "cancelled"
                     run.cancelled_at = run.cancellation_requested_at
+                    await close_open_nodes(session, tenant_id, run_id, "cancelled")
                     await EventOutbox(session, tenant_id).append(
                         run_id=run_id,
                         event_type="run.cancelled",
@@ -1785,6 +2086,7 @@ async def run_graph(
                     if isinstance(exc, BudgetExceededError)
                     else "graph_execution_failed"
                 )
+                await close_open_nodes(session, tenant_id, run_id, "failed")
                 await EventOutbox(session, tenant_id).append(
                     run_id=run_id,
                     event_type="run.failed",
@@ -1800,7 +2102,7 @@ async def run_graph(
     finally:
         model_run.reset(model_context)
         dependency_run.reset(telemetry_context)
-        client = model_client.get()
+        runtime = model_client.get()
         model_client.reset(client_context)
-        if client is not None:
-            await client.close()
+        if isinstance(runtime, ModelRuntime):
+            await asyncio.gather(*(client.close() for client in runtime.clients.values()))

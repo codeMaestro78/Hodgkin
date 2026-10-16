@@ -29,6 +29,7 @@ OPERATIONS = {
     "http.headers",
     "http.request",
     "db.transaction",
+    "db.connection.acquire",
     "db.statement.slow",
     "db.statement",
     "db.snapshot.collections",
@@ -50,7 +51,7 @@ OPERATIONS = {
     "accounting",
     "response_artifact",
 } | {f"node.{node}" for node in NODES}
-PROVIDERS = {"openai", "tavily", "internal", "serper", "parallel"}
+PROVIDERS = {"openai", "openrouter", "tavily", "internal", "serper", "parallel"}
 SUCCESS = {"succeeded", "consumed"}
 ERROR = {"failed", "released", "uncertain", "not_dispatched", "cancelled", "rejected"}
 OTHER = {"estimated", "insufficient_evidence", "skipped", "cached", "paused"}
@@ -170,6 +171,9 @@ def analyze(
         run = run_label(record.get("runId"))
         if selected_run is not None and run != selected_run:
             counts["filtered"] += 1
+            continue
+        if event == "dependency.outcome" and record.get("outcome") == "started":
+            counts["lifecycle"] += 1
             continue
         counts["accepted"] += 1
         operation = safe_label(record.get("operation"), OPERATIONS)

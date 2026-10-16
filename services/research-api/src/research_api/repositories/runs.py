@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from research_api.config import get_settings
 from research_api.db.models import Budget, ResearchRun, UsageLedger
 
 
@@ -76,6 +77,7 @@ class RunRepository:
             idempotency_key=idempotency_key,
             parent_report_id=parent_report_id,
             approval_required=approval_required,
+            model_routing=get_settings().model_routing_snapshot(),
         )
         run = await self._session.scalar(
             statement.on_conflict_do_nothing(

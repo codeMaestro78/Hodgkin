@@ -153,7 +153,12 @@ async def seed(session, tenant, run, *, create_tenant=True):
                 )
             elif model is Report:
                 row.update(
-                    version=i + 1, markdown=f"Report {i}", published=True, created_at=timestamp
+                    version=i + 1,
+                    markdown=f"Report {i}",
+                    published=True,
+                    published_at=timestamp,
+                    content_hash=f"{i:064x}",
+                    created_at=timestamp,
                 )
             elif model is ProviderCall:
                 reservation = uuid4()

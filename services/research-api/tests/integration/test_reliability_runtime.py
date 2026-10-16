@@ -226,16 +226,19 @@ async def test_report_audit_retains_conflicts_but_publishes_only_supported_asser
         run = await session.scalar(select(ResearchRun).where(ResearchRun.id == run_id))
         assert run.status == "completed"
         report = await session.scalar(select(Report).where(Report.run_id == run_id))
-        assert "## Executive summary" in report.markdown
-        assert "## Methodology" in report.markdown
-        if audit_mode == "deep":
-            assert "## Cross-source comparative analysis" in report.markdown
-        if audit_mode == "balanced":
-            assert "## Comparative analysis" in report.markdown
+        if supported and located:
+            assert "## Executive summary" in report.markdown
+            assert "## Methodology" in report.markdown
+        else:
+            assert "## Research finished—answer not established" in report.markdown
+            assert "## Executive summary" not in report.markdown
+        # These fixtures contain no verified comparison finding, so no empty table section.
+        assert "## Cross-source comparative analysis" not in report.markdown
+        assert "## Comparative analysis" not in report.markdown
         assert disputed not in report.markdown
         assert (safe in report.markdown) is (supported and located)
         if not supported or not located:
-            assert "No factual findings were published" in report.markdown
+            assert "No findings passed the evidence checks" in report.markdown
         claims = list(
             await session.scalars(select(EvidenceClaim).where(EvidenceClaim.run_id == run_id))
         )
@@ -326,6 +329,8 @@ async def test_followup_is_owned_idempotent_and_preserves_parent_report(monkeypa
             version=1,
             markdown="Preserved original conclusion.",
             published=True,
+            published_at=datetime.now(UTC),
+            content_hash="0" * 64,
         )
         session.add(report)
         await session.flush()
@@ -339,6 +344,8 @@ async def test_followup_is_owned_idempotent_and_preserves_parent_report(monkeypa
             version=2,
             markdown="Newer report remains separate.",
             published=True,
+            published_at=datetime.now(UTC),
+            content_hash="0" * 64,
         )
         session.add(newer)
         await session.flush()

@@ -27,6 +27,9 @@ from research_api.runtime_context import JobFence
 from research_api.telemetry import operation_event
 
 GRAPH_VERSION = "research-v4"
+# Older binaries reject this version instead of resuming a Serper receipt with
+# Tavily. Existing v3/v4 jobs retain their original discovery semantics.
+SERPER_GRAPH_VERSION = "research-v5-serper"
 
 
 async def lock_registry(session: AsyncSession, tenant: uuid.UUID) -> DispatchRegistry:
@@ -65,7 +68,9 @@ async def enqueue(
             tenant_id=run.tenant_id,
             user_id=run.user_id,
             batch_id=batch_id,
-            graph_version=GRAPH_VERSION,
+            graph_version=SERPER_GRAPH_VERSION
+            if settings.SERPER_DISCOVERY_ENABLED
+            else GRAPH_VERSION,
         )
     )
     registry.next_due_at = datetime.now(UTC)
@@ -148,7 +153,9 @@ async def schedule_due(session: AsyncSession, tenant: uuid.UUID, settings: Setti
                     run_id=run.id,
                     tenant_id=tenant,
                     user_id=run.user_id,
-                    graph_version=GRAPH_VERSION,
+                    graph_version=SERPER_GRAPH_VERSION
+                    if settings.SERPER_DISCOVERY_ENABLED
+                    else GRAPH_VERSION,
                 )
             )
             await EventOutbox(session, tenant).append(
@@ -196,7 +203,18 @@ async def _close_abandoned_attempts(
 async def claim(tenant: uuid.UUID, owner: uuid.UUID, settings: Settings) -> JobFence | None:
     started = monotonic()
     async with tenant_session(str(tenant)) as session:
-        registry = await lock_registry(session, tenant)
+        # Discovery/enqueue already created the registry. Do not wait behind a
+        # busy workspace and stall claims for every other tenant. Keep the same
+        # exclusive registry lock through commit once acquired; enqueue's quota
+        # lock and scheduling/claim atomicity are otherwise unchanged.
+        registry = await session.scalar(
+            select(DispatchRegistry)
+            .where(DispatchRegistry.tenant_id == tenant)
+            .with_for_update(skip_locked=True)
+            .execution_options(populate_existing=True)
+        )
+        if registry is None:
+            return None
         await schedule_due(session, tenant, settings)
         job = await session.scalar(
             select(RuntimeJob)
@@ -249,7 +267,7 @@ async def claim(tenant: uuid.UUID, owner: uuid.UUID, settings: Settings) -> JobF
         # Empty-brief v3 jobs retain their exact model request/parser contracts.
         # Consult the locked, immutable run brief, never checkpoint/model output;
         # do not upgrade the stored version or redispatch incompatible receipts.
-        graph_compatible = job.graph_version == GRAPH_VERSION or (
+        graph_compatible = job.graph_version in {GRAPH_VERSION, SERPER_GRAPH_VERSION} or (
             job.graph_version == "research-v3" and run.report_requirements == []
         )
         if not graph_compatible or job.attempts >= 5:

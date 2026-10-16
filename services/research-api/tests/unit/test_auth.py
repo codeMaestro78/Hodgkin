@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
@@ -125,3 +126,52 @@ async def test_unprovisioned_user_cannot_create_workspace(monkeypatch: pytest.Mo
             settings(), "fixture-service", authorization="Bearer fixture"
         )
     assert error.value.status_code == 403
+
+
+async def test_identity_connect_budget_is_bounded_and_no_retry(monkeypatch):
+    get = mock_identity(monkeypatch, 200, {})
+    get.side_effect = httpx.ConnectTimeout("secret endpoint")
+    with pytest.raises(HTTPException) as error:
+        await auth.verified_subject(settings(), "Bearer fixture")
+    assert error.value.status_code == 503
+    assert get.await_count == 1
+    assert get.call_args.kwargs["timeout"].connect <= 3
+
+
+async def test_revocation_is_observed_on_next_request(monkeypatch):
+    subject = uuid.uuid4()
+    get = mock_identity(monkeypatch, 200, {})
+    get.side_effect = [
+        httpx.Response(
+            200,
+            json={"id": str(subject), "role": "authenticated", "email_confirmed_at": "2026-01-01"},
+        ),
+        httpx.Response(401, json={}),
+    ]
+    assert await auth.verified_subject(settings(), "Bearer fixture") == subject
+    with pytest.raises(HTTPException) as error:
+        await auth.verified_subject(settings(), "Bearer fixture")
+    assert error.value.status_code == 401
+    assert get.await_count == 2
+
+
+async def test_identity_total_deadline_fails_closed_and_closes_owned_client(monkeypatch):
+    client = AsyncMock()
+
+    async def stalled(*args, **kwargs):
+        await asyncio.Event().wait()
+
+    client.get.side_effect = stalled
+    monkeypatch.setattr(auth.httpx, "AsyncClient", lambda **kwargs: client)
+    monkeypatch.setattr(auth, "IDENTITY_DEADLINE_SECONDS", 0.01)
+    with pytest.raises(HTTPException) as error:
+        await auth.verified_subject(settings(), "Bearer fixture")
+    assert error.value.status_code == 503
+    client.aclose.assert_awaited_once()
+
+
+async def test_identity_cancellation_propagates(monkeypatch):
+    get = mock_identity(monkeypatch, 200, {})
+    get.side_effect = asyncio.CancelledError
+    with pytest.raises(asyncio.CancelledError):
+        await auth.verified_subject(settings(), "Bearer fixture")

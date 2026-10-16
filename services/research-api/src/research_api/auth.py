@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import secrets
 import uuid
 from collections.abc import AsyncIterator
@@ -17,13 +18,17 @@ from research_api.db.session import tenant_session
 from research_api.telemetry import operation_event
 
 _identity_client: httpx.AsyncClient | None = None
+# A dead identity endpoint should not occupy a workspace request for ten seconds.
+# Every request still validates against Supabase; no successful identities are cached.
+IDENTITY_TIMEOUT = httpx.Timeout(5.0, connect=3.0, pool=1.0)
+IDENTITY_DEADLINE_SECONDS = 6.0
 
 
 @asynccontextmanager
 async def identity_transport() -> AsyncIterator[None]:
     """Reuse connections, never cache identities or authorization decisions."""
     global _identity_client
-    async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
+    async with httpx.AsyncClient(timeout=IDENTITY_TIMEOUT, follow_redirects=False) as client:
         _identity_client = client
         try:
             yield
@@ -50,17 +55,24 @@ async def verified_subject(settings: Settings, authorization: str | None) -> uui
         client = _identity_client
         owned = client is None
         if client is None:
-            client = httpx.AsyncClient(timeout=10.0, follow_redirects=False)
+            client = httpx.AsyncClient(timeout=IDENTITY_TIMEOUT, follow_redirects=False)
         try:
-            response = await client.get(
-                f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1/user",
-                headers={
-                    "apikey": settings.SUPABASE_PUBLISHABLE_KEY,
-                    "Authorization": f"Bearer {token}",
-                },
+            async with asyncio.timeout(IDENTITY_DEADLINE_SECONDS):
+                response = await client.get(
+                    f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1/user",
+                    headers={
+                        "apikey": settings.SUPABASE_PUBLISHABLE_KEY,
+                        "Authorization": f"Bearer {token}",
+                    },
+                    timeout=IDENTITY_TIMEOUT,
+                )
+            operation_event(
+                "auth.verify",
+                started=started,
+                statusCode=response.status_code,
+                outcome="succeeded" if response.status_code == 200 else "rejected",
             )
-            operation_event("auth.verify", started=started, statusCode=response.status_code)
-        except httpx.HTTPError as exc:
+        except (httpx.HTTPError, TimeoutError) as exc:
             operation_event("auth.verify", started=started, outcome="failed", error=exc)
             raise
         finally:
@@ -76,7 +88,7 @@ async def verified_subject(settings: Settings, authorization: str | None) -> uui
         if not user.get("email_confirmed_at"):
             raise HTTPException(status_code=403, detail="confirm your email before researching")
         return uuid.UUID(user["id"])
-    except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+    except (httpx.HTTPError, TimeoutError, ValueError, KeyError, TypeError) as exc:
         raise HTTPException(status_code=503, detail="identity service unavailable") from exc
 
 

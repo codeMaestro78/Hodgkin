@@ -1,14 +1,14 @@
-"""Versioned standard text-rate snapshot, not a provider invoice.
-
-Reviewed 2026-10-13 against https://developers.openai.com/api/docs/models/gpt-4o-mini
-Unknown models retain an explicitly labelled policy estimate. No tool/service-tier fees.
-"""
+"""Versioned standard text-rate snapshots; estimates are not provider invoices."""
 
 from dataclasses import dataclass
 from decimal import ROUND_CEILING, Decimal
 
-PRICING_VERSION = "openai-standard-text-2026-10-13"
+PRICING_VERSION = "policy-estimate-v1"
 POLICY_MODEL_COST = Decimal("0.10")
+# Conservative policy reservation, not a vendor invoice or current price quote.
+SERPER_SEARCH_POLICY_COST = Decimal("0.001")
+
+_RATES: dict[tuple[str, str], tuple[str, "TextRate"]] = {}
 
 
 @dataclass(frozen=True)
@@ -30,7 +30,37 @@ class TextRate:
         ).quantize(Decimal("0.000001"), rounding=ROUND_CEILING)
 
 
-def model_rate(model: str) -> TextRate | None:
-    if model in {"gpt-4o-mini", "gpt-4o-mini-2024-07-18"}:
-        return TextRate(Decimal("0.15"), Decimal("0.075"), Decimal("0.60"))
-    return None
+_RATES.update(
+    {
+        ("openai", "gpt-4o-mini"): (
+            "openai-standard-text-2026-10-13",
+            TextRate(Decimal("0.15"), Decimal("0.075"), Decimal("0.60")),
+        ),
+        ("openai", "gpt-4o-mini-2024-07-18"): (
+            "openai-standard-text-2026-10-13",
+            TextRate(Decimal("0.15"), Decimal("0.075"), Decimal("0.60")),
+        ),
+        ("openai", "gpt-5.4-mini"): (
+            "openai-standard-text-2026-10-16",
+            TextRate(Decimal("0.75"), Decimal("0.075"), Decimal("4.50")),
+        ),
+        ("openai", "gpt-6-luna"): (
+            "openai-standard-text-2026-10-16",
+            TextRate(Decimal("0.10"), Decimal("0.01"), Decimal("0.50")),
+        ),
+        ("openrouter", "meta/muse-spark-1.3"): (
+            "openrouter-standard-text-2026-10-16",
+            TextRate(Decimal("1.25"), Decimal("0.15"), Decimal("4.25")),
+        ),
+    }
+)
+
+
+def model_rate(model: str, provider: str = "openai") -> TextRate | None:
+    entry = _RATES.get((provider, model))
+    return entry[1] if entry else None
+
+
+def model_pricing_version(model: str, provider: str = "openai") -> str | None:
+    entry = _RATES.get((provider, model))
+    return entry[0] if entry else None

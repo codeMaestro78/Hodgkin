@@ -125,3 +125,33 @@ async def test_malformed_binary_hint_does_not_kill_listener():
         finally:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_failed_publish_cools_down_without_blocking_local_hints(monkeypatch):
+    now = [100.0]
+    monkeypatch.setattr(wakeups, "monotonic", lambda: now[0])
+    hub = EventWakeups()
+    outgoing = asyncio.Queue(maxsize=8)
+    hub._outgoing = outgoing
+    client = MagicMock()
+    client.publish = AsyncMock(side_effect=RedisConnectionError("private address"))
+    task = asyncio.create_task(hub._publish(client, outgoing))
+    try:
+        tenant, run = uuid.uuid4(), uuid.uuid4()
+        hub.committed(tenant, run)
+        await asyncio.wait_for(outgoing.join(), timeout=0.5)
+        with hub.watch(tenant, run) as signal:
+            for _ in range(5):
+                hub.committed(tenant, run)
+                await asyncio.wait_for(outgoing.join(), timeout=0.5)
+            assert signal.is_set()
+        assert client.publish.await_count == 1
+        assert not hub._pending
+        now[0] += 31
+        client.publish.side_effect = None
+        hub.committed(tenant, run)
+        await asyncio.wait_for(outgoing.join(), timeout=0.5)
+        assert client.publish.await_count == 2
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)

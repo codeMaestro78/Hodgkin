@@ -28,12 +28,16 @@ from sqlalchemy import select
 
 from research_api.db.models import Budget, ProviderCall, ResearchRun, UsageLedger
 from research_api.db.session import tenant_session
-from research_api.pricing import POLICY_MODEL_COST, PRICING_VERSION, model_rate
+from research_api.pricing import (
+    POLICY_MODEL_COST,
+    model_pricing_version,
+    model_rate,
+)
 from research_api.providers.retry_policy import (
     pre_dispatch_failure,
     rejected_without_usage,
     retry_delay,
-    retryable_openai,
+    retryable_model_provider,
 )
 from research_api.repositories.budgets import (
     BudgetExceededError,
@@ -76,6 +80,18 @@ class ReplayResponse(BaseModel):
     usage: ReplayUsage | None = None
 
 
+def request_fingerprint(provider: str, request: dict[str, Any], role: str | None = None) -> str:
+    """Keep legacy OpenAI identities stable; isolate other providers explicitly."""
+    if provider == "openai":
+        identity: Any = request
+        separators = None
+    else:
+        identity = {"provider": provider, "role": role, "request": request}
+        separators = (",", ":")
+    payload = json.dumps(identity, sort_keys=True, separators=separators)
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
 def _replay_projection(response: Any, accounting: dict[str, Any]) -> dict[str, Any]:
     # Never serialize the SDK response wholesale: tool payloads, request echoes,
     # raw web bodies and headers are outside the replay contract. Preserve exact
@@ -114,7 +130,16 @@ def _restore_response(call: ProviderCall) -> ReplayResponse:
         ) from error
 
 
-async def model_response(client: Any, *, max_attempts: int = 3, **request: Any) -> Any:
+async def model_response(
+    client: Any,
+    *,
+    provider: str = "openai",
+    role: str | None = None,
+    max_attempts: int = 3,
+    **request: Any,
+) -> Any:
+    if provider not in {"openai", "openrouter"}:
+        raise ValueError("unsupported model provider")
     if type(max_attempts) is not int or not 1 <= max_attempts <= 3:
         raise ValueError("model attempts must be between one and three")
     if isinstance(client, AsyncOpenAI) and client.max_retries != 0:
@@ -132,10 +157,12 @@ async def model_response(client: Any, *, max_attempts: int = 3, **request: Any) 
     tenant, run = identity
     # UTF-8 length is an admission heuristic, not a guaranteed provider-token bound.
     input_bound = len(json.dumps(request, ensure_ascii=False).encode("utf-8"))
-    fingerprint = hashlib.sha256(json.dumps(request, sort_keys=True).encode()).hexdigest()
-    rate = model_rate(str(request.get("model", "")))
+    if role is not None and role not in {"planner", "writer", "claim_review"}:
+        raise ValueError("unsupported model role")
+    fingerprint = request_fingerprint(provider, request, role)
+    rate = model_rate(str(request.get("model", "")), provider)
     estimated = rate.cost(input_bound, output_bound) if rate else POLICY_MODEL_COST
-    basis = PRICING_VERSION if rate else "policy-estimate-v1"
+    basis = model_pricing_version(str(request.get("model", "")), provider) or "policy-estimate-v1"
 
     attempt_limit = max_attempts
     for attempt in range(1, max_attempts + 1):
@@ -232,6 +259,8 @@ async def model_response(client: Any, *, max_attempts: int = 3, **request: Any) 
                     "reservedOutputTokens": output_bound,
                     "pricingVersion": basis,
                     "model": str(request.get("model", "")),
+                    "modelProvider": provider,
+                    "modelRole": role,
                 }
                 session.add(
                     ProviderCall(
@@ -256,11 +285,34 @@ async def model_response(client: Any, *, max_attempts: int = 3, **request: Any) 
                 raise BudgetExceededError("actual model usage exceeded admission heuristic")
             return replay_result
         started = monotonic()
+        model_name = str(request.get("model", ""))
+        dependency_event(
+            provider=provider,
+            operation="model",
+            outcome="started",
+            attempt=attempt,
+            reason="dispatch",
+            model=model_name,
+            role=role,
+            max_attempts=attempt_limit,
+        )
         try:
             response = await client.responses.create(**request)
         except BaseException as error:
             remote_ms = (monotonic() - started) * 1000
             state = "released" if rejected_without_usage(error) else "uncertain"
+            status_code = getattr(error, "status_code", None)
+            failure = {
+                "version": "model-failure-v1",
+                "exceptionType": type(error).__name__[:120],
+                "statusCode": (
+                    status_code
+                    if type(status_code) is int and 100 <= status_code <= 599
+                    else None
+                ),
+                "outcome": state,
+                "retryable": retryable_model_provider(error),
+            }
             async with tenant_session(str(tenant)) as session:
                 call = await session.scalar(
                     select(ProviderCall).where(
@@ -272,6 +324,7 @@ async def model_response(client: Any, *, max_attempts: int = 3, **request: Any) 
                     raise LookupError("model call missing for reservation") from error
                 call.outcome = "failed" if state == "released" else "uncertain"
                 call.completed_at = datetime.now(UTC)
+                call.provider_usage = {**(call.provider_usage or {}), "failure": failure}
                 if state == "released":
                     before_dispatch = pre_dispatch_failure(error)
                     call.provider_usage = {
@@ -284,7 +337,7 @@ async def model_response(client: Any, *, max_attempts: int = 3, **request: Any) 
                             "statusCode": (
                                 None if before_dispatch else getattr(error, "status_code", None)
                             ),
-                            "retryable": retryable_openai(error),
+                            "retryable": retryable_model_provider(error),
                         },
                     }
                 await session.flush()
@@ -293,18 +346,26 @@ async def model_response(client: Any, *, max_attempts: int = 3, **request: Any) 
                     new_state=state,
                 )
             dependency_event(
-                provider="openai",
+                provider=provider,
                 operation="model",
                 outcome=state,
                 attempt=attempt,
                 started=started,
                 reason=type(error).__name__,
                 remote_duration_ms=remote_ms,
+                model=model_name,
+                role=role,
+                max_attempts=attempt_limit,
+                retry_scheduled=(
+                    state == "released"
+                    and retryable_model_provider(error)
+                    and attempt < attempt_limit
+                ),
             )
             if (
                 state == "released"
                 and isinstance(error, Exception)
-                and retryable_openai(error)
+                and retryable_model_provider(error)
                 and attempt < attempt_limit
             ):
                 await retry_delay(attempt)
@@ -333,11 +394,13 @@ async def model_response(client: Any, *, max_attempts: int = 3, **request: Any) 
                     actual_cost = rate.cost(input_tokens, output_tokens, cached)
             except (AttributeError, TypeError, ValueError):
                 dependency_event(
-                    provider="openai",
+                    provider=provider,
                     operation="accounting",
                     outcome="estimated",
                     attempt=attempt,
                     reason="invalid_usage",
+                    model=model_name,
+                    role=role,
                 )
         accounting["costUsd"] = str(actual_cost if actual_cost is not None else estimated)
         accounting["usageBasis"] = "provider-usage" if "inputTokens" in accounting else "reserved"
@@ -385,13 +448,17 @@ async def model_response(client: Any, *, max_attempts: int = 3, **request: Any) 
                 > budget.max_estimated_cost_usd
             )
         dependency_event(
-            provider="openai",
+            provider=provider,
             operation="model",
             outcome="consumed",
             attempt=attempt,
             started=started,
             reason=basis,
             remote_duration_ms=remote_ms,
+            model=model_name,
+            role=role,
+            max_attempts=attempt_limit,
+            retry_scheduled=False,
         )
         if overspent:
             # Commit real usage first. Failing now prevents any subsequent paid dispatch.

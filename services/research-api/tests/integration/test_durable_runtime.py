@@ -13,12 +13,13 @@ from langgraph.graph import END, START, StateGraph
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from research_api import dispatcher, jobs, runtime_api
+from research_api import api, dispatcher, jobs, runtime_api
 from research_api.checkpointing import CheckpointPool
 from research_api.config import Settings
 from research_api.db.models import (
     Budget,
     NodeExecution,
+    Report,
     ResearchBatch,
     ResearchPlan,
     ResearchRun,
@@ -148,8 +149,15 @@ async def test_plan_pause_survives_new_pool_and_decision_is_idempotent(monkeypat
         )
         assert "paused" in statuses and "failed" not in statuses
     assert collected == [] and planner.await_count == 1
+    monkeypatch.setattr(api, "_caller", runtime_api._caller)
+    waiting = (await api.get_research_run(run_id))["approval"]
+    assert waiting["state"] == "pending"
+    assert waiting["waitStartedAt"] and waiting["waitedMs"] == 0
     payload = ApprovalRequest(planId=plan_id, decision=decision)
     await runtime_api.approve(run_id, payload)
+    decided = (await api.get_research_run(run_id))["approval"]
+    assert decided["state"] == decision
+    assert decided["waitStartedAt"] is None and decided["waitedMs"] >= 0
     await runtime_api.approve(run_id, payload)
     with pytest.raises(HTTPException) as conflict:
         await runtime_api.approve(
@@ -175,6 +183,60 @@ async def test_plan_pause_survives_new_pool_and_decision_is_idempotent(monkeypat
         assert job.active_ms >= paused_ms
     assert len(collected) == (1 if decision == "approve" else 0)
     assert planner.await_count == 1
+
+
+async def editable_plan(monkeypatch):
+    tenant, user, run_id, settings = await seed(monkeypatch, approval=True)
+    planned = builder._heuristic_plan("Compare durable research", 1)
+    plan_id = uuid.uuid4()
+    async with tenant_session(str(tenant)) as session:
+        run = await session.get(ResearchRun, run_id)
+        job = await session.get(RuntimeJob, run_id)
+        run.status = "awaiting_approval"
+        run.active_plan_id = plan_id
+        run.plan_version = 1
+        job.state = "waiting"
+        session.add(
+            ResearchPlan(
+                id=plan_id,
+                tenant_id=tenant,
+                run_id=run_id,
+                plan_version=1,
+                plan=planned.model_dump(mode="json"),
+            )
+        )
+    return tenant, user, run_id, plan_id
+
+
+async def test_plan_edit_is_versioned_and_stale_edits_conflict(monkeypatch):
+    tenant, _, run_id, plan_id = await editable_plan(monkeypatch)
+    from research_api.runtime_api import EditResearchPlanRequest
+
+    payload = EditResearchPlanRequest.model_validate(
+        {
+            "planId": str(plan_id),
+            "expectedPlanVersion": 1,
+            "questions": ["How does durable execution work in research systems?"],
+        }
+    )
+    edited = await runtime_api.edit_plan(run_id, payload)
+    assert edited.plan_version == 2 and edited.plan_id != plan_id
+    assert edited.questions[0].question == "How does durable execution work in research systems?"
+    with pytest.raises(HTTPException) as stale:
+        await runtime_api.edit_plan(run_id, payload)
+    assert stale.value.status_code == 409
+    async with tenant_session(str(tenant)) as session:
+        run = await session.get(ResearchRun, run_id)
+        versions = list(
+            await session.scalars(
+                select(ResearchPlan.plan_version).where(
+                    ResearchPlan.tenant_id == tenant,
+                    ResearchPlan.run_id == run_id,
+                )
+            )
+        )
+        assert run.plan_version == 2 and run.active_plan_id == edited.plan_id
+        assert sorted(versions) == [1, 2]
 
 
 async def test_batch_atomic_capacity_and_idempotency(monkeypatch):
@@ -353,6 +415,47 @@ async def test_runtime_deadline_is_not_reset_by_recovery(monkeypatch, active_ms)
         assert job.active_ms >= active_ms
 
 
+@pytest.mark.parametrize("report_committed", [True, False])
+async def test_deadline_after_open_node_settles_task_with_run(monkeypatch, report_committed):
+    tenant, _, run_id, settings = await seed(monkeypatch)
+
+    def graph(settings, checkpointer=None):
+        graph = StateGraph(builder.RunState)
+
+        async def synthesizer(state):
+            await start_node(tenant, run_id, "synthesizer")
+            if report_committed:
+                async with tenant_session(str(tenant)) as session:
+                    run = await lock_run(session, tenant, run_id)
+                    report = Report(tenant_id=tenant, run_id=run_id, version=1, markdown="Fixture")
+                    session.add(report)
+                    await session.flush()
+                    run.report_id, run.status = report.id, "completed"
+            await asyncio.sleep(5)
+            raise AssertionError("deadline must interrupt this node")
+
+        graph.add_node("synthesizer", synthesizer)
+        graph.add_edge(START, "synthesizer")
+        graph.add_edge("synthesizer", END)
+        return graph.compile(checkpointer=checkpointer)
+
+    monkeypatch.setattr(builder, "build_graph", graph)
+    async with tenant_session(str(tenant)) as session:
+        budget = await session.scalar(select(Budget).where(Budget.run_id == run_id))
+        (await session.get(RuntimeJob, run_id)).active_ms = budget.max_wall_clock_ms - 1_000
+    fence = await jobs.claim(tenant, uuid.uuid4(), settings)
+    async with CheckpointPool(settings) as pool:
+        await dispatcher.execute(fence, settings, pool)
+    async with tenant_session(str(tenant)) as session:
+        run = await session.get(ResearchRun, run_id)
+        node = await session.scalar(select(NodeExecution).where(NodeExecution.run_id == run_id))
+        expected = "completed" if report_committed else "failed"
+        assert run.status == node.status == expected
+        assert node.completed_at is not None
+        if not report_committed:
+            assert run.error_code == "wall_clock_limit_exceeded"
+
+
 async def test_repair_plan_requires_its_own_approval_before_more_collection(monkeypatch):
     tenant, _, run_id, settings = await seed(monkeypatch, approval=True)
     monkeypatch.setattr(
@@ -394,7 +497,8 @@ async def test_repair_plan_requires_its_own_approval_before_more_collection(monk
         return graph.compile(checkpointer=checkpointer)
 
     monkeypatch.setattr(builder, "build_graph", graph)
-    plans = []
+    monkeypatch.setattr(api, "_caller", runtime_api._caller)
+    plans, waits = [], []
     for expected_collections in (0, 1):
         fence = await jobs.claim(tenant, uuid.uuid4(), settings)
         async with CheckpointPool(settings) as pool:
@@ -404,8 +508,16 @@ async def test_repair_plan_requires_its_own_approval_before_more_collection(monk
             assert run.status == "awaiting_approval"
             plans.append(run.active_plan_id)
         assert len(collections) == expected_collections
+        waits.append((await api.get_research_run(run_id))["approval"])
         await runtime_api.approve(run_id, ApprovalRequest(planId=plans[-1], decision="approve"))
     assert plans[0] != plans[1]
+    # The repair plan opens its own wait; collection time between them is not paused.
+    assert waits[0]["waitedMs"] == 0 and waits[0]["waitStartedAt"]
+    assert waits[1]["waitStartedAt"] > waits[0]["waitStartedAt"]
+    first_gap = datetime.fromisoformat(waits[1]["waitStartedAt"]) - datetime.fromisoformat(
+        waits[0]["waitStartedAt"]
+    )
+    assert 0 <= waits[1]["waitedMs"] <= first_gap.total_seconds() * 1000
     fence = await jobs.claim(tenant, uuid.uuid4(), settings)
     async with CheckpointPool(settings) as pool:
         await dispatcher.execute(fence, settings, pool)

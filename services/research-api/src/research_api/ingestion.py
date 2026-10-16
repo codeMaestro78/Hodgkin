@@ -24,6 +24,13 @@ from research_api.db.models import (
 )
 from research_api.db.session import tenant_session
 from research_api.events.outbox import EventOutbox
+from research_api.pricing import SERPER_SEARCH_POLICY_COST
+from research_api.providers.serper import (
+    SERPER_RESPONSE_SCHEMA_VERSION,
+    SerperAdapter,
+    SerperCancelled,
+    SerperRequestError,
+)
 from research_api.providers.tavily import (
     TAVILY_RESPONSE_SCHEMA_VERSION,
     ExtractResponse,
@@ -57,15 +64,32 @@ class _PreparedSource:
 
 
 class TavilyEvidenceIngestor:
-    """One-worker Tavily Search/Extract ingestion boundary.
+    """One-worker discovery/Tavily Extract ingestion boundary.
 
     Reservations are committed before network dispatch. Raw extracted content is written to object
     storage and only compact source metadata enters PostgreSQL.
     """
 
-    def __init__(self, *, adapter: TavilyAdapter, artifact_store: ArtifactStore) -> None:
+    def __init__(
+        self,
+        *,
+        adapter: TavilyAdapter,
+        artifact_store: ArtifactStore,
+        discovery_adapter: SerperAdapter | None = None,
+    ) -> None:
         self._adapter = adapter
         self._artifact_store = artifact_store
+        self._discovery_adapter = discovery_adapter
+
+    def _request_provider(self, request: ProviderRequest) -> str:
+        return "serper" if request.operation == "search" and self._discovery_adapter else "tavily"
+
+    def _response_version(self, request: ProviderRequest) -> str:
+        return (
+            SERPER_RESPONSE_SCHEMA_VERSION
+            if self._request_provider(request) == "serper"
+            else TAVILY_RESPONSE_SCHEMA_VERSION
+        )
 
     async def ingest(
         self,
@@ -81,7 +105,8 @@ class TavilyEvidenceIngestor:
         if max_results <= 0:
             return []
         await self._check_cancelled(tenant_id, run_id)
-        search_request = self._adapter.search_request(
+        search_adapter = self._discovery_adapter or self._adapter
+        search_request = search_adapter.search_request(
             query=query, max_results=max_results, allowed_domains=allowed_domains
         )
         replayed_search = await self._replay_response(
@@ -117,7 +142,9 @@ class TavilyEvidenceIngestor:
                 tenant_id=tenant_id,
                 run_id=run_id,
                 request=request,
-                estimated_cost=Decimal("0.008"),
+                estimated_cost=(
+                    SERPER_SEARCH_POLICY_COST if self._discovery_adapter else Decimal("0.008")
+                ),
             )
         except ReservationReplayError:
             # A concurrent owner may have committed between the replay lookup
@@ -131,7 +158,7 @@ class TavilyEvidenceIngestor:
                 "recovery-needed: concurrent search receipt missing"
             ) from None
         try:
-            search_response = await self._adapter.search(
+            search_response = await (self._discovery_adapter or self._adapter).search(
                 request,
                 before_attempt=lambda: self._check_cancelled(tenant_id, run_id),
             )
@@ -140,7 +167,15 @@ class TavilyEvidenceIngestor:
                 tenant_id=tenant_id,
                 reservation_id=search_reservation,
                 state=error.outcome
-                if isinstance(error, (TavilyRequestError, TavilyCancelledBeforeDispatch))
+                if isinstance(
+                    error,
+                    (
+                        TavilyRequestError,
+                        TavilyCancelledBeforeDispatch,
+                        SerperRequestError,
+                        SerperCancelled,
+                    ),
+                )
                 else "uncertain",
                 response_schema_version=None,
                 provider_request_id=None,
@@ -151,12 +186,22 @@ class TavilyEvidenceIngestor:
             run_id=run_id,
             reservation_id=search_reservation,
             state="consumed",
-            response_schema_version=TAVILY_RESPONSE_SCHEMA_VERSION,
+            response_schema_version=self._response_version(request),
             provider_request_id=search_response.request_id,
             provider_usage=search_response.usage,
             response_body=search_response.model_dump(mode="json"),
         )
 
+        if self._discovery_adapter:
+            # Do not pay for extraction until the exact candidate catalogue and
+            # shortlist have a durable, hash-checked receipt. Storage failures
+            # retain the consumed call; recovery never guesses or re-searches.
+            replay = await self._replay_response(
+                tenant_id=tenant_id, run_id=run_id, request=request
+            )
+            if not isinstance(replay, SearchResponse):
+                raise ProviderRecoveryNeededError("recovery-needed: shortlist receipt missing")
+            return replay
         return search_response
 
     async def _ingest_search_results(
@@ -646,15 +691,15 @@ class TavilyEvidenceIngestor:
             reservation, call = row
             if (
                 call is None
-                or reservation.provider != "tavily"
+                or reservation.provider != self._request_provider(request)
                 or reservation.operation != request.operation
                 or reservation.state not in {"consumed", "reserved", "uncertain"}
                 or call.run_id != run_id
-                or call.provider != "tavily"
+                or call.provider != self._request_provider(request)
                 or call.operation != request.operation
                 or call.request_fingerprint != request.fingerprint
                 or call.request_schema_version != request.request_schema_version
-                or call.response_schema_version != TAVILY_RESPONSE_SCHEMA_VERSION
+                or call.response_schema_version != self._response_version(request)
                 or call.outcome != "succeeded"
                 or call.completed_at is None
                 or not call.response_artifact_ref
@@ -734,6 +779,7 @@ class TavilyEvidenceIngestor:
                 run_id=run_id,
                 request=request,
                 estimated_cost=estimated_cost,
+                provider=self._request_provider(request),
             )
 
     @staticmethod
@@ -744,10 +790,11 @@ class TavilyEvidenceIngestor:
         run_id: uuid.UUID,
         request: ProviderRequest,
         estimated_cost: Decimal,
+        provider: str = "tavily",
     ) -> uuid.UUID:
         reservation = await BudgetReservationRepository(session, tenant_id).reserve(
             run_id=run_id,
-            provider="tavily",
+            provider=provider,
             operation=request.operation,
             request_fingerprint=request.fingerprint,
             estimated_cost_usd=estimated_cost,
@@ -759,12 +806,12 @@ class TavilyEvidenceIngestor:
             )
         )
         if existing_call is not None or reservation.state != "reserved":
-            raise ReservationReplayError("existing Tavily attempt cannot be re-dispatched")
+            raise ReservationReplayError("existing provider attempt cannot be re-dispatched")
         provider_call = ProviderCall(
             tenant_id=tenant_id,
             run_id=run_id,
             reservation_id=reservation.id,
-            provider="tavily",
+            provider=provider,
             operation=request.operation,
             request_fingerprint=request.fingerprint,
             request_schema_version=request.request_schema_version,
@@ -821,6 +868,7 @@ class TavilyEvidenceIngestor:
                 else "failed"
             )
             provider_call.completed_at = datetime.now(UTC)
+            settled_provider = provider_call.provider
         # Settlement commits before artifact I/O. A paid successful call stays
         # consumed even when object storage is unavailable or the await is cancelled.
         if response_body is not None:
@@ -838,7 +886,7 @@ class TavilyEvidenceIngestor:
                 )
             except Exception:
                 dependency_event(
-                    provider="tavily",
+                    provider=settled_provider,
                     operation="response_artifact",
                     outcome="failed",
                     reason="artifact_storage_failed",

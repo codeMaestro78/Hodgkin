@@ -29,9 +29,13 @@ def rejected_without_usage(error: BaseException) -> bool:
     }
 
 
-def retryable_openai(error: BaseException) -> bool:
+def retryable_model_provider(error: BaseException) -> bool:
     # 408/409/5xx and read/write failures may have executed: retain their reservation.
     return pre_dispatch_failure(error) or getattr(error, "status_code", None) == 429
+
+
+# Kept for existing provider-specific call sites and tests.
+retryable_openai = retryable_model_provider
 
 
 async def retry_delay(attempt: int) -> None:

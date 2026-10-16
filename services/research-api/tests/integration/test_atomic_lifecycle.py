@@ -236,6 +236,8 @@ async def test_gap_investigation_cannot_be_overwritten_by_second_request(monkeyp
             version=1,
             markdown="Fixture report",
             published=True,
+            published_at=datetime.now(UTC),
+            content_hash="0" * 64,
         )
         session.add(report)
         await session.flush()
@@ -335,6 +337,8 @@ async def test_synthesizer_completion_cannot_overwrite_cancel_or_failure(
             version=1,
             markdown="Fixture",
             published=True,
+            published_at=datetime.now(UTC),
+            content_hash="0" * 64,
         )
         session.add(report)
         await session.flush()
