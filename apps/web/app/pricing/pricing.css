@@ -1,0 +1,383 @@
+/* Pricing page. Builds on the landing tokens in landing.css. */
+.pr-hero {
+  position: relative;
+  padding: 150px 24px 0;
+  text-align: center;
+}
+.pr-field {
+  height: 640px;
+}
+.pr-hero-copy {
+  position: relative;
+  max-width: 720px;
+  margin: 0 auto;
+}
+.pr-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 14px 5px 10px;
+  border-radius: 100px;
+  background: #fff;
+  box-shadow: var(--lp-shadow-raised);
+  font-size: 13px;
+  font-weight: 600;
+}
+.pr-eyebrow::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  background: var(--lp-ink);
+  transform: rotate(45deg);
+}
+.pr-title {
+  margin-top: 22px;
+  font-size: clamp(56px, 8vw, 104px);
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: -0.06em;
+}
+.pr-lead {
+  max-width: 460px;
+  margin: 22px auto 0;
+  font-size: 18px;
+  color: var(--lp-muted);
+  text-wrap: pretty;
+}
+.pr-stage {
+  position: relative;
+  max-width: 1120px;
+  margin: 40px auto 0;
+}
+
+/* Billing toggle */
+.pr-billing {
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 4px;
+  border-radius: 100px;
+  background: #fff;
+  box-shadow: var(--lp-shadow-raised);
+}
+.pr-billing-thumb {
+  position: absolute;
+  inset: 4px auto 4px 4px;
+  width: calc(50% - 4px);
+  border-radius: 100px;
+  background: var(--lp-ink);
+  transition: transform 460ms var(--lp-bounce);
+}
+.pr-billing[data-billing="yearly"] .pr-billing-thumb {
+  transform: translateX(100%);
+}
+.pr-billing button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 9px 20px;
+  border-radius: 100px;
+  background: none;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--lp-muted);
+  transition: color 260ms var(--lp-inout);
+}
+.pr-billing button[aria-pressed="true"] {
+  color: var(--lp-paper);
+}
+.pr-billing small {
+  padding: 2px 8px;
+  border-radius: 100px;
+  background: #e7f1ec;
+  color: var(--lp-ok);
+  font-size: 11.5px;
+}
+
+/* Plans */
+.pr-plans {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 16px;
+  margin-top: 28px;
+  text-align: left;
+}
+.pr-plan-group {
+  border-radius: 28px;
+  background: #fff;
+  box-shadow:
+    0 0 0 1px rgb(37 37 34 / 7%),
+    0 2px 4px rgb(37 37 34 / 3%),
+    0 28px 60px -30px rgb(70 50 30 / 22%);
+}
+.pr-plan-paid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.pr-plan-paid .pr-plan + .pr-plan {
+  border-left: 1px solid var(--lp-line);
+}
+.pr-plan {
+  display: flex;
+  flex-direction: column;
+  padding: 14px 14px 30px;
+}
+.pr-plan > :not(.pr-plan-crew) {
+  margin-inline: 14px;
+}
+.pr-plan-crew {
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 2px;
+  height: 116px;
+  margin-bottom: 26px;
+  padding-bottom: 14px;
+  border-radius: 18px;
+  background:
+    radial-gradient(rgb(37 37 34 / 8%) 1px, transparent 1.4px) 0 0 / 14px 14px,
+    var(--lp-sand);
+  box-shadow: inset 0 -2px 0 var(--lp-line-strong);
+}
+.pr-plan h3 {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+.pr-plan-summary {
+  margin-top: 4px;
+  min-height: 2.9em;
+  color: var(--lp-muted);
+  font-size: 15px;
+}
+.pr-price {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 18px;
+}
+.pr-price-clip {
+  display: inline-block;
+  overflow: hidden;
+  padding-bottom: 2px;
+}
+.pr-price-value {
+  display: inline-block;
+  font-size: 48px;
+  line-height: 1;
+  letter-spacing: -0.05em;
+  font-variant-numeric: tabular-nums;
+}
+.pr-price-unit {
+  color: var(--lp-faint);
+  font-size: 15px;
+}
+.pr-price-note {
+  margin-top: 6px;
+  color: var(--lp-faint);
+  font-size: 13px;
+}
+.pr-plan .lp-btn {
+  margin-top: 22px;
+}
+.pr-plan-features {
+  display: grid;
+  gap: 11px;
+  margin-top: 26px;
+  padding: 22px 0 0;
+  border-top: 1px solid var(--lp-line);
+  list-style: none;
+  font-size: 14.5px;
+}
+.pr-plan-features li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.pr-plan-features svg {
+  flex-shrink: 0;
+  margin-top: 4px;
+  color: var(--lp-ok);
+}
+
+/* Comparison */
+.pr-table-wrap {
+  position: relative;
+  overflow-x: auto;
+  border-radius: 24px;
+  background: #fff;
+  box-shadow: var(--lp-shadow-raised);
+}
+.pr-table {
+  width: 100%;
+  min-width: 560px;
+  border-collapse: collapse;
+  font-size: 15px;
+}
+.pr-table th,
+.pr-table td {
+  padding: 16px 22px;
+  text-align: center;
+}
+.pr-table thead th {
+  padding-block: 20px 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.pr-table tbody th {
+  font-weight: 400;
+  text-align: left;
+  color: var(--lp-muted);
+}
+.pr-table tbody tr {
+  border-top: 1px solid var(--lp-line);
+  transition: background-color 200ms var(--lp-inout);
+}
+.pr-table tbody strong {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+@media (hover: hover) and (pointer: fine) {
+  .pr-table tbody tr:hover {
+    background: var(--lp-paper);
+  }
+}
+.pr-yes {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--lp-ink);
+  color: #fff;
+  vertical-align: middle;
+}
+.pr-no {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  vertical-align: middle;
+}
+.pr-no i {
+  width: 10px;
+  height: 1.5px;
+  border-radius: 1px;
+  background: var(--lp-line-strong);
+}
+.pr-notes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px 56px;
+  margin-top: 56px;
+  padding: 0 8px;
+}
+.pr-note-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: var(--lp-sand);
+  box-shadow: inset 0 0 0 1px var(--lp-line);
+}
+.pr-notes h3 {
+  margin-top: 16px;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.pr-notes p {
+  margin-top: 6px;
+  color: var(--lp-muted);
+  font-size: 15px;
+  text-wrap: pretty;
+}
+
+/* Questions */
+.pr-faq {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: 64px;
+  align-items: start;
+  padding-bottom: 40px;
+}
+.pr-faq-intro {
+  position: sticky;
+  top: 120px;
+}
+.pr-faq-intro h2 {
+  font-size: clamp(32px, 3.6vw, 46px);
+  font-weight: 400;
+  line-height: 1.08;
+  letter-spacing: -0.045em;
+}
+.pr-faq-intro p {
+  margin-top: 16px;
+  color: var(--lp-muted);
+  font-size: 17px;
+}
+.pr-faq-intro .lp-btn {
+  margin-top: 28px;
+}
+.pr-faq .lp-faq-stage {
+  min-height: 420px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .pr-lead.lp-enter {
+    animation-delay: 420ms;
+  }
+  .pr-stage.lp-enter {
+    animation-duration: 1100ms;
+    animation-delay: 560ms;
+  }
+  .pr-price-value {
+    animation: pr-roll 520ms var(--lp-out) both;
+  }
+}
+@keyframes pr-roll {
+  from {
+    opacity: 0;
+    filter: blur(4px);
+    transform: translateY(60%);
+  }
+}
+
+@media (max-width: 960px) {
+  .pr-plans,
+  .pr-faq {
+    grid-template-columns: 1fr;
+  }
+  .pr-faq {
+    gap: 40px;
+  }
+  .pr-faq-intro {
+    position: static;
+  }
+}
+@media (max-width: 720px) {
+  .pr-hero {
+    padding-top: 116px;
+  }
+  .pr-plan-paid,
+  .pr-notes {
+    grid-template-columns: 1fr;
+  }
+  .pr-plan-paid .pr-plan + .pr-plan {
+    border-left: 0;
+    border-top: 1px solid var(--lp-line);
+  }
+  .pr-plan-summary {
+    min-height: 0;
+  }
+  .pr-billing button {
+    padding: 9px 14px;
+  }
+  .pr-table th,
+  .pr-table td {
+    padding: 14px 12px;
+  }
+}

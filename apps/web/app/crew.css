@@ -1,0 +1,97 @@
+/* Research characters: shared across landing, pricing, auth and workspace. */
+.critter {
+  --lx: 0;
+  --ly: 0;
+  display: inline-block;
+  width: var(--crit-size);
+  line-height: 0;
+  pointer-events: auto;
+}
+.critter svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+.crit-pupil {
+  transform: translate(calc(var(--lx) * 1px), calc(var(--ly) * 1px));
+}
+.crit-eyes,
+.crit-body {
+  transform-box: fill-box;
+}
+.crit-eyes {
+  transform-origin: center;
+}
+.crit-body {
+  transform-origin: 50% 100%;
+}
+.critter[data-pose="peek"] .crit-legs {
+  display: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .crit-eyes {
+    animation: crit-blink 5.8s var(--crit-delay, 0ms) infinite;
+  }
+  .crit-body {
+    animation: crit-breathe 3.4s cubic-bezier(0.45, 0, 0.55, 1)
+      var(--crit-delay, 0ms) infinite;
+  }
+  .critter-quill .crit-eyes {
+    animation-duration: 4.6s;
+  }
+  .critter-lens .crit-body {
+    animation-duration: 3.9s;
+  }
+  /* Without a cursor to follow, eyes glance around on their own. */
+  :root:not(.crew-tracking) .crit-pupil {
+    animation: crit-glance 9s cubic-bezier(0.45, 0, 0.55, 1)
+      var(--crit-delay, 0ms) infinite;
+  }
+  .critter svg {
+    transition: transform 420ms cubic-bezier(0.22, 1.4, 0.36, 1);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .critter:hover svg {
+      transform: translateY(-7px) rotate(-4deg);
+    }
+    .critter:nth-child(even):hover svg {
+      transform: translateY(-7px) rotate(4deg);
+    }
+  }
+}
+@keyframes crit-blink {
+  0%,
+  93%,
+  100% {
+    transform: scaleY(1);
+  }
+  95% {
+    transform: scaleY(0.1);
+  }
+}
+@keyframes crit-breathe {
+  50% {
+    transform: scale(1.02, 0.975);
+  }
+}
+@keyframes crit-glance {
+  0%,
+  18%,
+  100% {
+    transform: translate(0, 0);
+  }
+  24%,
+  42% {
+    transform: translate(-2px, 0.6px);
+  }
+  50%,
+  66% {
+    transform: translate(1.8px, -1px);
+  }
+  72%,
+  90% {
+    transform: translate(0.4px, 1.6px);
+  }
+}

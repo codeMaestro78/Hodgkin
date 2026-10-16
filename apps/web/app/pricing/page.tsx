@@ -1,0 +1,193 @@
+import type { Metadata } from "next";
+import Link from "next/link";
+import type { CSSProperties } from "react";
+import { Icon } from "../components/ui";
+import { LandingMotion } from "../components/landing-motion";
+import { EvidenceField } from "../components/landing/evidence-field";
+import { FaqThread } from "../components/landing/faq-thread";
+import { SiteFooter, SiteNav } from "../components/landing/site-chrome";
+import { Critter } from "../components/crew/critter";
+import { CrewEyes } from "../components/crew/crew-eyes";
+import { PricingPlans } from "./pricing-plans";
+import "../landing.css";
+import "./pricing.css";
+
+export const metadata: Metadata = { title: "Pricing · HogsKin" };
+
+const YES = true;
+const NO = false;
+
+const COMPARISON: [
+  string,
+  string | boolean,
+  string | boolean,
+  string | boolean,
+][] = [
+  ["Research runs each month", "10", "60", "200"],
+  ["Focused and Balanced depth", YES, YES, YES],
+  ["Deep research, up to 20 sources", NO, YES, YES],
+  ["Inline citations and source passages", YES, YES, YES],
+  ["Library, history and PDF export", YES, YES, YES],
+  ["Compare reports side by side", NO, YES, YES],
+  ["Read-only share links", NO, YES, YES],
+  ["Batches and scheduled runs", NO, NO, YES],
+];
+
+const QUESTIONS: [string, string][] = [
+  [
+    "Is the Free plan really free?",
+    "Yes. No card is needed to start, and Free produces the same cited, source-linked reports as the paid plans. It simply runs fewer of them.",
+  ],
+  [
+    "Do deeper runs cost more?",
+    "No. A run counts once, whatever depth you choose. Deep reads more widely and takes longer, but it is still one run.",
+  ],
+  [
+    "What happens when I reach my monthly runs?",
+    "Your library, reports and sources stay available. New runs wait for the next month, or you can move to a larger plan.",
+  ],
+  [
+    "Can I switch between monthly and yearly?",
+    "Yes. Yearly billing costs about 20% less across the year, and you can change plans whenever your research habits change.",
+  ],
+];
+
+function Cell({ value }: { value: string | boolean }) {
+  if (typeof value === "string") return <strong>{value}</strong>;
+  return value ? (
+    <span className="pr-yes">
+      <Icon name="check" size={13} />
+      <span className="sr-only">Included</span>
+    </span>
+  ) : (
+    <span className="pr-no">
+      <i aria-hidden="true" />
+      <span className="sr-only">Not included</span>
+    </span>
+  );
+}
+
+export default function PricingPage() {
+  return (
+    <div className="lp lp-pricing">
+      <a className="skip-link" href="#plans">
+        Skip to plans
+      </a>
+      <SiteNav active="pricing" />
+      <main>
+        <section className="pr-hero" id="plans">
+          <div className="lp-field-wrap pr-field" aria-hidden="true">
+            <EvidenceField />
+          </div>
+          <div className="pr-hero-copy">
+            <p className="pr-eyebrow lp-enter">Individual plans</p>
+            <h1 className="pr-title" aria-label="Pricing">
+              {[..."Pricing"].map((char, index) => (
+                <span
+                  key={index}
+                  className="lp-char"
+                  aria-hidden="true"
+                  style={{ "--d": `${120 + index * 55}ms` } as CSSProperties}
+                >
+                  {char}
+                </span>
+              ))}
+            </h1>
+            <p className="pr-lead lp-enter">
+              Start free. Move up when research becomes a habit. Every plan
+              cites its sources.
+            </p>
+          </div>
+          <div className="pr-stage lp-enter">
+            <PricingPlans />
+          </div>
+        </section>
+
+        <section
+          className="lp-section pr-compare"
+          aria-labelledby="compare-title"
+        >
+          <header className="lp-section-head">
+            <h2 id="compare-title">Everything in Free, and then some.</h2>
+            <p>
+              The same evidence-first reports on every plan. Paid plans read
+              deeper and do more with them.
+            </p>
+          </header>
+          <div className="pr-table-wrap" data-reveal>
+            <table className="pr-table">
+              <thead>
+                <tr>
+                  <th scope="col">
+                    <span className="sr-only">Feature</span>
+                  </th>
+                  <th scope="col">Free</th>
+                  <th scope="col">Scholar</th>
+                  <th scope="col">Investigator</th>
+                </tr>
+              </thead>
+              <tbody>
+                {COMPARISON.map(([label, ...values]) => (
+                  <tr key={label}>
+                    <th scope="row">{label}</th>
+                    {values.map((value, index) => (
+                      <td key={index}>
+                        <Cell value={value} />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="pr-notes">
+            <div data-reveal>
+              <span className="pr-note-icon">
+                <Icon name="sliders" size={18} />
+              </span>
+              <h3>Depth is a ceiling, not a quota.</h3>
+              <p>
+                Focused reads up to 6 sources, Balanced up to 12, Deep up to 20.
+                A run reads what the question needs, within that limit.
+              </p>
+            </div>
+            <div data-reveal>
+              <span className="pr-note-icon">
+                <Icon name="folder" size={18} />
+              </span>
+              <h3>Your research stays yours.</h3>
+              <p>
+                Reports, sources and history live in your private library on
+                every plan, and export to PDF whenever you need them.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <section className="lp-section pr-faq" aria-labelledby="pricing-faq">
+          <div className="pr-faq-intro">
+            <h2 id="pricing-faq">Questions about plans.</h2>
+            <p>Still deciding? Start on Free and see a full report first.</p>
+            <Link
+              href="/signup?plan=free"
+              className="lp-btn lp-btn-ink"
+              data-magnetic
+            >
+              Start free
+              <Icon name="arrow" size={16} />
+            </Link>
+          </div>
+          <div className="lp-faq-stage">
+            <FaqThread items={QUESTIONS} />
+            <span className="lp-peek-slot" aria-hidden="true">
+              <Critter kind="quill" pose="peek" size={70} delay={200} />
+            </span>
+          </div>
+        </section>
+      </main>
+      <SiteFooter />
+      <LandingMotion />
+      <CrewEyes />
+    </div>
+  );
+}
