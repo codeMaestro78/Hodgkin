@@ -40,8 +40,8 @@ async (page) => {
   assert(await coverage.getByRole("group", { name: "Table view" }).count() === 1, "Coverage counts are chartable");
 
   const method = article.locator('.answer-section[data-kind="method"]');
-  assert(await method.locator(".katex-display").count() === 1 && await method.locator(".katex-error").count() === 0, "Publication share renders as display math");
-  assert((await method.locator(".katex-mathml annotation").textContent()).includes("\\frac{6}{9}"), "Formula uses the recorded finding counts");
+  assert(await method.locator(".katex-display").count() === 0, "Legacy publication ratio is hidden from the report");
+  assert(!(await method.innerText()).includes("published share"), "Hidden publication ratio is absent from report text");
   await page.setViewportSize({ width: 390, height: 844 });
   assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), "Generated tables do not overflow at 390px");
   await page.setViewportSize({ width: 1440, height: 900 });

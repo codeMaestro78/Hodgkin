@@ -14,6 +14,7 @@ class SchemaVersion(StrEnum):
     field_1_2 = "1.2"
     field_1_3 = "1.3"
     field_1_4 = "1.4"
+    field_1_5 = "1.5"
 
 
 class Support(StrEnum):

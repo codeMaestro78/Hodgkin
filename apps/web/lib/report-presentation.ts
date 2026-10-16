@@ -7,7 +7,9 @@ export function hasNoVerifiedFindings(
 ): boolean {
   if (document) return document.findings.length === 0;
   return (
-    checks !== undefined && !checks.some((claim) => claim.publishedInReport)
+    checks !== undefined &&
+    checks.length > 0 &&
+    !checks.some((claim) => claim.publishedInReport)
   );
 }
 

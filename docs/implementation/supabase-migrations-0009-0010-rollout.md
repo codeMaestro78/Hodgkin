@@ -1,9 +1,11 @@
-# Alembic 0009–0010 production rollout and recovery
+# Alembic 0009–0012 production rollout and recovery
 
-These instructions cover Alembic revisions `0009` (private projects/library)
-and `0010` (published-report immutability, report shares, and stored Markdown /
-BibTeX exports). This repository uses Alembic as the migration authority; it
-does not use `supabase/migrations` or `supabase db push` for these changes.
+These instructions cover Alembic revisions `0009` (private projects/library),
+`0010` (published-report immutability, report shares, and stored Markdown /
+BibTeX exports), `0011` (persisted per-run model routing), and `0012`
+(compatibility for legacy published-report inserts). This repository uses
+Alembic as the migration authority; it does not use `supabase/migrations` or
+`supabase db push` for these changes.
 
 ## Preconditions
 
@@ -30,8 +32,8 @@ uv run alembic upgrade head
 uv run alembic current
 ```
 
-The expected head is `0010`. If the target is at `0008`, this applies `0009`
-then `0010` in order. `0010` intentionally keeps old application writers
+The expected head is `0012`. If the target is at `0008`, this applies `0009`
+through `0012` in order. `0010` intentionally keeps old application writers
 compatible: legacy published inserts receive `published_at` from the database,
 may have a null stored `content_hash`, and are still immutable after insert.
 The current writer stores a SHA-256 hash; readers compute one for legacy rows
@@ -39,7 +41,9 @@ that do not have it.
 
 Verify before deploying the UI that:
 
-- `alembic_version` is `0010`;
+- `alembic_version` is `0012`;
+- `research_runs.model_routing` exists and is readable/writable by the runtime
+  role as required by the API;
 - `projects`, `library_items`, `report_shares`, and `report_exports` exist;
 - RLS and FORCE RLS are enabled on the new tenant-owned tables;
 - `reports_immutable_after_publish` is enabled;
@@ -54,9 +58,10 @@ available until canary validation is complete.
 ## Application rollback
 
 Rollback the application artifact, **not** the database schema. Revisions
-`0009` and `0010` are additive, and `0010` deliberately allows legacy report
-inserts while continuing to reject updates to already-published reports. Keep
-the tables, trigger, migration history, shares, and export artifacts in place.
+`0009`–`0012` are additive, and `0010`/`0012` deliberately allow compatible
+legacy report inserts while continuing to reject updates to already-published
+reports. Keep the tables, trigger, migration history, shares, and export
+artifacts in place.
 Disable the new UI entry points if necessary; do not drop tables or manually
 disable the immutability trigger as a routine rollback.
 
@@ -66,8 +71,10 @@ remove the trigger or issue an Alembic downgrade to get writes moving again.
 
 ## Database recovery / schema reversal
 
-Both `0009` and `0010` refuse automatic downgrade because their tables contain
-user data and shares/exports may already be in use. That refusal is intentional.
+Revisions `0009` through `0012` refuse automatic downgrade because they contain
+user data, persisted model-routing state, or compatibility behavior required by
+rolling application versions. In particular, `0012` must not restore the prior
+trigger while old writers may still be deployed. These refusals are intentional.
 There is no safe generic `alembic downgrade` or ad-hoc `DROP TABLE` procedure.
 
 If a database-level rollback is required:

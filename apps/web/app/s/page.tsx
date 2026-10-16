@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -12,13 +12,17 @@ type SharedReport = {
 };
 
 export default function SharedReportPage() {
+  const shareToken = useRef<string | null>(null);
+  if (shareToken.current === null && typeof window !== "undefined") {
+    shareToken.current = new URLSearchParams(window.location.hash.slice(1)).get(
+      "share",
+    );
+  }
   const [report, setReport] = useState<SharedReport | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    const token = new URLSearchParams(window.location.hash.slice(1)).get(
-      "share",
-    );
+    const token = shareToken.current;
     if (!token || !/^[A-Za-z0-9_-]{40,100}$/.test(token)) {
       setFailed(true);
       return;

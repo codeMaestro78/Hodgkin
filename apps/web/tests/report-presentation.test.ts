@@ -12,6 +12,8 @@ describe("report presentation", () => {
   it("detects empty findings without hiding a populated structured report", () => {
     expect(hasNoVerifiedFindings({ findings: [] }, undefined)).toBe(true);
     expect(hasNoVerifiedFindings({ findings: [{}] }, [])).toBe(false);
+    // Empty checks mean legacy Markdown has not been assessed, not zero findings.
+    expect(hasNoVerifiedFindings(null, [])).toBe(false);
     expect(hasNoVerifiedFindings(null, [{ publishedInReport: false }])).toBe(
       true,
     );

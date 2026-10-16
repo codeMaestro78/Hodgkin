@@ -165,11 +165,14 @@ async def readiness() -> dict[str, str]:
                     "AND to_regclass('public.projects') IS NOT NULL "
                     "AND to_regclass('public.library_items') IS NOT NULL "
                     "AND to_regclass('public.report_shares') IS NOT NULL "
-                    "AND to_regclass('public.report_exports') IS NOT NULL"
+                    "AND to_regclass('public.report_exports') IS NOT NULL "
+                    "AND EXISTS (SELECT 1 FROM information_schema.columns "
+                    "WHERE table_schema='public' AND table_name='research_runs' "
+                    "AND column_name='model_routing')"
                 )
             )
         if not ready:
-            raise HTTPException(503, "database migrations 0007, 0009 and 0010 are required")
+            raise HTTPException(503, "database migrations through 0012 are required")
     except HTTPException:
         raise
     except Exception as exc:
