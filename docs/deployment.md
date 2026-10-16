@@ -88,6 +88,10 @@ committed to the repository — see [security.md](./security.md#secret-managemen
 - A breaking schema change requires a coordinated rollback plan across
   both services simultaneously; document this explicitly at release time
   rather than assuming independent rollback is always safe.
+- For Alembic revisions `0009` and `0010`, follow the
+  [migration rollout and recovery runbook](./implementation/supabase-migrations-0009-0010-rollout.md).
+  These revisions are forward-only; application rollback keeps the additive
+  schema in place, while database restoration is an operator-approved recovery.
 
 Confirmed deployment foundations are `compose.yaml`, `infra/`, `apps/web/Dockerfile`, and
 `services/research-api/Dockerfile`. Production IaC remains planned.

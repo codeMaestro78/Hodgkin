@@ -27,8 +27,22 @@ def test_requirement_writer_schema_requires_every_property(model, limit):
     assert assertion["additionalProperties"] is False
     assert set(assertion["required"]) == set(assertion["properties"])
     assert "requirement_indices" in assertion["required"]
+    assert "figures" in assertion["required"]
+    assert all("default" not in prop for prop in assertion["properties"].values())
+    figure = schema["$defs"]["FigureDraft"]
+    assert figure["additionalProperties"] is False
+    assert set(figure["required"]) == set(figure["properties"])
+
     citation = schema["$defs"]["CitationDraft"]
     assert set(citation["required"]) == set(citation["properties"])
+
+
+def test_drafts_recorded_before_figures_still_parse():
+    parsed = DeepRequirementAssertions.model_validate_json(
+        '{"claims":[{"claim":"x","citations":[],"caveats":[],"section":"risks",'
+        '"requirement_indices":[]}]}'
+    )
+    assert parsed.claims[0].figures == []
 
 
 @pytest.mark.parametrize("requirements", [[""], ["   "], ["x" * 501], ["x"] * 21])
