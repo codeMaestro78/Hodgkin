@@ -21,11 +21,14 @@ from pydantic import (
 class SchemaVersion(StrEnum):
     field_1_1 = "1.1"
     field_1_2 = "1.2"
+    field_1_3 = "1.3"
+    field_1_4 = "1.4"
 
 
 class Status(StrEnum):
     queued = "queued"
     planning = "planning"
+    awaiting_approval = "awaiting_approval"
     researching = "researching"
     verifying = "verifying"
     reflecting = "reflecting"
@@ -35,8 +38,8 @@ class Status(StrEnum):
     cancelled = "cancelled"
 
 
-class ReportRequirement(RootModel[constr(max_length=500)]):
-    root: constr(max_length=500)
+class ReportRequirement(RootModel[constr(pattern=r"\S", min_length=1, max_length=500)]):
+    root: constr(pattern=r"\S", min_length=1, max_length=500)
 
 
 class SubQuestionId(RootModel[UUID]):
@@ -100,9 +103,9 @@ class Budget(BaseModel):
         populate_by_name=True,
     )
     max_wall_clock_ms: conint(le=1800000, gt=0) = Field(..., alias="maxWallClockMs")
-    max_search_calls: conint(ge=1, le=50) = Field(..., alias="maxSearchCalls")
-    max_browser_sessions: conint(ge=0, le=5) = Field(..., alias="maxBrowserSessions")
-    max_reflection_rounds: conint(ge=0, le=3) = Field(..., alias="maxReflectionRounds")
+    max_search_calls: conint(ge=1, le=50) = Field(12, alias="maxSearchCalls")
+    max_browser_sessions: conint(ge=0, le=5) = Field(0, alias="maxBrowserSessions")
+    max_reflection_rounds: conint(ge=0, le=3) = Field(1, alias="maxReflectionRounds")
     max_input_tokens: conint(le=9007199254740991, gt=0) = Field(..., alias="maxInputTokens")
     max_output_tokens: conint(le=9007199254740991, gt=0) = Field(..., alias="maxOutputTokens")
     max_estimated_cost_usd: confloat(ge=0.0) = Field(..., alias="maxEstimatedCostUsd")

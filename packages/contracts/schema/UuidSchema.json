@@ -1,5 +1,5 @@
 {
-  "$id": "https://schemas.research.local/1.2/UuidSchema.json",
+  "$id": "https://schemas.research.local/1.4/UuidSchema.json",
   "title": "UuidSchema",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "string",

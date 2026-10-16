@@ -1,11 +1,12 @@
 {
-  "$id": "https://schemas.research.local/1.2/RunStatusSchema.json",
+  "$id": "https://schemas.research.local/1.4/RunStatusSchema.json",
   "title": "RunStatusSchema",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "string",
   "enum": [
     "queued",
     "planning",
+    "awaiting_approval",
     "researching",
     "verifying",
     "reflecting",

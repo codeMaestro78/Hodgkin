@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from research_api import api
+from research_api.snapshots import SnapshotCollections
 
 
 def claim():
@@ -66,22 +67,30 @@ async def test_run_projection_queries_evidence_for_verified_tenant_and_requested
         id=run_id,
         status="completed",
         original_question="Compare evidence platforms",
+        report_requirements=[],
         plan_version=1,
         error_code=None,
         created_at=now,
         updated_at=now,
+        approval_required=False,
     )
     session = SimpleNamespace(
-        scalar=AsyncMock(
+        scalar=AsyncMock(return_value=None),
+        execute=AsyncMock(
             side_effect=[
-                run,
-                SimpleNamespace(max_search_calls=6, max_estimated_cost_usd=1),
-                SimpleNamespace(search_calls=2),
-                None,
-                0,
+                SimpleNamespace(
+                    first=lambda: (
+                        run,
+                        SimpleNamespace(
+                            max_search_calls=6, max_estimated_cost_usd=1, max_wall_clock_ms=180_000
+                        ),
+                        SimpleNamespace(search_calls=2),
+                        0,
+                    )
+                ),
+                [],
             ]
         ),
-        execute=AsyncMock(return_value=[]),
         scalars=AsyncMock(return_value=[]),
     )
 
@@ -91,11 +100,14 @@ async def test_run_projection_queries_evidence_for_verified_tenant_and_requested
         yield session
 
     monkeypatch.setattr(api, "tenant_session", context)
+    collections = AsyncMock(return_value=SnapshotCollections([], [], [], [], [], [], [], []))
+    monkeypatch.setattr(api, "load_collections", collections)
     monkeypatch.setattr(
         api, "_caller", AsyncMock(return_value=SimpleNamespace(tenant_id=tenant, user_id=user))
     )
     result = await api.get_research_run(run_id)
     assert result["claimChecks"] == []
+    collections.assert_awaited_once_with(session, tenant, run_id)
     statement = session.execute.call_args.args[0]
     params = list(statement.compile().params.values())
     assert params.count(tenant) == 2
@@ -106,7 +118,7 @@ async def test_run_projection_queries_evidence_for_verified_tenant_and_requested
 @pytest.mark.asyncio
 async def test_reports_filter_is_bounded_and_keeps_owner_predicates(monkeypatch):
     tenant, user = uuid.uuid4(), uuid.uuid4()
-    session = SimpleNamespace(scalars=AsyncMock(return_value=[]))
+    session = SimpleNamespace(execute=AsyncMock(return_value=[]))
 
     @asynccontextmanager
     async def context(_tenant):
@@ -117,7 +129,8 @@ async def test_reports_filter_is_bounded_and_keeps_owner_predicates(monkeypatch)
         api, "_caller", AsyncMock(return_value=SimpleNamespace(tenant_id=tenant, user_id=user))
     )
     assert await api.list_research_runs(reports_only=True) == {"runs": []}
-    statement = session.scalars.call_args.args[0]
+    assert session.execute.await_count == 1
+    statement = session.execute.call_args.args[0]
     params = list(statement.compile().params.values())
     assert tenant in params and user in params and "completed" in params and 100 in params
     assert "report_id IS NOT NULL" in str(statement)

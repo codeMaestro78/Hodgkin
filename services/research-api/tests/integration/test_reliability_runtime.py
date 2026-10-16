@@ -1,13 +1,15 @@
 """Actual local persistence/graph with deterministic model and provider boundaries."""
 
+import os
 import uuid
+from collections import Counter
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from research_api import api
@@ -26,22 +28,37 @@ from research_api.db.models import (
     UsageLedger,
     User,
 )
+from research_api.db.session import engine as runtime_engine
 from research_api.db.session import tenant_session
 from research_api.execution import finish_node, start_node
 from research_api.graph import builder
 from research_api.model_budget import model_response, model_run
-from research_api.repositories.budgets import BudgetExceededError
+from research_api.repositories.budgets import ReservationReplayError
 from research_api.repositories.runs import RunBudgetDefaults, RunRepository
 from research_api.schemas.generated.followup_request import FollowupRequest
 
 pytestmark = pytest.mark.integration
 
 
-async def seed():
+@pytest.fixture
+def synthesis_insert_counts():
+    counts = Counter()
+
+    def count(_conn, _cursor, statement, _params, _context, _many):
+        for table in ("evidence_claims", "citations"):
+            if statement.startswith(f"INSERT INTO {table} "):
+                counts[table] += 1
+
+    event.listen(runtime_engine.sync_engine, "before_cursor_execute", count)
+    try:
+        yield counts
+    finally:
+        event.remove(runtime_engine.sync_engine, "before_cursor_execute", count)
+
+
+async def seed(calls=6):
     tenant, user = uuid.uuid4(), uuid.uuid4()
-    engine = create_async_engine(
-        "postgresql+psycopg://research_owner:research_owner@localhost:55432/research"
-    )
+    engine = create_async_engine(os.environ["TEST_DATABASE_ADMIN_URL"])
     try:
         async with async_sessionmaker(engine)() as session, session.begin():
             session.add(Tenant(id=tenant, name="Reliability fixture"))
@@ -52,16 +69,21 @@ async def seed():
         run = await RunRepository(session, tenant).create(
             user_id=user,
             question="Compare evidence reliability",
-            budget=RunBudgetDefaults(max_search_calls=6),
+            budget=RunBudgetDefaults(max_search_calls=calls),
         )
         return tenant, user, run.id
 
 
 @pytest.mark.parametrize("supported", [True, False])
+@pytest.mark.parametrize("durable", [False, True])
+@pytest.mark.parametrize("audit_mode", ["draft", "unlocated", "focused", "balanced", "deep"])
 async def test_report_audit_retains_conflicts_but_publishes_only_supported_assertions(
-    monkeypatch, supported
+    monkeypatch, supported, durable, audit_mode, synthesis_insert_counts
 ):
-    tenant, user, run_id = await seed()
+    located = audit_mode != "unlocated"
+    original_audit = builder._report_assertions
+    original_writer = builder._synthesize_with_openai
+    tenant, user, run_id = await seed({"balanced": 12, "deep": 20}.get(audit_mode, 6))
     quote = "Exact source evidence."
     safe = "Preserved evidence is inspectable."
     disputed = "All claims are always correct."
@@ -104,7 +126,7 @@ async def test_report_audit_retains_conflicts_but_publishes_only_supported_asser
 
     monkeypatch.setattr(builder, "TavilyEvidenceIngestor", Ingestor)
 
-    async def context(_settings, *, sources):
+    async def context(_settings, *, sources, **_):
         return [builder.SourceMaterial(source=sources[0], content=quote)], "SOURCE [1] " + quote
 
     monkeypatch.setattr(builder, "_read_source_context", context)
@@ -119,6 +141,7 @@ async def test_report_audit_retains_conflicts_but_publishes_only_supported_asser
             )
         ),
     )
+
     monkeypatch.setattr(
         builder,
         "_report_assertions",
@@ -132,6 +155,42 @@ async def test_report_audit_retains_conflicts_but_publishes_only_supported_asser
         ),
     )
 
+    if not located:
+        monkeypatch.setattr(builder, "_report_assertions", original_audit)
+        monkeypatch.setattr(
+            builder,
+            "_model_response",
+            AsyncMock(
+                return_value=SimpleNamespace(
+                    output_text='{"claims":[{"claim":"Not located in the draft.",'
+                    '"citations":[],"caveats":[]}]}'
+                )
+            ),
+        )
+
+    if audit_mode in {"focused", "balanced", "deep"}:
+        import json
+
+        monkeypatch.setattr(builder, "_synthesize_with_openai", original_writer)
+        candidate_call = AsyncMock(
+            return_value=SimpleNamespace(
+                output_text=json.dumps(
+                    {
+                        "claims": [
+                            {
+                                "claim": text,
+                                "section": "mechanisms",
+                                "citations": [{"source_number": 1, "quote": quote}],
+                                "caveats": [],
+                            }
+                            for text in [safe, disputed]
+                        ]
+                    }
+                )
+            )
+        )
+        monkeypatch.setattr(builder, "_model_response", candidate_call)
+
     async def reviews(_settings, *, claims):
         return [
             builder.SemanticReview(
@@ -144,32 +203,52 @@ async def test_report_audit_retains_conflicts_but_publishes_only_supported_asser
         ]
 
     monkeypatch.setattr(builder, "_semantic_reviews_with_openai", reviews)
-    await builder.run_graph(
-        Settings(TAVILY_API_KEY="fixture", OPENAI_API_KEY="fixture"),
-        run_id=run_id,
-        tenant_id=tenant,
-        user_id=user,
-        question="Compare evidence reliability",
-    )
+    settings = Settings(TAVILY_API_KEY="fixture", OPENAI_API_KEY="fixture")
+    if durable:
+        from research_api import dispatcher, jobs
+        from research_api.checkpointing import CheckpointPool
+
+        async with tenant_session(str(tenant)) as session:
+            run = await session.get(ResearchRun, run_id)
+            await jobs.enqueue(session, run, settings)
+        fence = await jobs.claim(tenant, uuid.uuid4(), settings)
+        async with CheckpointPool(settings) as pool:
+            await dispatcher.execute(fence, settings, pool)
+    else:
+        await builder.run_graph(
+            settings,
+            run_id=run_id,
+            tenant_id=tenant,
+            user_id=user,
+            question="Compare evidence reliability",
+        )
     async with tenant_session(str(tenant)) as session:
         run = await session.scalar(select(ResearchRun).where(ResearchRun.id == run_id))
         assert run.status == "completed"
         report = await session.scalar(select(Report).where(Report.run_id == run_id))
+        assert "## Executive summary" in report.markdown
+        assert "## Methodology" in report.markdown
+        if audit_mode == "deep":
+            assert "## Cross-source comparative analysis" in report.markdown
+        if audit_mode == "balanced":
+            assert "## Comparative analysis" in report.markdown
         assert disputed not in report.markdown
-        assert (safe in report.markdown) is supported
-        if not supported:
+        assert (safe in report.markdown) is (supported and located)
+        if not supported or not located:
             assert "No factual findings were published" in report.markdown
         claims = list(
             await session.scalars(select(EvidenceClaim).where(EvidenceClaim.run_id == run_id))
         )
         assert {item.support for item in claims} == (
-            {"supported", "contradicted"} if supported else {"contradicted"}
+            ({"supported", "contradicted"} if supported else {"contradicted"}) if located else set()
         )
         assert all(item.report_id == report.id for item in claims)
         assert list(await session.scalars(select(ResearchGap).where(ResearchGap.run_id == run_id)))
-        assert (
-            len(list(await session.scalars(select(Citation).where(Citation.run_id == run_id)))) == 2
-        )
+        assert len(
+            list(await session.scalars(select(Citation).where(Citation.run_id == run_id)))
+        ) == (2 if located else 0)
+        if not located:
+            assert "limited evidence record" in report.markdown
         attempts = list(
             await session.scalars(
                 select(SubQuestionAttempt).where(SubQuestionAttempt.run_id == run_id)
@@ -189,6 +268,11 @@ async def test_report_audit_retains_conflicts_but_publishes_only_supported_asser
         )
         assert events[-1].event_type == "run.completed"
         assert len({event.event_sequence for event in events}) == len(events)
+    if audit_mode in {"focused", "balanced", "deep"}:
+        assert candidate_call.await_count == 1
+        builder._report_assertions.assert_not_awaited()
+    assert synthesis_insert_counts["evidence_claims"] == (1 if located else 0)
+    assert synthesis_insert_counts["citations"] == (1 if located else 0)
     async with tenant_session(str(uuid.uuid4())) as session:
         assert not list(
             await session.scalars(select(EvidenceClaim).where(EvidenceClaim.run_id == run_id))
@@ -221,7 +305,7 @@ async def test_model_reservations_do_not_spend_search_budget_or_redispatch_termi
     )
     try:
         await model_response(client, model="fixture", input="public evidence", store=False)
-        with pytest.raises(BudgetExceededError):
+        with pytest.raises(ReservationReplayError):
             await model_response(client, model="fixture", input="public evidence", store=False)
         assert client.responses.create.await_count == 1
         assert client.responses.create.call_args.kwargs["max_output_tokens"] == 4096
@@ -261,7 +345,6 @@ async def test_followup_is_owned_idempotent_and_preserves_parent_report(monkeypa
         parent.report_id = newer.id
     caller = SimpleNamespace(tenant_id=tenant, user_id=user)
     monkeypatch.setattr(api, "_caller", AsyncMock(return_value=caller))
-    monkeypatch.setattr(api, "run_graph", AsyncMock())
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(background_tasks=set())))
     body = FollowupRequest(
         question="Investigate contradictory evidence",

@@ -6,8 +6,8 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field, RootModel, confloat, conint, constr
 
 
-class ReportRequirement(RootModel[constr(max_length=500)]):
-    root: constr(max_length=500)
+class ReportRequirement(RootModel[constr(pattern=r"\S", min_length=1, max_length=500)]):
+    root: constr(pattern=r"\S", min_length=1, max_length=500)
 
 
 class BudgetOverrides(BaseModel):
@@ -33,9 +33,10 @@ class CreateResearchRunRequest(BaseModel):
     )
     question: constr(min_length=5, max_length=10000)
     report_requirements: list[ReportRequirement] = Field(
-        ..., alias="reportRequirements", max_length=20
+        [], alias="reportRequirements", max_length=20, validate_default=True
     )
     budget_overrides: BudgetOverrides | None = Field(None, alias="budgetOverrides")
     idempotency_key: constr(min_length=16, max_length=200) | None = Field(
         None, alias="idempotencyKey"
     )
+    require_approval: bool = Field(True, alias="requireApproval")

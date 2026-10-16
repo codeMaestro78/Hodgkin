@@ -1,5 +1,16 @@
 # Evidence reliability delivery
 
+## Milestones 4–8 implementation update (2026-10-14)
+
+See [durable runtime](./durable-runtime.md) for PostgreSQL recovery, approval,
+batch/schedule APIs, accounting/replay, migration 0007 and acceptance evidence.
+Earlier notes below describe the previous boundary; they are not current claims
+that checkpoints or schedules remain unimplemented. Hosted migration 0007 was
+applied and verified on 2026-10-14 after approval. The configured runtime still
+uses `research_app` after the authorized restricted-role configuration. Restart
+existing API processes to replace their old pools; hosted end-to-end validation
+is still the next prerequisite.
+
 ## Investigation and order
 
 Next.js 16 / React 19 uses a verified Supabase SSR BFF. FastAPI, SQLAlchemy,
@@ -51,10 +62,13 @@ durable worker/checkpoint recovery, per-task retry, report diffs, decision-prior
 comparisons, projects/bookmarks and configurable saved templates remain incomplete.
 Redirect aliasing is not inferred when the provider supplies no verified mapping.
 
-Model calls reserve a conservative token bound and a fixed $0.10 policy estimate
-before dispatch, then reconcile tokens when usage is supplied. This is a safety
-reservation, not verified provider pricing or a billing guarantee. Search/extract
-budgets and Focused/Balanced/Deep source ceilings remain separate.
+Model calls now reserve a UTF-8-length token admission heuristic and a versioned
+default-model standard-text rate estimate, then reconcile supplied usage in both
+directions. Unknown models retain the labelled $0.10 policy estimate. This is not
+an exact tokenizer bound, invoice, or billing guarantee. Search/extract budgets
+and Focused/Balanced/Deep source ceilings remain separate. See the follow-on
+[core reliability slice](./core-reliability-slice.md) for retry, accounting,
+cancellation and persistence-ceiling acceptance gates and updated validation.
 
 Run locally with `corepack pnpm dev` and, from `services/research-api`,
 `uv run uvicorn research_api.main:app --reload` (check the service README for

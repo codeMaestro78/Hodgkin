@@ -30,6 +30,14 @@ jobs:
   python:
     runs-on: ubuntu-latest
     services:
+      redis:
+        image: redis:8.2-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
       postgres:
         image: postgres:18-alpine
         env:
@@ -61,6 +69,7 @@ jobs:
       TEST_DATABASE_ADMIN_URL: postgresql+psycopg://research_owner:research_owner@localhost:5432/research
       DATABASE_ADMIN_URL: postgresql+psycopg://research_owner:research_owner@localhost:5432/research
       OBJECT_STORAGE_ENDPOINT: http://localhost:4566
+      TEST_REDIS_URL: redis://localhost:6379/0
       RUN_AUTH_SCHEMA_TESTS: "1"
     steps:
       - uses: actions/checkout@v4

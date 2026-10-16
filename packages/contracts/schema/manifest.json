@@ -1,7 +1,9 @@
 {
-  "schemaVersion": "1.2",
+  "schemaVersion": "1.4",
   "schemas": [
     "AgentEventSchema",
+    "ApprovalRequestSchema",
+    "BatchRequestSchema",
     "BudgetSchema",
     "CitationSchema",
     "CitationVerificationSchema",
@@ -18,6 +20,7 @@
     "PublicClaimCheckSchema",
     "PublicGapSchema",
     "ReflectionDecisionSchema",
+    "ReportDocumentV1Schema",
     "ResearchGapSchema",
     "ResearchPlanSchema",
     "ResearchRunProjectionSchema",
@@ -25,6 +28,7 @@
     "ReservationStateSchema",
     "RunInsightsSchema",
     "RunStatusSchema",
+    "ScheduleRequestSchema",
     "SchemaVersionSchema",
     "Sha256Schema",
     "SourceClassSchema",

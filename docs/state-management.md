@@ -1,6 +1,6 @@
 # State Management
 
-> Implementation authority: Zod schema version 1.2 in `packages/contracts/src/` is the canonical
+> Implementation authority: Zod schema version 1.4 in `packages/contracts/src/` is the canonical
 > executable contract. Draft 2020-12 output in `packages/contracts/schema/` and generated Pydantic
 > v2 models in `services/research-api/src/research_api/schemas/generated/` must be regenerated and
 > checked together. Illustrative snippets below do not override those checked-in artifacts.
@@ -9,6 +9,13 @@ The canonical data contracts shared across the frontend, the Next.js BFF,
 the event store, and the Python research service. These are Zod schemas in
 TypeScript, mirrored as Pydantic models in Python — generate one from the
 other or maintain contract tests in CI (see [testing.md](./testing.md)).
+
+Version 1.4 preserves readable 1.1–1.3 envelopes and introduces the independent
+`ReportDocumentV1Schema` (document version 1, assessment `evidence-links-v1`).
+Historical `reports.document = NULL` means `not_assessed`, never inferred success.
+Requirements are nonblank, at most 20 and 500 characters each. Execution status
+and answer quality are separate; evidence associations do not certify completeness.
+See [Phase 1 rollout and compatibility](implementation/phase1-quality-foundations.md).
 
 Any change to a schema on this page is a **contract change**: bump
 `schemaVersion`, update both language definitions, check every consumer,

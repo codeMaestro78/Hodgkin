@@ -1,5 +1,10 @@
 # Events and SSE
 
+Phase 1 report documents add no new SSE delivery semantics or event types.
+Readable schema envelopes include 1.1–1.4. `research:history-snapshot` is a local
+browser projection notification only, not a durable event, authorization signal,
+or substitute for replay from the PostgreSQL outbox.
+
 The append-only event log and its real-time delivery over
 Server-Sent Events. See [api.md](./api.md#get-apiresearchrunsrunidevents)
 for the HTTP contract and [state-management.md](./state-management.md#agentevent)
@@ -20,6 +25,25 @@ This exists because a research run can take minutes, browser tabs can
 lose connectivity, and the frontend must be able to reconstruct exactly
 what happened without re-running anything.
 
+## Commit wake-ups
+
+`tenant_session()` sends a local wake-up only after successful outer commit.
+Outbox rows rolled back within savepoints do not generate hints. The API's
+lifespan also starts one bounded Redis publisher/subscriber bridge per process
+when `SSE_REDIS_WAKEUPS_ENABLED=true` (the default). Redis carries only tenant/run
+UUIDs, never event bodies. A hint triggers the existing authorized PostgreSQL
+read; it cannot authorize access, advance a cursor, or become an SSE payload.
+
+Streams register before their first replay read and clear their local signal
+before each read, preventing a commit between the read and wait from being lost.
+No database connection is held while waiting. Polling remains as a fallback:
+active idle backoff 1–5 seconds, 5 seconds while awaiting approval. Redis outages,
+missed messages, startup races and a full hint queue degrade freshness, not replay
+correctness. Existing terminal pagination and `Last-Event-ID` semantics remain.
+
+See [delivery validation](implementation/event-delivery-latency.md) for bounds,
+tests, rollout and measurement limitations.
+
 ## Event catalog
 
 The catalog below also contains design targets, not a claim that every target is
@@ -29,6 +53,18 @@ a compact notification (sequence, type, label, time); task, evidence and report
 data arrive through the tenant-scoped run snapshot. Duplicate or older sequences
 are ignored and refreshes are coalesced. No simulated percent-complete or draft
 token stream is emitted. `run.completed` is committed with final node completion.
+
+The browser coalesces routine source notifications for 1.5 seconds. `node.started`
+and terminal notifications preempt that wait, using one pending refresh timer;
+they do not postpone already-urgent work. In-flight snapshot requests remain
+single-flight with a trailing refresh, and route cleanup cancels pending timers.
+The waiting surface shows at most three labeled persisted actions, not model
+thoughts. New rows fade in briefly only when reduced motion is not requested.
+
+The BFF emits numeric `Server-Timing` fields for verified authentication,
+upstream response headers and total proxy processing. These expose no request
+content or credentials and add no logging volume. SSE header timings describe
+connection establishment, not delivery latency or research completion time.
 
 | Event | Payload highlights | Emitted by |
 |---|---|---|

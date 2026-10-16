@@ -27,7 +27,10 @@ class EventOutbox:
         run = await self._session.scalar(
             select(ResearchRun)
             .where(ResearchRun.tenant_id == self._tenant_id, ResearchRun.id == run_id)
-            .with_for_update()
+            # Serialize sequence allocation without conflicting with the KEY
+            # SHARE locks held by concurrent child-row FK inserts.
+            .with_for_update(key_share=True)
+            .execution_options(populate_existing=True)
         )
         if run is None:
             raise LookupError("run not found for tenant")
@@ -38,7 +41,7 @@ class EventOutbox:
         if event_type == "task.state":
             AgentEvent.model_validate(
                 {
-                    "schemaVersion": "1.2",
+                    "schemaVersion": "1.3",
                     "eventId": str(identity),
                     "eventSequence": run.next_event_sequence,
                     "tenantId": str(self._tenant_id),
@@ -59,6 +62,9 @@ class EventOutbox:
         )
         self._session.add(event)
         await self._session.flush()
+        # Keep ORM references until the outer transaction commits. Rolled-back
+        # savepoint rows become transient and cannot produce a committed hint.
+        self._session.info.setdefault("outbox_wakeups", []).append(event)
         return event
 
     async def replay_after(self, *, run_id: uuid.UUID, sequence: int) -> list[RunEvent]:

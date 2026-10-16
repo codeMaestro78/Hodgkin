@@ -12,6 +12,8 @@ from pydantic import BaseModel, ConfigDict, Field, RootModel, conint, constr
 class SchemaVersion(StrEnum):
     field_1_1 = "1.1"
     field_1_2 = "1.2"
+    field_1_3 = "1.3"
+    field_1_4 = "1.4"
 
 
 class SuccessCriterion(RootModel[constr(max_length=400)]):

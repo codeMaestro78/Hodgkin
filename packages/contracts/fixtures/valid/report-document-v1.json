@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "assessmentVersion": "evidence-links-v1",
+  "mode": "deep",
+  "title": "Compare approaches",
+  "sections": [
+    {
+      "id": "overview",
+      "title": "Executive summary",
+      "claimIds": ["00000000-0000-4000-8000-000000000001"]
+    },
+    {
+      "id": "mechanisms",
+      "title": "Detailed mechanisms and architecture",
+      "claimIds": []
+    },
+    {
+      "id": "comparison",
+      "title": "Cross-source comparative analysis",
+      "claimIds": []
+    },
+    {
+      "id": "risks",
+      "title": "Failure modes, constraints and trade-offs",
+      "claimIds": []
+    },
+    {
+      "id": "implications",
+      "title": "Implementation and decision implications",
+      "claimIds": []
+    }
+  ],
+  "findings": [
+    {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "text": "Verified statement.",
+      "section": "mechanisms",
+      "citationIds": ["00000000-0000-4000-8000-000000000101"],
+      "sourceIds": ["00000000-0000-4000-8000-000000000201"]
+    }
+  ],
+  "requirements": [
+    {
+      "id": "question",
+      "origin": "main_question",
+      "text": "Compare approaches",
+      "status": "unresolved",
+      "claimIds": [],
+      "basis": "not_established"
+    },
+    {
+      "id": "requirement-1",
+      "origin": "user_requirement",
+      "text": "Assess costs",
+      "status": "addressed",
+      "claimIds": ["00000000-0000-4000-8000-000000000001"],
+      "basis": "model_linked_verified_findings"
+    }
+  ],
+  "questionCoverage": [
+    {
+      "id": "00000000-0000-4000-8000-000000000300",
+      "text": "How do they work?",
+      "status": "addressed",
+      "claimIds": ["00000000-0000-4000-8000-000000000001"],
+      "basis": "collection_provenance"
+    }
+  ],
+  "quality": {
+    "status": "partial",
+    "reason": "Linked evidence and collection provenance are associations only. Completeness of the main question and user requirements has not been assessed.",
+    "verifiedFindings": 1,
+    "excludedFindings": 2
+  }
+}

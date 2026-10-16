@@ -9,6 +9,42 @@ from typing import Any
 from urllib.parse import urlsplit
 
 
+def report_assertion_span(markdown: str, assertion: str) -> str | None:
+    """Locate only literal text, allowing inline emphasis/code and whitespace changes.
+
+    Return the original report slice, never a paraphrase. This is a report-location
+    check, NOT a source-quotation check; source passages still require exact bytes.
+    """
+    if not assertion.strip():
+        return None
+    if assertion in markdown:
+        return assertion
+
+    def projection(value: str) -> tuple[str, list[int], list[int]]:
+        characters: list[str] = []
+        starts: list[int] = []
+        ends: list[int] = []
+        start = 0
+        for token in re.finditer(r"\*\*|__|`+|\s+|.", value, re.DOTALL):
+            part = token.group()
+            if part in {"**", "__"} or part.startswith("`"):
+                if ends:
+                    ends[-1] = token.end()
+                continue
+            characters.append(" " if part.isspace() else part)
+            starts.append(start)
+            ends.append(token.end())
+            start = token.end()
+        return "".join(characters), starts, ends
+
+    text, starts, ends = projection(markdown)
+    sought, _, _ = projection(assertion)
+    if not sought.strip():
+        return None
+    index = text.find(sought)
+    return markdown[starts[index] : ends[index + len(sought) - 1]] if index >= 0 else None
+
+
 def claim_status(citations: list[dict[str, Any]]) -> str:
     checked = [item for item in citations if item.get("exactSpanVerified") is True]
     verdicts = [item.get("verdict") for item in checked]

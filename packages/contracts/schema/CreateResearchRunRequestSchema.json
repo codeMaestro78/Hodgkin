@@ -1,5 +1,5 @@
 {
-  "$id": "https://schemas.research.local/1.2/CreateResearchRunRequestSchema.json",
+  "$id": "https://schemas.research.local/1.4/CreateResearchRunRequestSchema.json",
   "title": "CreateResearchRunRequestSchema",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
@@ -15,7 +15,9 @@
       "type": "array",
       "items": {
         "type": "string",
-        "maxLength": 500
+        "minLength": 1,
+        "maxLength": 500,
+        "pattern": "\\S"
       }
     },
     "budgetOverrides": {
@@ -65,11 +67,16 @@
       "type": "string",
       "minLength": 16,
       "maxLength": 200
+    },
+    "requireApproval": {
+      "default": true,
+      "type": "boolean"
     }
   },
   "required": [
     "question",
-    "reportRequirements"
+    "reportRequirements",
+    "requireApproval"
   ],
   "additionalProperties": false
 }

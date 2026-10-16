@@ -1,7 +1,9 @@
 import os
 from logging.config import fileConfig
+from pathlib import Path
 
 from alembic import context
+from dotenv import dotenv_values
 from sqlalchemy import engine_from_config, pool
 
 from research_api.config import get_settings
@@ -15,8 +17,12 @@ target_metadata = Base.metadata
 # Alembic must read the same service .env as the application. DATABASE_ADMIN_URL
 # remains optional for deployments that use a distinct migration principal.
 settings = get_settings()
+private_migration_env = dotenv_values(Path(__file__).resolve().parents[4] / ".env.migrations")
 database_url = (
-    os.getenv("DATABASE_ADMIN_URL") or settings.DATABASE_ADMIN_URL or settings.DATABASE_URL
+    os.getenv("DATABASE_ADMIN_URL")
+    or settings.DATABASE_ADMIN_URL
+    or private_migration_env.get("DATABASE_ADMIN_URL")
+    or settings.DATABASE_URL
 )
 config.set_main_option("sqlalchemy.url", database_url)
 

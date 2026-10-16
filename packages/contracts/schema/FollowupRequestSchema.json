@@ -1,5 +1,5 @@
 {
-  "$id": "https://schemas.research.local/1.2/FollowupRequestSchema.json",
+  "$id": "https://schemas.research.local/1.4/FollowupRequestSchema.json",
   "title": "FollowupRequestSchema",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",

@@ -1,5 +1,5 @@
 {
-  "$id": "https://schemas.research.local/1.2/ResearchStateSchema.json",
+  "$id": "https://schemas.research.local/1.4/ResearchStateSchema.json",
   "title": "ResearchStateSchema",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
@@ -8,7 +8,9 @@
       "type": "string",
       "enum": [
         "1.1",
-        "1.2"
+        "1.2",
+        "1.3",
+        "1.4"
       ]
     },
     "runId": {
@@ -36,6 +38,7 @@
       "enum": [
         "queued",
         "planning",
+        "awaiting_approval",
         "researching",
         "verifying",
         "reflecting",
@@ -60,7 +63,9 @@
       "type": "array",
       "items": {
         "type": "string",
-        "maxLength": 500
+        "minLength": 1,
+        "maxLength": 500,
+        "pattern": "\\S"
       }
     },
     "activePlanId": {
@@ -135,7 +140,9 @@
               "type": "string",
               "enum": [
                 "1.1",
-                "1.2"
+                "1.2",
+                "1.3",
+                "1.4"
               ]
             },
             "decision": {
@@ -161,7 +168,9 @@
                     "type": "string",
                     "enum": [
                       "1.1",
-                      "1.2"
+                      "1.2",
+                      "1.3",
+                      "1.4"
                     ]
                   },
                   "id": {
