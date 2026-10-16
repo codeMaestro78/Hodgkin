@@ -52,7 +52,9 @@ async def report_harness(monkeypatch):
     sdk = SimpleNamespace(responses=SimpleNamespace(create=sdk_create), close=AsyncMock())
     monkeypatch.setattr(builder, "AsyncOpenAI", Mock(return_value=sdk))
 
-    async def arrange(*, supported=True, requirements=None, calls=6):
+    async def arrange(
+        *, supported=True, requirements=None, calls=6, content=QUOTE, drafts=None, accepted=(SAFE,)
+    ):
         tenant, user, run_id = await seed(calls)
         tenants.append(tenant)
         requirements = list(REQUIREMENTS if requirements is None else requirements)
@@ -103,11 +105,13 @@ async def report_harness(monkeypatch):
         monkeypatch.setattr(builder, "TavilyEvidenceIngestor", Ingestor)
 
         async def context(_settings, *, sources, **_):
-            return [builder.SourceMaterial(source=sources[0], content=QUOTE)], "SOURCE [1] " + QUOTE
+            return [
+                builder.SourceMaterial(source=sources[0], content=content)
+            ], "SOURCE [1] " + content
 
         monkeypatch.setattr(builder, "_read_source_context", context)
         candidates = []
-        for text, quote, source_number, indices in (
+        for text, quote, source_number, indices in drafts or (
             (SAFE, QUOTE, 1, [0, -1, 999]),
             (UNSUPPORTED, QUOTE, 1, [1]),
             (NONEXACT, "This passage does not exist in the artifact.", 1, [1]),
@@ -121,6 +125,8 @@ async def report_harness(monkeypatch):
             )
             if requirements:
                 candidate["requirement_indices"] = indices
+            if isinstance(indices, dict):
+                candidate.update(indices)
             candidates.append(candidate)
         response = AsyncMock(
             return_value=SimpleNamespace(output_text=json.dumps({"claims": candidates}))
@@ -136,7 +142,7 @@ async def report_harness(monkeypatch):
                 builder.SemanticReview(
                     claim_index=index,
                     citation_index=0,
-                    verdict="supports" if supported and claim.claim == SAFE else "contradicts",
+                    verdict="supports" if supported and claim.claim in accepted else "contradicts",
                     confidence=0.9,
                 )
                 for index, claim in enumerate(claims)
@@ -334,6 +340,8 @@ async def test_api_selected_version_uses_its_document_and_never_infers_legacy_qu
             version=2,
             markdown="Legacy markdown with no structured assessment.",
             published=True,
+            published_at=datetime.now(UTC),
+            content_hash="0" * 64,
         )
         session.add(legacy)
         await session.flush()
@@ -440,3 +448,65 @@ async def test_report_document_and_evidence_rollback_when_publication_event_fail
     assert (await api.get_research_run(harness.run_id))["report"] is None
     assert harness.response.await_count == 1
     harness.sdk_create.assert_not_awaited()
+
+
+FIGURE_SOURCE = (
+    "Pipeline A reduced error to 4.2% across 1,200 runs. "
+    "Pipeline B reduced error to 6.8% in the same audit."
+)
+FIGURE_A = "Pipeline A reduced error to 4.2%."
+FIGURE_B = "Pipeline B reduced error to 6.8%."
+FIGURE_RUNS = "Pipeline A was audited across 1,200 runs."
+FIGURE_REJECTED = "Pipeline B reduced error to 6.8% in every deployment."
+
+
+def _figure(subject, metric, value):
+    return {"figures": [dict(subject=subject, metric=metric, value=value, citation_index=0)]}
+
+
+@pytest.mark.parametrize("calls", [6, 12, 20])
+async def test_key_figures_publish_only_verbatim_values_from_verified_findings(
+    report_harness, calls
+):
+    drafts = (
+        (FIGURE_A, "Pipeline A reduced error to 4.2%", 1, _figure("Pipeline A", "error", "4.2%")),
+        (FIGURE_B, "Pipeline B reduced error to 6.8%", 1, _figure("Pipeline B", "error", "6.8%")),
+        # Published claim, but the proposed value is not in the quote: the figure is dropped.
+        (FIGURE_RUNS, "across 1,200 runs", 1, _figure("Pipeline A", "runs", "1,300 runs")),
+        # Rejected claim: its figure must never reach the table.
+        (
+            FIGURE_REJECTED,
+            "Pipeline B reduced error to 6.8%",
+            1,
+            _figure("Pipeline B reduced error", "error", "6.8%"),
+        ),
+    )
+    harness = await report_harness(
+        requirements=[],
+        calls=calls,
+        content=FIGURE_SOURCE,
+        drafts=drafts,
+        accepted=(FIGURE_A, FIGURE_B, FIGURE_RUNS),
+    )
+    await harness.execute()
+    schema = harness.response.call_args.kwargs["text"]["format"]["schema"]
+    assert "figures" in schema["$defs"]["SectionedAssertion"]["required"]
+    async with tenant_session(str(harness.tenant)) as session:
+        run = await session.get(models.ResearchRun, harness.run_id)
+        assert run.status == "completed", run.error_code
+        report = await session.get(models.Report, run.report_id)
+        assert validate_report_document(report.document) == report.document
+        markdown = report.markdown
+    assert "## Key figures" in markdown
+    assert (
+        "### Error\n\n| Subject | Error | Source |\n| --- | --- | --- |\n"
+        "| Pipeline A | 4.2% | [1] |\n| Pipeline B | 6.8% | [1] |\n"
+    ) in markdown
+    assert "1,300" not in markdown and "### Runs" not in markdown
+    assert FIGURE_REJECTED not in markdown and "Pipeline B reduced error |" not in markdown
+    # A single cited source never produces a comparison table.
+    assert "## Evidence by source" not in markdown
+    assert "published share" not in markdown
+    assert "\\frac{3}{4}" not in markdown
+    assert "published 3 verified findings" in markdown
+    assert ("## Evidence coverage" in markdown) is (calls > 12)

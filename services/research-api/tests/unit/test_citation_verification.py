@@ -30,17 +30,13 @@ def test_verified_claims_rejects_paraphrased_quotes_but_keeps_exact_claims() -> 
             ClaimDraft(
                 claim="The service supports live extraction.",
                 citations=[
-                    CitationDraft(
-                        source_number=1, quote="The service supports live extraction."
-                    )
+                    CitationDraft(source_number=1, quote="The service supports live extraction.")
                 ],
                 caveats=[],
             ),
             ClaimDraft(
                 claim="The service extracts live data.",
-                citations=[
-                    CitationDraft(source_number=1, quote="The service extracts live data.")
-                ],
+                citations=[CitationDraft(source_number=1, quote="The service extracts live data.")],
                 caveats=[],
             ),
         ],
@@ -52,6 +48,4 @@ def test_verified_claims_rejects_paraphrased_quotes_but_keeps_exact_claims() -> 
 
     verified = _verified_claims(answer, [source], reviews)
 
-    assert [claim.claim for claim, _ in verified] == [
-        "The service supports live extraction."
-    ]
+    assert [claim.claim for claim, _ in verified] == ["The service supports live extraction."]
