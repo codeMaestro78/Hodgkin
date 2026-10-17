@@ -5,6 +5,7 @@ import logging
 import uuid
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
+from time import monotonic
 
 from redis.asyncio import Redis
 from redis.asyncio.retry import Retry
@@ -23,6 +24,7 @@ class EventWakeups:
         self._pending: set[Key] = set()
         self.connected = asyncio.Event()
         self._warned = False
+        self._publish_retry_at = 0.0
 
     @contextmanager
     def watch(self, tenant: uuid.UUID, run: uuid.UUID) -> Iterator[asyncio.Event]:
@@ -64,8 +66,11 @@ class EventWakeups:
             # remote reader might already have consumed the previous hint.
             self._pending.discard(key)
             try:
+                if monotonic() < self._publish_retry_at:
+                    continue
                 await client.publish(CHANNEL, f"{tenant}:{run}")
             except (RedisError, OSError, TimeoutError):
+                self._publish_retry_at = monotonic() + 30
                 self._unavailable()
             finally:
                 outgoing.task_done()
@@ -97,7 +102,7 @@ class EventWakeups:
                 self.connected.clear()
                 self._unavailable()
                 await asyncio.sleep(delay)
-                delay = min(delay * 2, 5)
+                delay = min(delay * 2, 30)
 
     @asynccontextmanager
     async def transport(self, url: str | None) -> AsyncIterator[None]:
@@ -131,6 +136,7 @@ class EventWakeups:
             self.connected.clear()
             self._pending.clear()
             self._warned = False
+            self._publish_retry_at = 0.0
 
 
 event_wakeups = EventWakeups()

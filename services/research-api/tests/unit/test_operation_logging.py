@@ -4,6 +4,8 @@ import uuid
 from time import monotonic
 from unittest.mock import AsyncMock
 
+import pytest
+
 from research_api import auth
 from research_api.config import Settings
 from research_api.telemetry import error_facts, operation_event, request_id
@@ -115,3 +117,19 @@ def test_debug_logging_retains_transaction_details(caplog):
     with caplog.at_level(logging.DEBUG, logger="research_api.dependencies"):
         operation_event("db.transaction", started=monotonic(), setupMs=42)
     assert json.loads(caplog.records[-1].message)["setupMs"] == 42
+
+
+@pytest.mark.parametrize("status,outcome", [(200, "succeeded"), (401, "rejected"), (503, "failed")])
+async def test_http_error_responses_are_never_logged_as_success(caplog, status, outcome):
+    from research_api.main import RequestTiming
+
+    async def app(scope, receive, send):
+        await send({"type": "http.response.start", "status": status, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    with caplog.at_level(logging.DEBUG, logger="research_api.dependencies"):
+        await RequestTiming(app)({"type": "http", "headers": []}, AsyncMock(), AsyncMock())
+    events = [json.loads(record.message) for record in caplog.records]
+    request = next(event for event in events if event["operation"] == "http.request")
+    assert request["statusCode"] == status
+    assert request["outcome"] == outcome

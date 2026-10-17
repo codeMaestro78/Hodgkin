@@ -52,8 +52,10 @@ def operation_event(
     duration_ms = round((monotonic() - started) * 1000, 2)
     routine = operation in {
         "db.transaction",
+        "db.connection.acquire",
         "db.snapshot.collections",
         "auth.verify",
+        "auth.verify.coalesced",
         "http.headers",
     }
     routine |= operation == "http.request" and (
@@ -64,7 +66,9 @@ def operation_event(
         logging.ERROR
         if outcome == "failed"
         else logging.WARNING
-        if outcome == "insufficient_evidence" or operation == "db.statement.slow"
+        if outcome in {"insufficient_evidence", "rejected"}
+        or operation == "db.statement.slow"
+        or (operation == "db.connection.acquire" and duration_ms >= 1000)
         else logging.DEBUG
         if routine
         else logging.INFO
@@ -112,7 +116,16 @@ def dependency_event(
     started: float | None = None,
     reason: str | None = None,
     remote_duration_ms: float | None = None,
+    model: str | None = None,
+    role: str | None = None,
+    max_attempts: int | None = None,
+    retry_scheduled: bool | None = None,
 ) -> None:
+    """Record a dependency boundary without request/response content or credentials."""
+    if role is not None and role not in {"planner", "writer", "claim_review"}:
+        raise ValueError("unsupported telemetry model role")
+    if model is not None and (not model.strip() or len(model) > 200):
+        raise ValueError("invalid telemetry model name")
     logger.info(
         json.dumps(
             {
@@ -123,8 +136,16 @@ def dependency_event(
                 "outcome": outcome,
                 "attempt": attempt,
                 "runId": str(dependency_run.get()) if dependency_run.get() else None,
-                "durationMs": round((monotonic() - started) * 1000, 2) if started else None,
+                "durationMs": (
+                    round((monotonic() - started) * 1000, 2)
+                    if started is not None and outcome != "started"
+                    else None
+                ),
                 "reason": reason,
+                **({"model": model} if model is not None else {}),
+                **({"role": role} if role is not None else {}),
+                **({"maxAttempts": max_attempts} if max_attempts is not None else {}),
+                **({"retryScheduled": retry_scheduled} if retry_scheduled is not None else {}),
                 **(
                     {"remoteDurationMs": round(remote_duration_ms, 2)}
                     if remote_duration_ms is not None

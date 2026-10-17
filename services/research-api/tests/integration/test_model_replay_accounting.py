@@ -21,6 +21,7 @@ from research_api import accounting_ops, model_budget
 from research_api.db.models import (
     ProviderCall,
     ProviderCallReservation,
+    ResearchRun,
     Tenant,
     UsageLedger,
     User,
@@ -28,6 +29,7 @@ from research_api.db.models import (
 from research_api.db.session import tenant_session
 from research_api.graph.builder import SynthesisOutput
 from research_api.model_budget import model_response, model_run
+from research_api.model_routing import pin_run_model_routing
 from research_api.repositories.budgets import (
     BudgetExceededError,
     BudgetReservationRepository,
@@ -69,13 +71,21 @@ async def test_remote_timing_excludes_slow_accounting_and_replay(monkeypatch, fa
     monkeypatch.setattr(model_budget, "dependency_event", lambda **facts: emitted.append(facts))
     if failed:
         with pytest.raises(ValueError, match="private remote failure"):
-            await invoke(identity, sdk)
+            await invoke(identity, sdk, role="writer")
     else:
-        await invoke(identity, sdk)
-        await invoke(identity, sdk)  # Replay must not count as a new remote observation.
+        await invoke(identity, sdk, role="writer")
+        await invoke(
+            identity, sdk, role="writer"
+        )  # Replay must not count as a new remote observation.
     assert sdk.responses.create.await_count == 1
-    assert len(emitted) == 1
-    assert emitted[0]["remote_duration_ms"] == 250
+    assert [event["outcome"] for event in emitted] == [
+        "started",
+        "uncertain" if failed else "consumed",
+    ]
+    assert emitted[0]["model"] == "gpt-4o-mini"
+    assert emitted[0]["role"] == "writer"
+    assert "remote_duration_ms" not in emitted[0]
+    assert emitted[1]["remote_duration_ms"] == 250
     assert clock[0] >= 15.25
 
 
@@ -107,6 +117,30 @@ async def seed():
             user_id=user, question="Model replay fixture", budget=RunBudgetDefaults()
         )
         return tenant, run.id
+
+
+async def test_model_routes_stay_pinned_when_runtime_configuration_changes():
+    tenant, run_id = await seed()
+    original = {
+        "planner": {"provider": "openai", "model": "gpt-4o-mini"},
+        "writer": {"provider": "openrouter", "model": "deepseek/deepseek-v4.1-flash"},
+        "claim_review": {"provider": "openai", "model": "gpt-5.4-mini"},
+    }
+    async with tenant_session(str(tenant)) as session:
+        run = await session.scalar(
+            select(ResearchRun).where(ResearchRun.tenant_id == tenant, ResearchRun.id == run_id)
+        )
+        assert run is not None
+        run.model_routing = original
+
+    changed = {
+        "planner": {"provider": "openai", "model": "gpt-6-luna"},
+        "writer": {"provider": "openai", "model": "gpt-6-luna"},
+        "claim_review": {"provider": "openai", "model": "gpt-6-luna"},
+    }
+    pinned = await pin_run_model_routing(tenant, run_id, changed, changed)
+
+    assert {role: route.as_dict() for role, route in pinned.items()} == original
 
 
 def client(*, error=None, text=TEXT):
@@ -420,7 +454,7 @@ async def test_replay_settles_persisted_success_once_before_enforcing_budget(sta
     for _ in range(2):
         if overspent:
             with pytest.raises(BudgetExceededError):
-                await invoke(identity, sdk)
+                await invoke(identity, sdk, role="writer")
         else:
             replay = await invoke(identity, sdk)
             assert replay.output_text == TEXT
@@ -459,6 +493,32 @@ async def test_permanent_or_ambiguous_errors_cannot_unlock_new_attempts(status):
         await invoke(identity, sdk)
     with pytest.raises(ReservationReplayError):
         await invoke(identity, sdk)
+    sdk.responses.create.assert_awaited_once()
+
+
+async def test_ambiguous_timeout_persists_safe_failure_diagnostics_without_retry():
+    identity = await seed()
+    error = TimeoutError("private request content must not be persisted")
+    sdk = client(error=error)
+
+    with pytest.raises(TimeoutError):
+        await invoke(identity, sdk, role="writer")
+    with pytest.raises(ReservationReplayError):
+        await invoke(identity, sdk, role="writer")
+
+    _, reservations, calls = await snapshot(identity)
+    assert len(reservations) == len(calls) == 1
+    assert reservations[0].state == "uncertain"
+    assert calls[0].outcome == "uncertain"
+    failure = calls[0].provider_usage["failure"]
+    assert failure == {
+        "version": "model-failure-v1",
+        "exceptionType": "TimeoutError",
+        "statusCode": None,
+        "outcome": "uncertain",
+        "retryable": False,
+    }
+    assert "private request content" not in json.dumps(calls[0].provider_usage)
     sdk.responses.create.assert_awaited_once()
 
 

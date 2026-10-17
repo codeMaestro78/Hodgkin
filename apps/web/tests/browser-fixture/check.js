@@ -180,7 +180,7 @@ async (page) => {
   );
   await page.keyboard.press("Escape");
   await page.goto(base + "/?view=run&state=failed");
-  await page.getByText("This research couldn’t be completed.").waitFor();
+  await page.getByText("Research failed", { exact: true }).first().waitFor();
   await page.getByRole("button", { name: "Evidence", exact: true }).click();
   assert(
     await page
@@ -189,7 +189,7 @@ async (page) => {
     "Failed run retains collected evidence",
   );
   await page.goto(base + "/?view=run&state=writing");
-  await page.getByText("Bringing the findings together.").waitFor();
+  await page.getByText("Writing report", { exact: true }).first().waitFor();
   assert(
     await page.getByLabel("Questions being explored").isVisible(),
     "Working run displays actual question states",
@@ -231,7 +231,7 @@ async (page) => {
     return rects.every((rect) => Math.abs(rect.left - rects[0].left) < 1 && Math.abs(rect.width - rects[0].width) < 1);
   });
   assert(aligned, "Title, metrics, progress and brief share one aligned column");
-  assert(await page.locator(".new-research").evaluate((el) => getComputedStyle(el).backgroundColor === "rgb(169, 97, 66)"),
-    "Workspace primary buttons use the landing copper accent");
+  assert(await page.locator(".new-research").evaluate((el) => getComputedStyle(el).backgroundColor === "rgb(37, 37, 34)"),
+    "Workspace primary buttons use the landing ink pill; copper stays reserved for citations");
   return { checksPassed: checks.length, checks };
 }

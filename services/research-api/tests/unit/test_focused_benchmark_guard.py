@@ -13,7 +13,21 @@ from research_api import config
 SCRIPT = Path(__file__).parents[2] / "scripts" / "benchmark_focused.py"
 
 
-@pytest.mark.parametrize("arguments", [[], ["--confirm-paid", "--runs", "3", "--offset", "2"]])
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        [],
+        ["--confirm-paid", "--runs", "3", "--offset", "2"],
+        ["--confirm-paid", "--question", "   "],
+        ["--confirm-paid", "--question", "x" * 1001],
+        ["--confirm-paid", "--runs", "2", "--question", "Compare evidence"],
+        ["--confirm-paid", "--runs", "2", "--compare-discovery"],
+        ["--confirm-paid", "--discovery-provider", "serper", "--compare-discovery"],
+        ["--confirm-paid", "--runs", "2", "--compare-http-clients"],
+        ["--confirm-paid", "--discovery-provider", "serper", "--compare-http-clients"],
+        ["--confirm-paid", "--compare-discovery", "--compare-http-clients"],
+    ],
+)
 def test_cli_rejects_missing_approval_or_out_of_range_workload(arguments):
     result = subprocess.run(  # noqa: S603 - fixed local script, no shell or external input.
         [sys.executable, str(SCRIPT), *arguments], capture_output=True, text=True, timeout=5

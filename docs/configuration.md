@@ -32,15 +32,39 @@ Implemented settings are defined in `.env.example` and
 
 ## Models
 
+The API loads the service `.env` as a baseline and overlays the repository-root `.env`
+when running from this checkout, including when started from `services/research-api`.
+This preserves service-only Auth settings while root model settings take precedence.
+Process environment variables take precedence over both files. Set `RESEARCH_ENV_FILE`
+to an explicit file to select another deployment configuration (empty disables dotenv).
+Startup emits `runtime.configuration` with the selected files and non-secret model routes.
+Tests disable implicit dotenv loading. Existing runs keep their persisted model routes;
+changing configuration affects newly created runs after the API restarts.
+
+For the local Compose Redis, use `REDIS_URL=redis://localhost:56379/0` in the selected
+configuration. A stale cloud Redis hostname causes reconnect attempts and polling fallback.
+
 | Name | Type | Required | Default | Description | Range | Sensitivity | Used by | Status |
 |---|---|---|---|---|---|---|---|---|
-| `LLM_PROVIDER` | string | Yes | — | Model provider for planner/distiller/verifier/reflector/writer calls | — | Low | Python service | `PROPOSED` |
-| `LLM_MODEL_NAME` | string | Yes | — | Model identifier | — | Low | Python service | `PROPOSED` |
+| `LLM_PROVIDER` | `openai` \| `openrouter` | No | `openai` | Default model provider inherited by roles without an override | enum | Low | Python service | Implemented |
+| `LLM_MODEL_NAME` | string | No | `gpt-4o-mini` | Default model inherited by roles without an override | ≤ 200 chars | Low | Python service | Implemented |
+| `LLM_PLANNER_PROVIDER` / `LLM_PLANNER_MODEL_NAME` | provider / string | No | Inherit defaults | Planner role route, persisted on new runs | provider enum / ≤ 200 chars | Low | Python service | Implemented |
+| `LLM_WRITER_PROVIDER` / `LLM_WRITER_MODEL_NAME` | provider / string | No | Inherit defaults | Report synthesis route, persisted on new runs | provider enum / ≤ 200 chars | Low | Python service | Implemented |
+| `LLM_CLAIM_REVIEW_PROVIDER` / `LLM_CLAIM_REVIEW_MODEL_NAME` | provider / string | No | Inherit defaults | Assertion extraction and semantic citation-review route | provider enum / ≤ 200 chars | Low | Python service | Implemented |
+| `OPENAI_API_KEY` / `OPENROUTER_API_KEY` | secret string | Required for selected provider | — | API credential for configured model routes | — | **High** | Python service | Implemented |
+
+The model route is snapshotted per run. The current coverage reflector is deterministic, so it has
+no model route. Supported models have versioned accounting rates; unknown models use an explicitly
+labelled policy estimate rather than a fabricated provider price.
 
 ## Providers
 
 Implemented retry controls: `PROVIDER_MAX_ATTEMPTS` defaults to 3 (validated 1–3),
 and `PROVIDER_TIMEOUT_SECONDS` defaults to 30 (greater than zero, at most 120).
+Writer model calls use `MODEL_WRITER_TIMEOUT_SECONDS`, default 45 seconds (greater
+than zero, at most 120), because synthesis can generate a longer structured report.
+This is a bounded timeout increase, not an added retry; uncertain dispatched calls
+remain reserved and are never blindly reissued.
 OpenAI SDK retries are disabled; explicit model attempts retry only known
 rejections/pre-dispatch failures. Tavily retries only pre-dispatch failures.
 Both recheck persisted cancellation before retry dispatch. The run wall-clock

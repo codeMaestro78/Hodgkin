@@ -2,8 +2,15 @@
 import Link from "next/link";
 import { useRef, useState } from "react";
 import type { FormEvent } from "react";
+import type { CSSProperties } from "react";
 import { Brand, Icon } from "./ui";
 import { useEntrance } from "./workspace-motion";
+import { EvidenceField } from "./landing/evidence-field";
+import { Critter } from "./crew/critter";
+import { CrewEyes } from "./crew/crew-eyes";
+import "../auth.css";
+
+const enter = (step: number) => ({ "--n": step }) as CSSProperties;
 export function AuthPage({
   mode,
   configured,
@@ -23,11 +30,6 @@ export function AuthPage({
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const scope = useRef<HTMLElement>(null);
-  useEntrance(
-    scope,
-    mode,
-    ".auth-story-copy, .auth-form-heading, .account-form, .auth-local",
-  );
   useEntrance(scope, notice, ".form-feedback");
   async function perform(action: string, fields: Record<string, string> = {}) {
     if (busy) return;
@@ -82,10 +84,13 @@ export function AuthPage({
   return (
     <main ref={scope} className={`auth-page ${signup ? "auth-signup" : ""}`}>
       <section className="auth-story">
-        <Brand light />
-        <div className="auth-story-copy">
+        <div className="auth-field" aria-hidden="true">
+          <EvidenceField />
+        </div>
+        <Brand />
+        <div className="auth-story-copy" data-enter style={enter(1)}>
           <span className="auth-story-line" />
-          <h2>
+          <p className="auth-story-title">
             {signup ? (
               <>
                 A place for your
@@ -99,15 +104,48 @@ export function AuthPage({
                 curiosity left off.
               </>
             )}
-          </h2>
+          </p>
           <p>
             Your questions, the evidence behind them, and the ideas that come
             next. One considered workspace.
           </p>
         </div>
+        <figure className="auth-specimen" data-enter style={enter(3)}>
+          <div className="auth-perch" aria-hidden="true">
+            <Critter kind="folio" size={50} />
+            <Critter kind="lens" size={46} delay={600} />
+            <Critter kind="seal" size={48} delay={1200} />
+            <Critter kind="quill" size={44} delay={300} />
+          </div>
+          <div className="auth-specimen-card">
+            <span className="auth-specimen-label">
+              <Icon name="search" size={13} />
+              Do heat pumps still work well in very cold climates?
+            </span>
+            <p>
+              Yes, with caveats. Rated figures tend to be optimistic, so
+              independent field data is the better guide
+              <sup className="auth-cite">3</sup>.
+            </p>
+            <div className="auth-specimen-source">
+              <span>3</span>
+              <div>
+                <strong>Rated capacity at low temperatures</strong>
+                <small>Field study &middot; passage verified</small>
+              </div>
+              <i>
+                <Icon name="check" size={11} />
+              </i>
+            </div>
+          </div>
+          <figcaption className="sr-only">
+            An example answer with a citation linked to its source.
+          </figcaption>
+        </figure>
         <p className="auth-story-foot">
           Research the live web. Keep the trail.
         </p>
+        <CrewEyes />
       </section>
       <section className="auth-form-area">
         <Link href="/" className="auth-back">
@@ -115,9 +153,12 @@ export function AuthPage({
           Back to home
         </Link>
         <div className="auth-form-wrap">
-          <div className="auth-form-heading">
-            <span className="auth-emblem">
-              <Icon name={signup ? "plus" : "layers"} size={24} />
+          <div className="auth-form-heading" data-enter style={enter(1)}>
+            <span className="auth-emblem" aria-hidden="true">
+              <Critter
+                kind={signup ? "quill" : forgot || reset ? "seal" : "lens"}
+                size={40}
+              />
             </span>
             <h1>
               {forgot
@@ -143,6 +184,8 @@ export function AuthPage({
               <button
                 type="button"
                 className="google-auth"
+                data-enter
+                style={enter(2)}
                 disabled={!configured || Boolean(busy)}
                 onClick={() => void perform("google")}
               >
@@ -173,12 +216,17 @@ export function AuthPage({
                   ? "Connecting to Google…"
                   : "Continue with Google"}
               </button>
-              <div className="auth-divider">
+              <div className="auth-divider" data-enter style={enter(2)}>
                 <span>or use email</span>
               </div>
             </>
           )}
-          <form onSubmit={submit} className="account-form">
+          <form
+            onSubmit={submit}
+            className="account-form"
+            data-enter
+            style={enter(3)}
+          >
             {signup && (
               <label>
                 Full name
@@ -283,7 +331,7 @@ export function AuthPage({
               </p>
             )}
           </form>
-          <p className="auth-switch">
+          <p className="auth-switch" data-enter style={enter(4)}>
             {signup || forgot || reset
               ? "Already have an account?"
               : "New to HogsKin?"}{" "}
@@ -291,7 +339,7 @@ export function AuthPage({
               {signup || forgot || reset ? "Log in" : "Create an account"}
             </Link>
           </p>
-          <div className="auth-local">
+          <div className="auth-local" data-enter style={enter(5)}>
             <span>
               {configured ? "Your private workspace" : "Setup required"}
             </span>

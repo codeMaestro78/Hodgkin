@@ -1,0 +1,5687 @@
+{
+  "inputs_sha256": {
+    "cases.jsonl": "bf5b58687b3d12345ae94ab0a65ed77cdab87ca06c9518b0b82a240acef41a9d",
+    "rubric.md": "fe5cd5ae3ccb72cc5bd281502ad218c387206cc80c0cca932595a5d6b2ce2089",
+    "schema.json": "a07a3cc510424d0a90cba1e0394277cd8e674dac1bfcfe8b462206f853a0f0d2",
+    "synthetic-receipts.json": "e7eb43b30e6e67fdc5c116e7bd9f5e49711253de85e1d04c68029a4ecfe2e11c"
+  },
+  "observations": [
+    {
+      "case_id": "modes-01",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 12,
+        "context_chars": 12000,
+        "output_tokens": 4096,
+        "plan_questions": 3,
+        "provider_operations": 6,
+        "sources": 6
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "focused",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "25e7f3f6aa5f8aa5c881714df04548726c936901d8b042d6f2c0cc972573cf3a",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-01",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 24,
+        "context_chars": 18000,
+        "output_tokens": 6144,
+        "plan_questions": 4,
+        "provider_operations": 12,
+        "sources": 12
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "balanced",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "25e7f3f6aa5f8aa5c881714df04548726c936901d8b042d6f2c0cc972573cf3a",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-01",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 40,
+        "context_chars": 24000,
+        "output_tokens": 8192,
+        "plan_questions": 6,
+        "provider_operations": 20,
+        "sources": 20
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "deep",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "25e7f3f6aa5f8aa5c881714df04548726c936901d8b042d6f2c0cc972573cf3a",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-02",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 12,
+        "context_chars": 12000,
+        "output_tokens": 4096,
+        "plan_questions": 3,
+        "provider_operations": 6,
+        "sources": 6
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "focused",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "3061e82cad562fc44f08901e9cdefa811d40c3213aa7f89ace2a3cbc9dd60deb",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-02",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 24,
+        "context_chars": 18000,
+        "output_tokens": 6144,
+        "plan_questions": 4,
+        "provider_operations": 12,
+        "sources": 12
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "balanced",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "3061e82cad562fc44f08901e9cdefa811d40c3213aa7f89ace2a3cbc9dd60deb",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-02",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 40,
+        "context_chars": 24000,
+        "output_tokens": 8192,
+        "plan_questions": 6,
+        "provider_operations": 20,
+        "sources": 20
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "deep",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "3061e82cad562fc44f08901e9cdefa811d40c3213aa7f89ace2a3cbc9dd60deb",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-03",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 12,
+        "context_chars": 12000,
+        "output_tokens": 4096,
+        "plan_questions": 3,
+        "provider_operations": 6,
+        "sources": 6
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "focused",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "335dd24bd3c4581a8ba8ffa8450fe92f47006c0dc6a251258d486af18d37b449",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-03",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 24,
+        "context_chars": 18000,
+        "output_tokens": 6144,
+        "plan_questions": 4,
+        "provider_operations": 12,
+        "sources": 12
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "balanced",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "335dd24bd3c4581a8ba8ffa8450fe92f47006c0dc6a251258d486af18d37b449",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-03",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 40,
+        "context_chars": 24000,
+        "output_tokens": 8192,
+        "plan_questions": 6,
+        "provider_operations": 20,
+        "sources": 20
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "deep",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "335dd24bd3c4581a8ba8ffa8450fe92f47006c0dc6a251258d486af18d37b449",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-04",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 12,
+        "context_chars": 12000,
+        "output_tokens": 4096,
+        "plan_questions": 3,
+        "provider_operations": 6,
+        "sources": 6
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "focused",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "6c67726b399ce25e6b325265cb5447774963460ede7f5fae8a7d1d721535e907",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-04",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 24,
+        "context_chars": 18000,
+        "output_tokens": 6144,
+        "plan_questions": 4,
+        "provider_operations": 12,
+        "sources": 12
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "balanced",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "6c67726b399ce25e6b325265cb5447774963460ede7f5fae8a7d1d721535e907",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-04",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 40,
+        "context_chars": 24000,
+        "output_tokens": 8192,
+        "plan_questions": 6,
+        "provider_operations": 20,
+        "sources": 20
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "deep",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "6c67726b399ce25e6b325265cb5447774963460ede7f5fae8a7d1d721535e907",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-05",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 12,
+        "context_chars": 12000,
+        "output_tokens": 4096,
+        "plan_questions": 3,
+        "provider_operations": 6,
+        "sources": 6
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "focused",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "b996dfe847758b83d099703195dd0d2ed9298b96c077fa28fb24af1c670a7d00",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-05",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 24,
+        "context_chars": 18000,
+        "output_tokens": 6144,
+        "plan_questions": 4,
+        "provider_operations": 12,
+        "sources": 12
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "balanced",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "b996dfe847758b83d099703195dd0d2ed9298b96c077fa28fb24af1c670a7d00",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-05",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 40,
+        "context_chars": 24000,
+        "output_tokens": 8192,
+        "plan_questions": 6,
+        "provider_operations": 20,
+        "sources": 20
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "deep",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "b996dfe847758b83d099703195dd0d2ed9298b96c077fa28fb24af1c670a7d00",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-06",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 12,
+        "context_chars": 12000,
+        "output_tokens": 4096,
+        "plan_questions": 3,
+        "provider_operations": 6,
+        "sources": 6
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "focused",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "9823f24fa95c7b5fe2d64128d8a43fadd9e776724b4611db30903bb5e2a5c1b7",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-06",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 24,
+        "context_chars": 18000,
+        "output_tokens": 6144,
+        "plan_questions": 4,
+        "provider_operations": 12,
+        "sources": 12
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "balanced",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "9823f24fa95c7b5fe2d64128d8a43fadd9e776724b4611db30903bb5e2a5c1b7",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-06",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 40,
+        "context_chars": 24000,
+        "output_tokens": 8192,
+        "plan_questions": 6,
+        "provider_operations": 20,
+        "sources": 20
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "deep",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "9823f24fa95c7b5fe2d64128d8a43fadd9e776724b4611db30903bb5e2a5c1b7",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-07",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 12,
+        "context_chars": 12000,
+        "output_tokens": 4096,
+        "plan_questions": 3,
+        "provider_operations": 6,
+        "sources": 6
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "focused",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "b5fd778343b8cec2bc1d6c8614486d640d4af519b22dd5f1675f11e4a563de51",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-07",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 24,
+        "context_chars": 18000,
+        "output_tokens": 6144,
+        "plan_questions": 4,
+        "provider_operations": 12,
+        "sources": 12
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "balanced",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "b5fd778343b8cec2bc1d6c8614486d640d4af519b22dd5f1675f11e4a563de51",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-07",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 40,
+        "context_chars": 24000,
+        "output_tokens": 8192,
+        "plan_questions": 6,
+        "provider_operations": 20,
+        "sources": 20
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "deep",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "b5fd778343b8cec2bc1d6c8614486d640d4af519b22dd5f1675f11e4a563de51",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-08",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 12,
+        "context_chars": 12000,
+        "output_tokens": 4096,
+        "plan_questions": 3,
+        "provider_operations": 6,
+        "sources": 6
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "focused",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "8d2e3f0e23f55d9cd933ab4535aa9cb0cdbceab1353f48da5f724cd6ba1ac5aa",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-08",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 24,
+        "context_chars": 18000,
+        "output_tokens": 6144,
+        "plan_questions": 4,
+        "provider_operations": 12,
+        "sources": 12
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "balanced",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "8d2e3f0e23f55d9cd933ab4535aa9cb0cdbceab1353f48da5f724cd6ba1ac5aa",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-08",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 40,
+        "context_chars": 24000,
+        "output_tokens": 8192,
+        "plan_questions": 6,
+        "provider_operations": 20,
+        "sources": 20
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "deep",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "8d2e3f0e23f55d9cd933ab4535aa9cb0cdbceab1353f48da5f724cd6ba1ac5aa",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-09",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 12,
+        "context_chars": 12000,
+        "output_tokens": 4096,
+        "plan_questions": 3,
+        "provider_operations": 6,
+        "sources": 6
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "focused",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "abed777f14c3f21bcd3eb4da2d72d7ef47af21d211763dc8e16bd56d08790847",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-09",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 24,
+        "context_chars": 18000,
+        "output_tokens": 6144,
+        "plan_questions": 4,
+        "provider_operations": 12,
+        "sources": 12
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "balanced",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "abed777f14c3f21bcd3eb4da2d72d7ef47af21d211763dc8e16bd56d08790847",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-09",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 40,
+        "context_chars": 24000,
+        "output_tokens": 8192,
+        "plan_questions": 6,
+        "provider_operations": 20,
+        "sources": 20
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "deep",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "abed777f14c3f21bcd3eb4da2d72d7ef47af21d211763dc8e16bd56d08790847",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-10",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 12,
+        "context_chars": 12000,
+        "output_tokens": 4096,
+        "plan_questions": 3,
+        "provider_operations": 6,
+        "sources": 6
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "focused",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "ded2110225b1846a6da480d8e57d065b1019f9a029bcf4015c1fddfdac529830",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-10",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 24,
+        "context_chars": 18000,
+        "output_tokens": 6144,
+        "plan_questions": 4,
+        "provider_operations": 12,
+        "sources": 12
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "balanced",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "ded2110225b1846a6da480d8e57d065b1019f9a029bcf4015c1fddfdac529830",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-10",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 40,
+        "context_chars": 24000,
+        "output_tokens": 8192,
+        "plan_questions": 6,
+        "provider_operations": 20,
+        "sources": 20
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "deep",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "ded2110225b1846a6da480d8e57d065b1019f9a029bcf4015c1fddfdac529830",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-11",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 12,
+        "context_chars": 12000,
+        "output_tokens": 4096,
+        "plan_questions": 3,
+        "provider_operations": 6,
+        "sources": 6
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "focused",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "4d9a1fb9c87e540d9de9fe6b8a3720ab92323262f8b6d54dc3b70c421437a27f",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-11",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 24,
+        "context_chars": 18000,
+        "output_tokens": 6144,
+        "plan_questions": 4,
+        "provider_operations": 12,
+        "sources": 12
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "balanced",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "4d9a1fb9c87e540d9de9fe6b8a3720ab92323262f8b6d54dc3b70c421437a27f",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-11",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 40,
+        "context_chars": 24000,
+        "output_tokens": 8192,
+        "plan_questions": 6,
+        "provider_operations": 20,
+        "sources": 20
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "deep",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "4d9a1fb9c87e540d9de9fe6b8a3720ab92323262f8b6d54dc3b70c421437a27f",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-12",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 12,
+        "context_chars": 12000,
+        "output_tokens": 4096,
+        "plan_questions": 3,
+        "provider_operations": 6,
+        "sources": 6
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "focused",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "a489d7638c3c965ee4c7b7c0100b8eb0e25b372b7d1508d6220293b12ea0781f",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-12",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 24,
+        "context_chars": 18000,
+        "output_tokens": 6144,
+        "plan_questions": 4,
+        "provider_operations": 12,
+        "sources": 12
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "balanced",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "a489d7638c3c965ee4c7b7c0100b8eb0e25b372b7d1508d6220293b12ea0781f",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-12",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 40,
+        "context_chars": 24000,
+        "output_tokens": 8192,
+        "plan_questions": 6,
+        "provider_operations": 20,
+        "sources": 20
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "deep",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "a489d7638c3c965ee4c7b7c0100b8eb0e25b372b7d1508d6220293b12ea0781f",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-13",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 12,
+        "context_chars": 12000,
+        "output_tokens": 4096,
+        "plan_questions": 3,
+        "provider_operations": 6,
+        "sources": 6
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "focused",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "aa6c698dc524d06db584c53e9d76a1637e4c976a491f85aa572ab819d6f480f0",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-13",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 24,
+        "context_chars": 18000,
+        "output_tokens": 6144,
+        "plan_questions": 4,
+        "provider_operations": 12,
+        "sources": 12
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "balanced",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "aa6c698dc524d06db584c53e9d76a1637e4c976a491f85aa572ab819d6f480f0",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-13",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 40,
+        "context_chars": 24000,
+        "output_tokens": 8192,
+        "plan_questions": 6,
+        "provider_operations": 20,
+        "sources": 20
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "deep",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "aa6c698dc524d06db584c53e9d76a1637e4c976a491f85aa572ab819d6f480f0",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-14",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 12,
+        "context_chars": 12000,
+        "output_tokens": 4096,
+        "plan_questions": 3,
+        "provider_operations": 6,
+        "sources": 6
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "focused",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "13240c64f4135d68388deee2d4ce51fb1d07e230c696a199bc5aa50f3a3d0918",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-14",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 24,
+        "context_chars": 18000,
+        "output_tokens": 6144,
+        "plan_questions": 4,
+        "provider_operations": 12,
+        "sources": 12
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "balanced",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "13240c64f4135d68388deee2d4ce51fb1d07e230c696a199bc5aa50f3a3d0918",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-14",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 40,
+        "context_chars": 24000,
+        "output_tokens": 8192,
+        "plan_questions": 6,
+        "provider_operations": 20,
+        "sources": 20
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "deep",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "13240c64f4135d68388deee2d4ce51fb1d07e230c696a199bc5aa50f3a3d0918",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-15",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 12,
+        "context_chars": 12000,
+        "output_tokens": 4096,
+        "plan_questions": 3,
+        "provider_operations": 6,
+        "sources": 6
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "focused",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "840ffa6b82fc7e13b86054cb72fba0ef601a7d8ff04423fbffc3664d97fedc8e",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-15",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 24,
+        "context_chars": 18000,
+        "output_tokens": 6144,
+        "plan_questions": 4,
+        "provider_operations": 12,
+        "sources": 12
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "balanced",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "840ffa6b82fc7e13b86054cb72fba0ef601a7d8ff04423fbffc3664d97fedc8e",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-15",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 40,
+        "context_chars": 24000,
+        "output_tokens": 8192,
+        "plan_questions": 6,
+        "provider_operations": 20,
+        "sources": 20
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "deep",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "840ffa6b82fc7e13b86054cb72fba0ef601a7d8ff04423fbffc3664d97fedc8e",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-16",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 12,
+        "context_chars": 12000,
+        "output_tokens": 4096,
+        "plan_questions": 3,
+        "provider_operations": 6,
+        "sources": 6
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "focused",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "6a1ef54f8c8932124db92bbf411032f6b8e5cfa4aaf6c6d352d8b87a89298c60",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-16",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 24,
+        "context_chars": 18000,
+        "output_tokens": 6144,
+        "plan_questions": 4,
+        "provider_operations": 12,
+        "sources": 12
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "balanced",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "6a1ef54f8c8932124db92bbf411032f6b8e5cfa4aaf6c6d352d8b87a89298c60",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-16",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 40,
+        "context_chars": 24000,
+        "output_tokens": 8192,
+        "plan_questions": 6,
+        "provider_operations": 20,
+        "sources": 20
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "deep",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "6a1ef54f8c8932124db92bbf411032f6b8e5cfa4aaf6c6d352d8b87a89298c60",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-17",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 12,
+        "context_chars": 12000,
+        "output_tokens": 4096,
+        "plan_questions": 3,
+        "provider_operations": 6,
+        "sources": 6
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "focused",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "d66d0adfab907197e0bfc73e6646660df7053a562fef4e8b1ceb926b547cd1c3",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-17",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 24,
+        "context_chars": 18000,
+        "output_tokens": 6144,
+        "plan_questions": 4,
+        "provider_operations": 12,
+        "sources": 12
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "balanced",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "d66d0adfab907197e0bfc73e6646660df7053a562fef4e8b1ceb926b547cd1c3",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-17",
+      "dimension_states": {
+        "core": "partial",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 40,
+        "context_chars": 24000,
+        "output_tokens": 8192,
+        "plan_questions": 6,
+        "provider_operations": 20,
+        "sources": 20
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "deep",
+      "policy_origin": "legacy-inferred",
+      "quality": "partial",
+      "receipt_sha256": "d66d0adfab907197e0bfc73e6646660df7053a562fef4e8b1ceb926b547cd1c3",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 1
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-18",
+      "dimension_states": {
+        "core": "unknown",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 12,
+        "context_chars": 12000,
+        "output_tokens": 4096,
+        "plan_questions": 3,
+        "provider_operations": 6,
+        "sources": 6
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "focused",
+      "policy_origin": "legacy-inferred",
+      "quality": "insufficient_evidence",
+      "receipt_sha256": "daae25dd18ae14f6f9874e8e8dadc64753ca363532b0d7b713e3f11997ee7610",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 0
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-18",
+      "dimension_states": {
+        "core": "unknown",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 24,
+        "context_chars": 18000,
+        "output_tokens": 6144,
+        "plan_questions": 4,
+        "provider_operations": 12,
+        "sources": 12
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "balanced",
+      "policy_origin": "legacy-inferred",
+      "quality": "insufficient_evidence",
+      "receipt_sha256": "daae25dd18ae14f6f9874e8e8dadc64753ca363532b0d7b713e3f11997ee7610",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 0
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-18",
+      "dimension_states": {
+        "core": "unknown",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 40,
+        "context_chars": 24000,
+        "output_tokens": 8192,
+        "plan_questions": 6,
+        "provider_operations": 20,
+        "sources": 20
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "deep",
+      "policy_origin": "legacy-inferred",
+      "quality": "insufficient_evidence",
+      "receipt_sha256": "daae25dd18ae14f6f9874e8e8dadc64753ca363532b0d7b713e3f11997ee7610",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 0
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-19",
+      "dimension_states": {
+        "core": "unknown",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 12,
+        "context_chars": 12000,
+        "output_tokens": 4096,
+        "plan_questions": 3,
+        "provider_operations": 6,
+        "sources": 6
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 0
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "focused",
+      "policy_origin": "legacy-inferred",
+      "quality": "insufficient_evidence",
+      "receipt_sha256": "c083e17db35e9edcecb2c2897be444b044f03b1ad87587d37c47fb0ba144fffb",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 0
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-19",
+      "dimension_states": {
+        "core": "unknown",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 24,
+        "context_chars": 18000,
+        "output_tokens": 6144,
+        "plan_questions": 4,
+        "provider_operations": 12,
+        "sources": 12
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 0
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "balanced",
+      "policy_origin": "legacy-inferred",
+      "quality": "insufficient_evidence",
+      "receipt_sha256": "c083e17db35e9edcecb2c2897be444b044f03b1ad87587d37c47fb0ba144fffb",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 0
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-19",
+      "dimension_states": {
+        "core": "unknown",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 40,
+        "context_chars": 24000,
+        "output_tokens": 8192,
+        "plan_questions": 6,
+        "provider_operations": 20,
+        "sources": 20
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 0
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "deep",
+      "policy_origin": "legacy-inferred",
+      "quality": "insufficient_evidence",
+      "receipt_sha256": "c083e17db35e9edcecb2c2897be444b044f03b1ad87587d37c47fb0ba144fffb",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 0
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-20",
+      "dimension_states": {
+        "core": "unknown",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 12,
+        "context_chars": 12000,
+        "output_tokens": 4096,
+        "plan_questions": 3,
+        "provider_operations": 6,
+        "sources": 6
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "focused",
+      "policy_origin": "legacy-inferred",
+      "quality": "insufficient_evidence",
+      "receipt_sha256": "0921e1df870d08e22eb78d304856e17f5fea8dd17206abee277e1ff6006a30b1",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 0
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-20",
+      "dimension_states": {
+        "core": "unknown",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 24,
+        "context_chars": 18000,
+        "output_tokens": 6144,
+        "plan_questions": 4,
+        "provider_operations": 12,
+        "sources": 12
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "balanced",
+      "policy_origin": "legacy-inferred",
+      "quality": "insufficient_evidence",
+      "receipt_sha256": "0921e1df870d08e22eb78d304856e17f5fea8dd17206abee277e1ff6006a30b1",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 0
+      },
+      "version": "modes-observation-v1"
+    },
+    {
+      "case_id": "modes-20",
+      "dimension_states": {
+        "core": "unknown",
+        "tail": "unknown"
+      },
+      "evidence_kind": "synthetic",
+      "failed": false,
+      "human_review_reference": null,
+      "human_scores": {
+        "decision_usefulness": null,
+        "directness": null,
+        "information_density": null
+      },
+      "limits": {
+        "candidate_findings": 40,
+        "context_chars": 24000,
+        "output_tokens": 8192,
+        "plan_questions": 6,
+        "provider_operations": 20,
+        "sources": 20
+      },
+      "measurements": {
+        "end_to_end_ms": {
+          "source": null,
+          "value": null
+        },
+        "estimated_cost_usd": {
+          "source": null,
+          "value": null
+        },
+        "first_useful_evidence_ms": {
+          "source": null,
+          "value": null
+        },
+        "queue_wait_ms": {
+          "source": null,
+          "value": null
+        },
+        "settled_cost_usd": {
+          "source": null,
+          "value": null
+        }
+      },
+      "metrics": {
+        "abstention_calibration": null,
+        "citation_completeness": null,
+        "claim_precision": null,
+        "contradiction_recall": null,
+        "disagreement_preservation": null,
+        "evidence_attribution": null,
+        "exact_citation_correctness": {
+          "denominator": 1,
+          "numerator": 1
+        },
+        "independence_assessment": null,
+        "primary_source_coverage": null,
+        "provenance_completeness": null,
+        "secondary_source_coverage": null,
+        "unsupported_assertion_rate": null
+      },
+      "mode": "deep",
+      "policy_origin": "legacy-inferred",
+      "quality": "insufficient_evidence",
+      "receipt_sha256": "0921e1df870d08e22eb78d304856e17f5fea8dd17206abee277e1ff6006a30b1",
+      "requested_mode": null,
+      "snapshot": {
+        "graph": "not_executed",
+        "model": "not_invoked",
+        "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+        "prompt": "not_invoked",
+        "provider": "authored_synthetic_receipts_v1",
+        "schema": "modes-observation-v1"
+      },
+      "usage": {
+        "input_tokens": null,
+        "operations": {
+          "extract": 1,
+          "search": 1
+        },
+        "output_tokens": null,
+        "sources": 1,
+        "verified_findings": 0
+      },
+      "version": "modes-observation-v1"
+    }
+  ],
+  "scope": "synthetic_offline_harness_only",
+  "summary": {
+    "evidence_kind": "synthetic",
+    "modes": {
+      "balanced": {
+        "effective_limits": [
+          {
+            "candidate_findings": 24,
+            "context_chars": 18000,
+            "output_tokens": 6144,
+            "plan_questions": 4,
+            "provider_operations": 12,
+            "sources": 12
+          }
+        ],
+        "failures": 0,
+        "human_scores": {
+          "decision_usefulness": {
+            "mean": null,
+            "samples": 0
+          },
+          "directness": {
+            "mean": null,
+            "samples": 0
+          },
+          "information_density": {
+            "mean": null,
+            "samples": 0
+          }
+        },
+        "measurements": {
+          "end_to_end_ms": {
+            "p50": null,
+            "p95": null,
+            "samples": 0,
+            "total": null
+          },
+          "estimated_cost_usd": {
+            "p50": null,
+            "p95": null,
+            "samples": 0,
+            "total": null
+          },
+          "first_useful_evidence_ms": {
+            "p50": null,
+            "p95": null,
+            "samples": 0,
+            "total": null
+          },
+          "queue_wait_ms": {
+            "p50": null,
+            "p95": null,
+            "samples": 0,
+            "total": null
+          },
+          "settled_cost_usd": {
+            "p50": null,
+            "p95": null,
+            "samples": 0,
+            "total": null
+          }
+        },
+        "metrics": {
+          "abstention_calibration": {
+            "denominator": 0,
+            "measured_runs": 0,
+            "numerator": 0,
+            "value": null
+          },
+          "citation_completeness": {
+            "denominator": 0,
+            "measured_runs": 0,
+            "numerator": 0,
+            "value": null
+          },
+          "claim_precision": {
+            "denominator": 0,
+            "measured_runs": 0,
+            "numerator": 0,
+            "value": null
+          },
+          "contradiction_recall": {
+            "denominator": 0,
+            "measured_runs": 0,
+            "numerator": 0,
+            "value": null
+          },
+          "core_dimension_coverage": {
+            "denominator": 20,
+            "numerator": 0,
+            "value": 0.0
+          },
+          "disagreement_preservation": {
+            "denominator": 0,
+            "measured_runs": 0,
+            "numerator": 0,
+            "value": null
+          },
+          "evidence_attribution": {
+            "denominator": 0,
+            "measured_runs": 0,
+            "numerator": 0,
+            "value": null
+          },
+          "exact_citation_correctness": {
+            "denominator": 20,
+            "measured_runs": 20,
+            "numerator": 19,
+            "value": 0.95
+          },
+          "independence_assessment": {
+            "denominator": 0,
+            "measured_runs": 0,
+            "numerator": 0,
+            "value": null
+          },
+          "primary_source_coverage": {
+            "denominator": 0,
+            "measured_runs": 0,
+            "numerator": 0,
+            "value": null
+          },
+          "provenance_completeness": {
+            "denominator": 0,
+            "measured_runs": 0,
+            "numerator": 0,
+            "value": null
+          },
+          "secondary_source_coverage": {
+            "denominator": 0,
+            "measured_runs": 0,
+            "numerator": 0,
+            "value": null
+          },
+          "tail_dimension_coverage": {
+            "denominator": 20,
+            "numerator": 0,
+            "value": 0.0
+          },
+          "unsupported_assertion_rate": {
+            "denominator": 0,
+            "measured_runs": 0,
+            "numerator": 0,
+            "value": null
+          }
+        },
+        "operations": 40,
+        "quality": {
+          "insufficient_evidence": 3,
+          "partial": 17
+        },
+        "runs": 20,
+        "settled_cost_per_established_dimension": null,
+        "settled_cost_per_verified_finding": null,
+        "sources": 20,
+        "tokens": {
+          "input_tokens": {
+            "samples": 0,
+            "total": null
+          },
+          "output_tokens": {
+            "samples": 0,
+            "total": null
+          }
+        },
+        "verified_findings": 17
+      },
+      "deep": {
+        "effective_limits": [
+          {
+            "candidate_findings": 40,
+            "context_chars": 24000,
+            "output_tokens": 8192,
+            "plan_questions": 6,
+            "provider_operations": 20,
+            "sources": 20
+          }
+        ],
+        "failures": 0,
+        "human_scores": {
+          "decision_usefulness": {
+            "mean": null,
+            "samples": 0
+          },
+          "directness": {
+            "mean": null,
+            "samples": 0
+          },
+          "information_density": {
+            "mean": null,
+            "samples": 0
+          }
+        },
+        "measurements": {
+          "end_to_end_ms": {
+            "p50": null,
+            "p95": null,
+            "samples": 0,
+            "total": null
+          },
+          "estimated_cost_usd": {
+            "p50": null,
+            "p95": null,
+            "samples": 0,
+            "total": null
+          },
+          "first_useful_evidence_ms": {
+            "p50": null,
+            "p95": null,
+            "samples": 0,
+            "total": null
+          },
+          "queue_wait_ms": {
+            "p50": null,
+            "p95": null,
+            "samples": 0,
+            "total": null
+          },
+          "settled_cost_usd": {
+            "p50": null,
+            "p95": null,
+            "samples": 0,
+            "total": null
+          }
+        },
+        "metrics": {
+          "abstention_calibration": {
+            "denominator": 0,
+            "measured_runs": 0,
+            "numerator": 0,
+            "value": null
+          },
+          "citation_completeness": {
+            "denominator": 0,
+            "measured_runs": 0,
+            "numerator": 0,
+            "value": null
+          },
+          "claim_precision": {
+            "denominator": 0,
+            "measured_runs": 0,
+            "numerator": 0,
+            "value": null
+          },
+          "contradiction_recall": {
+            "denominator": 0,
+            "measured_runs": 0,
+            "numerator": 0,
+            "value": null
+          },
+          "core_dimension_coverage": {
+            "denominator": 20,
+            "numerator": 0,
+            "value": 0.0
+          },
+          "disagreement_preservation": {
+            "denominator": 0,
+            "measured_runs": 0,
+            "numerator": 0,
+            "value": null
+          },
+          "evidence_attribution": {
+            "denominator": 0,
+            "measured_runs": 0,
+            "numerator": 0,
+            "value": null
+          },
+          "exact_citation_correctness": {
+            "denominator": 20,
+            "measured_runs": 20,
+            "numerator": 19,
+            "value": 0.95
+          },
+          "independence_assessment": {
+            "denominator": 0,
+            "measured_runs": 0,
+            "numerator": 0,
+            "value": null
+          },
+          "primary_source_coverage": {
+            "denominator": 0,
+            "measured_runs": 0,
+            "numerator": 0,
+            "value": null
+          },
+          "provenance_completeness": {
+            "denominator": 0,
+            "measured_runs": 0,
+            "numerator": 0,
+            "value": null
+          },
+          "secondary_source_coverage": {
+            "denominator": 0,
+            "measured_runs": 0,
+            "numerator": 0,
+            "value": null
+          },
+          "tail_dimension_coverage": {
+            "denominator": 20,
+            "numerator": 0,
+            "value": 0.0
+          },
+          "unsupported_assertion_rate": {
+            "denominator": 0,
+            "measured_runs": 0,
+            "numerator": 0,
+            "value": null
+          }
+        },
+        "operations": 40,
+        "quality": {
+          "insufficient_evidence": 3,
+          "partial": 17
+        },
+        "runs": 20,
+        "settled_cost_per_established_dimension": null,
+        "settled_cost_per_verified_finding": null,
+        "sources": 20,
+        "tokens": {
+          "input_tokens": {
+            "samples": 0,
+            "total": null
+          },
+          "output_tokens": {
+            "samples": 0,
+            "total": null
+          }
+        },
+        "verified_findings": 17
+      },
+      "focused": {
+        "effective_limits": [
+          {
+            "candidate_findings": 12,
+            "context_chars": 12000,
+            "output_tokens": 4096,
+            "plan_questions": 3,
+            "provider_operations": 6,
+            "sources": 6
+          }
+        ],
+        "failures": 0,
+        "human_scores": {
+          "decision_usefulness": {
+            "mean": null,
+            "samples": 0
+          },
+          "directness": {
+            "mean": null,
+            "samples": 0
+          },
+          "information_density": {
+            "mean": null,
+            "samples": 0
+          }
+        },
+        "measurements": {
+          "end_to_end_ms": {
+            "p50": null,
+            "p95": null,
+            "samples": 0,
+            "total": null
+          },
+          "estimated_cost_usd": {
+            "p50": null,
+            "p95": null,
+            "samples": 0,
+            "total": null
+          },
+          "first_useful_evidence_ms": {
+            "p50": null,
+            "p95": null,
+            "samples": 0,
+            "total": null
+          },
+          "queue_wait_ms": {
+            "p50": null,
+            "p95": null,
+            "samples": 0,
+            "total": null
+          },
+          "settled_cost_usd": {
+            "p50": null,
+            "p95": null,
+            "samples": 0,
+            "total": null
+          }
+        },
+        "metrics": {
+          "abstention_calibration": {
+            "denominator": 0,
+            "measured_runs": 0,
+            "numerator": 0,
+            "value": null
+          },
+          "citation_completeness": {
+            "denominator": 0,
+            "measured_runs": 0,
+            "numerator": 0,
+            "value": null
+          },
+          "claim_precision": {
+            "denominator": 0,
+            "measured_runs": 0,
+            "numerator": 0,
+            "value": null
+          },
+          "contradiction_recall": {
+            "denominator": 0,
+            "measured_runs": 0,
+            "numerator": 0,
+            "value": null
+          },
+          "core_dimension_coverage": {
+            "denominator": 20,
+            "numerator": 0,
+            "value": 0.0
+          },
+          "disagreement_preservation": {
+            "denominator": 0,
+            "measured_runs": 0,
+            "numerator": 0,
+            "value": null
+          },
+          "evidence_attribution": {
+            "denominator": 0,
+            "measured_runs": 0,
+            "numerator": 0,
+            "value": null
+          },
+          "exact_citation_correctness": {
+            "denominator": 20,
+            "measured_runs": 20,
+            "numerator": 19,
+            "value": 0.95
+          },
+          "independence_assessment": {
+            "denominator": 0,
+            "measured_runs": 0,
+            "numerator": 0,
+            "value": null
+          },
+          "primary_source_coverage": {
+            "denominator": 0,
+            "measured_runs": 0,
+            "numerator": 0,
+            "value": null
+          },
+          "provenance_completeness": {
+            "denominator": 0,
+            "measured_runs": 0,
+            "numerator": 0,
+            "value": null
+          },
+          "secondary_source_coverage": {
+            "denominator": 0,
+            "measured_runs": 0,
+            "numerator": 0,
+            "value": null
+          },
+          "tail_dimension_coverage": {
+            "denominator": 20,
+            "numerator": 0,
+            "value": 0.0
+          },
+          "unsupported_assertion_rate": {
+            "denominator": 0,
+            "measured_runs": 0,
+            "numerator": 0,
+            "value": null
+          }
+        },
+        "operations": 40,
+        "quality": {
+          "insufficient_evidence": 3,
+          "partial": 17
+        },
+        "runs": 20,
+        "settled_cost_per_established_dimension": null,
+        "settled_cost_per_verified_finding": null,
+        "sources": 20,
+        "tokens": {
+          "input_tokens": {
+            "samples": 0,
+            "total": null
+          },
+          "output_tokens": {
+            "samples": 0,
+            "total": null
+          }
+        },
+        "verified_findings": 17
+      }
+    },
+    "release_gate": {
+      "reasons": [
+        "phase5 thresholds/non-inferiority margins not preregistered",
+        "phase5 safety/recovery/tenant/cancellation suite receipts not evaluated by this tool",
+        "draft case gold expectations await independent human adjudication",
+        "phase5 matched quality/effort comparisons require a separate reviewed release decision",
+        "no matched live observations; synthetic/replay is regression evidence only",
+        "human-reviewed output labels missing",
+        "latency/cost observations missing"
+      ],
+      "status": "blocked"
+    },
+    "snapshot": {
+      "graph": "not_executed",
+      "model": "not_invoked",
+      "policy": "legacy_reports_py_sha256:cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+      "prompt": "not_invoked",
+      "provider": "authored_synthetic_receipts_v1",
+      "schema": "modes-observation-v1"
+    },
+    "version": "modes-summary-v1"
+  },
+  "version": "modes-baseline-v1"
+}

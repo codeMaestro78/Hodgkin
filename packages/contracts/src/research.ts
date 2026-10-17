@@ -9,6 +9,7 @@ import {
   UuidSchema,
 } from "./common";
 import { ResearchGapSchema } from "./evidence";
+import { ResearchModeSchema, ResearchModeResolutionSchema } from "./mode";
 
 export const SubQuestionSchema = z
   .object({
@@ -65,6 +66,9 @@ export const ReflectionDecisionSchema = z
 
 export const ResearchStateSchema = z
   .object({
+    mode: ResearchModeSchema.nullable().optional(),
+    modePolicyVersion: z.string().min(1).max(100).nullable().optional(),
+    modeResolution: ResearchModeResolutionSchema.nullable().optional(),
     schemaVersion: SchemaVersionSchema,
     runId: UuidSchema,
     tenantId: UuidSchema,
@@ -96,6 +100,9 @@ export const ResearchStateSchema = z
 
 export const ResearchRunProjectionSchema = z
   .object({
+    mode: ResearchModeSchema.nullable().optional(),
+    modePolicyVersion: z.string().min(1).max(100).nullable().optional(),
+    modeResolution: ResearchModeResolutionSchema.nullable().optional(),
     schemaVersion: SchemaVersionSchema,
     runId: UuidSchema,
     tenantId: UuidSchema,
@@ -125,6 +132,7 @@ export const WatermarkedRunProjectionSchema = z
 
 export const CreateResearchRunRequestSchema = z
   .object({
+    mode: ResearchModeSchema.nullable().optional(),
     question: z.string().min(5).max(10_000),
     reportRequirements: z
       .array(z.string().min(1).max(500).regex(/\S/))
@@ -138,6 +146,9 @@ export const CreateResearchRunRequestSchema = z
 
 export const CreateResearchRunResponseSchema = z
   .object({
+    mode: ResearchModeSchema.nullable().optional(),
+    modePolicyVersion: z.string().min(1).max(100).nullable().optional(),
+    modeResolution: ResearchModeResolutionSchema.nullable().optional(),
     runId: UuidSchema,
     status: z.literal("queued"),
   })

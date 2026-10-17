@@ -1,5 +1,11 @@
 import { z } from "zod";
-import { DateTimeSchema, SchemaVersionSchema, UuidSchema } from "./common";
+import {
+  DateTimeSchema,
+  ProviderSchema,
+  SchemaVersionSchema,
+  UuidSchema,
+} from "./common";
+import { ResearchModeSchema, ResearchModeResolutionSchema } from "./mode";
 
 export const ClaimStatusSchema = z.enum([
   "supported",
@@ -32,6 +38,7 @@ export const ExecutionTaskSchema = z
   .strict();
 export const FollowupRequestSchema = z
   .object({
+    mode: ResearchModeSchema.optional(),
     question: z.string().trim().min(5).max(1000),
     gapId: UuidSchema.optional(),
     reportVersion: z.number().int().positive().max(10000).optional(),
@@ -49,8 +56,66 @@ export const PublicGapSchema = z
     subQuestionIds: z.array(UuidSchema).max(16),
   })
   .strict();
+
+export const RetrievalProviderAccountingSchema = z
+  .object({
+    provider: ProviderSchema,
+    searchCalls: z.number().int().nonnegative(),
+    discovered: z.number().int().nonnegative().nullable(),
+    shortlisted: z.number().int().nonnegative().nullable(),
+    excluded: z.number().int().nonnegative().nullable(),
+    duplicateWork: z.number().int().nonnegative().nullable(),
+    unavailable: z.number().int().nonnegative().nullable(),
+    policyVersions: z.array(z.string().min(1).max(100)).max(10),
+    countsComplete: z.boolean(),
+    extractedSources: z.number().int().nonnegative(),
+    citedInVerifiedFinding: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export const RetrievalExtractionOutcomesSchema = z
+  .object({
+    succeeded: z.number().int().nonnegative(),
+    failed: z.number().int().nonnegative(),
+    uncertain: z.number().int().nonnegative(),
+    pending: z.number().int().nonnegative(),
+    other: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export const RetrievalSemanticReviewOutcomesSchema = z
+  .object({
+    supports: z.number().int().nonnegative(),
+    partially_supports: z.number().int().nonnegative(),
+    contradicts: z.number().int().nonnegative(),
+    unrelated: z.number().int().nonnegative(),
+    notRecorded: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export const RetrievalAccountingSchema = z
+  .object({
+    schemaVersion: z.literal("1.1"),
+    providers: z.array(RetrievalProviderAccountingSchema).max(8),
+    extractionCalls: z.number().int().nonnegative(),
+    extractionOutcomes: RetrievalExtractionOutcomesSchema,
+    extractedSources: z.number().int().nonnegative(),
+    citedInVerifiedFinding: z.number().int().nonnegative(),
+    citationChecks: z.number().int().nonnegative(),
+    exactSpanVerifiedCitations: z.number().int().nonnegative(),
+    semanticReviewOutcomes: RetrievalSemanticReviewOutcomesSchema,
+    publishedClaims: z.number().int().nonnegative(),
+    answerUsefulness: z.literal("not_assessed"),
+    dimensionRelevance: z.literal("not_assessed"),
+    sourceIndependence: z.literal("not_assessed"),
+  })
+  .strict();
+
 export const RunInsightsSchema = z
   .object({
+    mode: ResearchModeSchema.nullable().optional(),
+    modePolicyVersion: z.string().min(1).max(100).nullable().optional(),
+    modeResolution: ResearchModeResolutionSchema.nullable().optional(),
     schemaVersion: SchemaVersionSchema,
     tasks: z.array(ExecutionTaskSchema).max(100),
     providerCalls: z
@@ -92,6 +157,7 @@ export const RunInsightsSchema = z
           .strict(),
       )
       .max(20),
+    retrievalAccounting: RetrievalAccountingSchema.optional(),
   })
   .strict();
 

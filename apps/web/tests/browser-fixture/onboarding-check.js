@@ -3,7 +3,8 @@ async (page) => {
   const checks = [];
   const assert = (condition, label) => { if (!condition) throw new Error(label); checks.push(label); };
   await page.goto(base + "/?view=onboarding");
-  await page.evaluate(() => sessionStorage.removeItem("fixture-onboarding"));
+  // Earlier checks share this tab; start from no onboarding state and no recovered composer draft.
+  await page.evaluate(() => sessionStorage.clear());
   await page.reload();
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.getByRole("heading", { name: "What best describes you?" }).waitFor();

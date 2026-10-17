@@ -6,28 +6,48 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException
+from pydantic import ValidationError, field_validator
 from sqlalchemy import func, select
 
 from research_api.api import _budget_from_request
 from research_api.auth import authenticated_caller as _caller
 from research_api.config import get_settings
 from research_api.db.models import (
+    Budget,
     PlanApproval,
     ResearchBatch,
+    ResearchPlan,
     ResearchSchedule,
     RuntimeJob,
+    SubQuestion,
 )
 from research_api.db.session import tenant_session
 from research_api.events.outbox import EventOutbox
+from research_api.graph.builder import PlannedQuestion, PlannerOutput
 from research_api.jobs import enqueue, lock_registry, refresh_due
 from research_api.lifecycle import lock_run
+from research_api.mode_planning import CoveragePlan, attach_coverage_plan, planning_admission
 from research_api.repositories.runs import RunBudgetDefaults, RunRepository
+from research_api.research_limits import is_run_quick, operation_limit, run_source_limit
 from research_api.schemas.generated.approval_request import ApprovalRequest
 from research_api.schemas.generated.batch_request import BatchRequest
 from research_api.schemas.generated.create_research_run_request import CreateResearchRunRequest
+from research_api.schemas.generated.edit_research_plan_request import (
+    EditResearchPlanRequest as GeneratedEditResearchPlanRequest,
+)
+from research_api.schemas.generated.edit_research_plan_response import EditResearchPlanResponse
 from research_api.schemas.generated.schedule_request import ScheduleRequest
 
 router = APIRouter(prefix="/research", tags=["runtime"])
+
+
+class EditResearchPlanRequest(GeneratedEditResearchPlanRequest):
+    @field_validator("questions", mode="before")
+    @classmethod
+    def trim_questions(cls, value: object) -> object:
+        if isinstance(value, list):
+            return [item.strip() if isinstance(item, str) else item for item in value]
+        return value
 
 
 def budget_from(request: BatchRequest | ScheduleRequest) -> RunBudgetDefaults:
@@ -37,12 +57,191 @@ def budget_from(request: BatchRequest | ScheduleRequest) -> RunBudgetDefaults:
             require_approval=request.require_approval,
             report_requirements=[],
             budget_overrides=(
-                request.budget_overrides.model_dump(by_alias=True, exclude_none=True)
+                request.budget_overrides.model_dump(
+                    by_alias=True, exclude_none=True, exclude_unset=True
+                )
                 if request.budget_overrides
                 else None
             ),
         )
     )
+
+
+@router.post("/runs/{run_id}/plan", response_model=EditResearchPlanResponse)
+async def edit_plan(
+    run_id: uuid.UUID,
+    payload: EditResearchPlanRequest,
+    authorization: Annotated[str | None, Header()] = None,
+    x_internal_service_auth: Annotated[str | None, Header()] = None,
+) -> EditResearchPlanResponse:
+    """Append a replacement plan only while its owner is reviewing it."""
+    settings = get_settings()
+    caller = await _caller(settings, x_internal_service_auth, authorization=authorization)
+    questions = [question.root for question in payload.questions]
+    if any(not question.strip() for question in questions):
+        raise HTTPException(422, "each research question must contain non-space text")
+
+    async with tenant_session(str(caller.tenant_id)) as session:
+        # Keep the same registry -> job -> run lock order as approval and cancel.
+        await lock_registry(session, caller.tenant_id)
+        job = await session.scalar(
+            select(RuntimeJob)
+            .where(
+                RuntimeJob.tenant_id == caller.tenant_id,
+                RuntimeJob.run_id == run_id,
+                RuntimeJob.user_id == caller.user_id,
+            )
+            .with_for_update()
+        )
+        if job is None:
+            raise HTTPException(404, "research run not found")
+        run = await lock_run(session, caller.tenant_id, run_id)
+        if run.user_id != caller.user_id:
+            raise HTTPException(404, "research run not found")
+        if (
+            run.status != "awaiting_approval"
+            or job.state != "waiting"
+            or run.cancellation_requested_at is not None
+        ):
+            raise HTTPException(409, "the research plan is no longer editable")
+        if (
+            run.active_plan_id != payload.plan_id
+            or run.plan_version != payload.expected_plan_version
+        ):
+            raise HTTPException(409, "the research plan changed; refresh before editing")
+        if await session.scalar(
+            select(PlanApproval.id).where(
+                PlanApproval.tenant_id == caller.tenant_id,
+                PlanApproval.run_id == run_id,
+                PlanApproval.plan_id == payload.plan_id,
+            )
+        ):
+            raise HTTPException(409, "the research plan already has a decision")
+
+        current = await session.scalar(
+            select(ResearchPlan).where(
+                ResearchPlan.tenant_id == caller.tenant_id,
+                ResearchPlan.run_id == run_id,
+                ResearchPlan.id == payload.plan_id,
+                ResearchPlan.plan_version == run.plan_version,
+            )
+        )
+        budget = await session.scalar(
+            select(Budget).where(Budget.tenant_id == caller.tenant_id, Budget.run_id == run_id)
+        )
+        if current is None or budget is None:
+            raise HTTPException(409, "the active research plan could not be loaded")
+        try:
+            original = PlannerOutput.model_validate(
+                {"sub_questions": current.plan.get("sub_questions")}
+                if run.mode is not None
+                else current.plan
+            )
+        except ValidationError as exc:
+            raise HTTPException(409, "this research plan format cannot be edited") from exc
+        # Approval runs never reserve bounded repair; this matches the planner split.
+        admission = planning_admission(budget, mode=run.mode, quick_mode=is_run_quick(run))
+        maximum = admission.max_initial_questions
+        if len(questions) > maximum:
+            raise HTTPException(
+                422,
+                f"this run's budget supports at most {maximum} research question(s)",
+            )
+
+        edited = original.model_copy(
+            update={
+                "sub_questions": [
+                    PlannedQuestion.model_validate(
+                        original.sub_questions[
+                            min(index, len(original.sub_questions) - 1)
+                        ].model_dump()
+                        | {
+                            "question": question,
+                            "rationale": "Researcher-edited scope.",
+                            "success_criteria": [
+                                "Collect directly relevant, verifiable evidence for this question."
+                            ],
+                        }
+                    )
+                    for index, question in enumerate(questions)
+                ]
+            }
+        )
+        version = run.plan_version + 1
+        plan_payload = current.plan | edited.model_dump(mode="json")
+        coverage: CoveragePlan | None = None
+        if run.mode is not None:
+            if run.mode_policy_version is None:
+                raise HTTPException(409, "the explicit research policy snapshot is missing")
+            try:
+                coverage = attach_coverage_plan(
+                    run_id=run.id,
+                    question=run.original_question,
+                    requirements=run.report_requirements or [],
+                    questions=[item.model_dump(mode="json") for item in edited.sub_questions],
+                    mode=run.mode,
+                    policy_version=run.mode_policy_version,
+                    operations=operation_limit(budget),
+                    sources=run_source_limit(budget),
+                    repair_operations=admission.repair_operations_reserved,
+                    repair_sources=admission.repair_sources_reserved,
+                )
+            except ValueError as exc:
+                raise HTTPException(422, "edited coverage plan is invalid: " + str(exc)) from exc
+            plan_payload["coverage"] = coverage.model_dump(mode="json")
+        replacement = ResearchPlan(
+            tenant_id=caller.tenant_id,
+            run_id=run_id,
+            plan_version=version,
+            parent_plan_version=run.plan_version,
+            plan=plan_payload,
+        )
+        session.add(replacement)
+        await session.flush()
+        replacement_questions: list[SubQuestion] = []
+        for index, item in enumerate(edited.sub_questions):
+            question = SubQuestion(
+                tenant_id=caller.tenant_id,
+                run_id=run_id,
+                plan_id=replacement.id,
+                question=item.question,
+                payload=item.model_dump(mode="json")
+                | {"planIndex": index}
+                | (
+                    {"dimensionIds": [str(key) for key in coverage.question_dimensions[index]]}
+                    if coverage is not None
+                    else {}
+                ),
+                status="pending",
+                attempts=0,
+            )
+            session.add(question)
+            replacement_questions.append(question)
+        run.active_plan_id = replacement.id
+        run.plan_version = version
+        await session.flush()
+        await EventOutbox(session, caller.tenant_id).append(
+            run_id=run_id,
+            event_type="approval.plan_updated",
+            payload={
+                "planId": str(replacement.id),
+                "planVersion": version,
+                "questionCount": len(replacement_questions),
+                "label": "Research plan updated; review the new version",
+            },
+        )
+        return EditResearchPlanResponse.model_validate(
+            {
+                "runId": str(run_id),
+                "planId": str(replacement.id),
+                "planVersion": version,
+                "status": "awaiting_approval",
+                "questions": [
+                    {"id": str(question.id), "question": question.question}
+                    for question in replacement_questions
+                ],
+            }
+        )
 
 
 @router.post("/runs/{run_id}/approve")

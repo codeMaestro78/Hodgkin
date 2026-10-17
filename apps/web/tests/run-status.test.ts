@@ -1,10 +1,13 @@
 import { afterEach, expect, it, vi } from "vitest";
 import {
   modeDeadline,
+  retryDeadline,
   runStage,
   runFailure,
   snapshotRefreshDelay,
   createSnapshotRefresh,
+  runPhaseIndex,
+  runPhases,
 } from "../lib/run-status";
 
 it("coalesces source bursts without delaying terminal snapshots", () => {
@@ -60,4 +63,72 @@ it.each([
   [20, 600_000],
 ])("keeps mode %i bounded at %i", (calls, ms) => {
   expect(modeDeadline(calls)).toBe(ms);
+});
+
+it("maps every recorded status to an honest progress phase", () => {
+  expect(runPhases).toHaveLength(5);
+  expect(runPhaseIndex("awaiting_approval")).toBe(0);
+  expect(runPhaseIndex("reflecting")).toBe(runPhaseIndex("researching"));
+  expect(runPhaseIndex("verifying")).toBe(2);
+  expect(runPhaseIndex("completed")).toBe(4);
+  for (const status of ["queued", "failed", "cancelled"])
+    expect(runPhaseIndex(status)).toBe(-1);
+});
+
+it.each([
+  ["focused", 180_000],
+  ["balanced", 300_000],
+  ["deep", 600_000],
+] as const)(
+  "uses persisted %s mode rather than a small call budget",
+  (mode, deadline) => {
+    expect(
+      retryDeadline({
+        mode,
+        modePolicyVersion: "research-mode-policy-v1",
+        budget: { maxSearchCalls: 2 },
+      }),
+    ).toBe(deadline);
+  },
+);
+
+it.each([60_000, 90_000, 900_000])(
+  "preserves recorded retry limit %i without raising it",
+  (maxWallClockMs) => {
+    expect(
+      retryDeadline({
+        mode: "deep",
+        modePolicyVersion: "research-mode-policy-v1",
+        budget: { maxSearchCalls: 20, maxWallClockMs },
+      }),
+    ).toBe(maxWallClockMs);
+  },
+);
+
+it("uses the legacy call-derived deadline only when persisted policy is absent", () => {
+  expect(retryDeadline({ budget: { maxSearchCalls: 2 } })).toBe(120_000);
+  expect(
+    retryDeadline({
+      mode: null,
+      modePolicyVersion: null,
+      budget: { maxSearchCalls: 12 },
+    }),
+  ).toBe(300_000);
+  expect(retryDeadline({ mode: "deep", budget: { maxSearchCalls: 6 } })).toBe(
+    180_000,
+  );
+  expect(
+    retryDeadline({
+      mode: "deep",
+      modePolicyVersion: "future-policy",
+      budget: { maxSearchCalls: 6 },
+    }),
+  ).toBe(180_000);
+  expect(
+    retryDeadline({
+      mode: "deep",
+      modePolicyVersion: "future-policy",
+      budget: { maxSearchCalls: 6, maxWallClockMs: 45_000 },
+    }),
+  ).toBe(45_000);
 });

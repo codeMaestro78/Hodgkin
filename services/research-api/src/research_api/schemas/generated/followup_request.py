@@ -3,9 +3,16 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, conint, constr
+
+
+class Mode(StrEnum):
+    focused = "focused"
+    balanced = "balanced"
+    deep = "deep"
 
 
 class FollowupRequest(BaseModel):
@@ -13,6 +20,7 @@ class FollowupRequest(BaseModel):
         extra="forbid",
         populate_by_name=True,
     )
+    mode: Mode | None = None
     question: constr(min_length=5, max_length=1000)
     gap_id: UUID | None = Field(None, alias="gapId")
     report_version: conint(le=10000, gt=0) | None = Field(None, alias="reportVersion")

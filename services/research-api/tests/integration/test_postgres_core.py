@@ -185,5 +185,18 @@ async def test_tavily_ingestion_persists_source_provider_ledger_and_raw_response
     stored_evidence = await artifacts.get_for_verification(artifact_ref=source.artifact_ref)
     assert stored_evidence == b"Evidence text."
     assert [call.outcome for call in calls] == ["succeeded", "succeeded"]
-    assert all(call.provider_usage == {"credits": 1} for call in calls)
+    search_call = next(call for call in calls if call.operation == "search")
+    extract_call = next(call for call in calls if call.operation == "extract")
+    assert search_call.provider_usage == {
+        "credits": 1,
+        "retrieval": {
+            "discovered": 1,
+            "shortlisted": 1,
+            "excluded": None,
+            "duplicateWork": None,
+            "unavailable": None,
+            "policy": None,
+        },
+    }
+    assert extract_call.provider_usage == {"credits": 1}
     assert all(call.response_artifact_ref for call in calls)

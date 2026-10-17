@@ -7,3 +7,12 @@ pnpm-lock.yaml
 apps/web/tests/browser-fixture/check.js
 apps/web/tests/browser-fixture/reliability-check.js
 apps/web/tests/browser-fixture/onboarding-check.js
+apps/web/tests/browser-fixture/automation-check.js
+apps/web/tests/browser-fixture/failure-check.js
+apps/web/tests/browser-fixture/frontend-regressions-check.js
+apps/web/tests/browser-fixture/synthesis-check.js
+apps/web/tests/browser-fixture/orchestration-check.js
+apps/web/tests/browser-fixture/share-check.js
+apps/web/tests/browser-fixture/answer-check.js
+apps/web/tests/browser-fixture/workspace-check.js
+apps/web/tests/browser-fixture/report-content-check.js

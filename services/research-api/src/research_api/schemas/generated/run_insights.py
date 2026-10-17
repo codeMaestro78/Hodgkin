@@ -4,9 +4,21 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Literal
 from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, RootModel, conint, constr
+
+
+class Mode(StrEnum):
+    focused = "focused"
+    balanced = "balanced"
+    deep = "deep"
+
+
+class ModeResolution(StrEnum):
+    explicit = "explicit"
+    legacy_inferred = "legacy-inferred"
 
 
 class SchemaVersion(StrEnum):
@@ -14,6 +26,8 @@ class SchemaVersion(StrEnum):
     field_1_2 = "1.2"
     field_1_3 = "1.3"
     field_1_4 = "1.4"
+    field_1_5 = "1.5"
+    field_1_6 = "1.6"
 
 
 class Status(StrEnum):
@@ -112,11 +126,97 @@ class ReportVersion(BaseModel):
     created_at: AwareDatetime = Field(..., alias="createdAt")
 
 
+class Provider1(StrEnum):
+    openalex = "openalex"
+    serper = "serper"
+    tavily = "tavily"
+    parallel = "parallel"
+    browser = "browser"
+    internal = "internal"
+
+
+class PolicyVersion(RootModel[constr(min_length=1, max_length=100)]):
+    root: constr(min_length=1, max_length=100)
+
+
+class Provider(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    provider: Provider1
+    search_calls: conint(ge=0, le=9007199254740991) = Field(..., alias="searchCalls")
+    discovered: conint(ge=0, le=9007199254740991) | None
+    shortlisted: conint(ge=0, le=9007199254740991) | None
+    excluded: conint(ge=0, le=9007199254740991) | None
+    duplicate_work: conint(ge=0, le=9007199254740991) | None = Field(..., alias="duplicateWork")
+    unavailable: conint(ge=0, le=9007199254740991) | None
+    policy_versions: list[PolicyVersion] = Field(..., alias="policyVersions", max_length=10)
+    counts_complete: bool = Field(..., alias="countsComplete")
+    extracted_sources: conint(ge=0, le=9007199254740991) = Field(..., alias="extractedSources")
+    cited_in_verified_finding: conint(ge=0, le=9007199254740991) = Field(
+        ..., alias="citedInVerifiedFinding"
+    )
+
+
+class ExtractionOutcomes(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    succeeded: conint(ge=0, le=9007199254740991)
+    failed: conint(ge=0, le=9007199254740991)
+    uncertain: conint(ge=0, le=9007199254740991)
+    pending: conint(ge=0, le=9007199254740991)
+    other: conint(ge=0, le=9007199254740991)
+
+
+class SemanticReviewOutcomes(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    supports: conint(ge=0, le=9007199254740991)
+    partially_supports: conint(ge=0, le=9007199254740991)
+    contradicts: conint(ge=0, le=9007199254740991)
+    unrelated: conint(ge=0, le=9007199254740991)
+    not_recorded: conint(ge=0, le=9007199254740991) = Field(..., alias="notRecorded")
+
+
+class RetrievalAccounting(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    schema_version: Literal["1.1"] = Field(..., alias="schemaVersion")
+    providers: list[Provider] = Field(..., max_length=8)
+    extraction_calls: conint(ge=0, le=9007199254740991) = Field(..., alias="extractionCalls")
+    extraction_outcomes: ExtractionOutcomes = Field(..., alias="extractionOutcomes")
+    extracted_sources: conint(ge=0, le=9007199254740991) = Field(..., alias="extractedSources")
+    cited_in_verified_finding: conint(ge=0, le=9007199254740991) = Field(
+        ..., alias="citedInVerifiedFinding"
+    )
+    citation_checks: conint(ge=0, le=9007199254740991) = Field(..., alias="citationChecks")
+    exact_span_verified_citations: conint(ge=0, le=9007199254740991) = Field(
+        ..., alias="exactSpanVerifiedCitations"
+    )
+    semantic_review_outcomes: SemanticReviewOutcomes = Field(..., alias="semanticReviewOutcomes")
+    published_claims: conint(ge=0, le=9007199254740991) = Field(..., alias="publishedClaims")
+    answer_usefulness: Literal["not_assessed"] = Field(..., alias="answerUsefulness")
+    dimension_relevance: Literal["not_assessed"] = Field(..., alias="dimensionRelevance")
+    source_independence: Literal["not_assessed"] = Field(..., alias="sourceIndependence")
+
+
 class RunInsights(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
         populate_by_name=True,
     )
+    mode: Mode | None = None
+    mode_policy_version: constr(min_length=1, max_length=100) | None = Field(
+        None, alias="modePolicyVersion"
+    )
+    mode_resolution: ModeResolution | None = Field(None, alias="modeResolution")
     schema_version: SchemaVersion = Field(..., alias="schemaVersion")
     tasks: list[Task] = Field(..., max_length=100)
     provider_calls: list[ProviderCall] = Field(..., alias="providerCalls", max_length=100)
@@ -125,3 +225,4 @@ class RunInsights(BaseModel):
     parent_run_id: UUID | None = Field(..., alias="parentRunId")
     followup_runs: list[FollowupRun] = Field(..., alias="followupRuns", max_length=20)
     report_versions: list[ReportVersion] = Field(..., alias="reportVersions", max_length=20)
+    retrieval_accounting: RetrievalAccounting | None = Field(None, alias="retrievalAccounting")

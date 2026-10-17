@@ -14,8 +14,11 @@ phases.
 - Docker with Compose
 
 `OPENAI_API_KEY` (with `LLM_MODEL_NAME=gpt-4o-mini`) and `TAVILY_API_KEY` are required for the
-real intake → planner → Tavily collection path. Unit and integration tests do not
-make billed external calls.
+real intake → planner → Tavily collection path. Optional per-role `LLM_<ROLE>_PROVIDER` and
+`LLM_<ROLE>_MODEL_NAME` settings can route planner, writer, and claim-review calls separately;
+OpenRouter routes require `OPENROUTER_API_KEY`. Each new research run persists its route snapshot.
+The coverage reflector is deterministic and does not call a model. Unit and integration tests do
+not make billed external calls.
 
 ## Install
 
@@ -81,3 +84,24 @@ The Python suite expects local infrastructure for tests marked `integration`. Sc
 
 Start debugging from the durable run projection, reservation/provider ledgers, and ordered event
 outbox. See [observability.md](./observability.md) and [agent.md](./agent.md#17-debugging-guide).
+
+### Diagnosing runtime network latency
+
+`auth.verify` retains a fresh Supabase `/auth/v1/user` check for every request. Its
+connection deadline is 3 seconds, pool wait is 1 second, read timeout is 5 seconds,
+and the overall request deadline is 6 seconds. Failures return 503; invalid sessions
+remain 401. There is no identity acceptance cache or automatic auth retry.
+
+At INFO level, slow connection acquisition emits `db.connection.acquire` (over one
+second). It includes pool wait, connection establishment and pre-ping, so it is not
+a measurement of queue wait alone. `db.statement.slow` includes only an allowlisted
+`commandCategory` and `executemany`, never SQL text or parameters. DEBUG transaction
+records include `acquireMs` and `setupMs`; setup includes acquisition, tenant context
+and any execution lease check. Compare these to statement timings before changing
+pool settings or queries.
+
+Redis wakeups are optional hints. Failed publication enters a 30-second cooldown;
+listener reconnects back off from 1 to 30 seconds. Local wakeups and PostgreSQL replay
+continue during outages. Dropped hints can incur the normal polling delay. Check that
+the active environment's Redis hostname resolves from the API's execution environment
+when `event_wakeups.redis_unavailable` appears; the cooldown does not repair DNS.

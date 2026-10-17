@@ -73,7 +73,7 @@ async (page) => {
     }
     if (path === "/api/auth/session")
       return reply({
-        user: { name: "Fixture", email: "fixture@example.test" },
+        user: { id: "fixture-account", name: "Fixture", email: "fixture@example.test" },
       });
     if (path === "/api/onboarding") return reply({ profile: null });
     if (path === "/api/research/runs") return reply({ runs: [] });
@@ -344,4 +344,4 @@ async (page) => {
     "Resolved approval in awaiting_approval has no decision controls",
   );
   return { checksPassed: checks.length, checks };
-};
+}

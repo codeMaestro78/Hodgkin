@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 
 from research_api.auth import authenticated_caller as _caller
 from research_api.config import get_settings
+from research_api.db.assessments import ResearchAssessment
 from research_api.db.models import (
     Budget,
     Citation,
@@ -20,10 +21,12 @@ from research_api.db.models import (
     PlanApproval,
     Report,
     ResearchGap,
+    ResearchPlan,
     ResearchRun,
     RunEvent,
     RuntimeJob,
     Source,
+    SubQuestion,
     UsageLedger,
 )
 from research_api.db.session import tenant_session
@@ -31,14 +34,21 @@ from research_api.events.outbox import EventOutbox
 from research_api.events.wakeups import event_wakeups
 from research_api.execution import prior_dependencies, task_projection
 from research_api.jobs import enqueue, lock_registry, refresh_due
-from research_api.query_intelligence import is_quick_explainer
+from research_api.mode_planning import planning_admission
+from research_api.mode_policy import resolve_mode_budget
 from research_api.reliability import claim_status, source_assessments
 from research_api.repositories.runs import (
     IdempotencyConflictError,
     RunBudgetDefaults,
     RunRepository,
 )
-from research_api.research_limits import active_time_limit, source_limit
+from research_api.research_limits import (
+    active_time_limit,
+    is_run_quick,
+    operation_limit,
+    run_source_limit,
+)
+from research_api.retrieval_accounting import build_retrieval_accounting
 from research_api.schemas.generated.create_research_run_request import CreateResearchRunRequest
 from research_api.schemas.generated.followup_request import FollowupRequest
 from research_api.schemas.generated.public_claim_check import PublicClaimCheck
@@ -47,6 +57,60 @@ from research_api.snapshots import load_collections
 
 router = APIRouter(prefix="/research", tags=["research"])
 AfterSequenceQuery = Annotated[int, Query(ge=0, alias="after")]
+
+_PUBLIC_REPAIR_REASONS = frozenset(
+    {
+        "claim_capacity_exhausted",
+        "failed",
+        "insufficient_time",
+        "no_delta_claims",
+        "no_new_evidence",
+        "no_verified_delta_claims",
+        "timeout",
+    }
+)
+
+
+def _public_repair_outcome(value: object) -> dict[str, object] | None:
+    """Expose only the durable user-facing repair result, never internal failure detail."""
+    if not isinstance(value, dict) or value.get("status") not in {"repaired", "stopped"}:
+        return None
+    result: dict[str, object] = {"status": value["status"]}
+    reason = value.get("reason")
+    if isinstance(reason, str) and reason in _PUBLIC_REPAIR_REASONS:
+        result["reason"] = reason
+    for source_key, public_key in (
+        ("new_source_count", "newSourceCount"),
+        ("delta_claim_count", "verifiedFindingCount"),
+    ):
+        count = value.get(source_key)
+        if isinstance(count, int) and not isinstance(count, bool) and 0 <= count <= 40:
+            result[public_key] = count
+    return result
+
+
+def _created_projection(run: ResearchRun, budget: RunBudgetDefaults) -> dict[str, object]:
+    result: dict[str, object] = {"runId": str(run.id), "status": "queued"}
+    if run.mode is not None:
+        result.update(
+            {
+                "mode": run.mode,
+                "modePolicyVersion": run.mode_policy_version,
+                "modeResolution": "explicit",
+                "budget": {
+                    "maxSearchCalls": budget.max_search_calls,
+                    "maxProviderOperations": operation_limit(budget),
+                    "maxSources": run_source_limit(budget),
+                    "maxWallClockMs": budget.max_wall_clock_ms,
+                    "maxBrowserSessions": budget.max_browser_sessions,
+                    "maxReflectionRounds": budget.max_reflection_rounds,
+                    "maxInputTokens": budget.max_input_tokens,
+                    "maxOutputTokens": budget.max_output_tokens,
+                    "maxEstimatedCostUsd": float(budget.max_estimated_cost_usd),
+                },
+            }
+        )
+    return result
 
 
 def _public_claim_checks(
@@ -117,7 +181,17 @@ def _public_claim_checks(
     ]
 
 
-def _budget_from_request(request: CreateResearchRunRequest) -> RunBudgetDefaults:
+def _budget_from_request(
+    request: CreateResearchRunRequest, policy_version: str | None = None
+) -> RunBudgetDefaults:
+    mode = getattr(request, "mode", None)
+    if mode is not None:
+        try:
+            return resolve_mode_budget(
+                mode, request.budget_overrides, policy_version=policy_version
+            )
+        except ValueError as exc:
+            raise HTTPException(422, {"code": "mode_budget_invalid", "message": str(exc)}) from exc
     defaults = RunBudgetDefaults()
     overrides = request.budget_overrides
     if overrides is None:
@@ -149,7 +223,7 @@ async def create_research_run(
     x_internal_service_auth: str | None = Header(default=None),
     x_development_tenant_id: str | None = Header(default=None),
     x_development_user_id: str | None = Header(default=None),
-) -> dict[str, str]:
+) -> dict[str, object]:
     settings = get_settings()
     caller = await _caller(
         settings,
@@ -159,8 +233,10 @@ async def create_research_run(
         authorization=authorization,
     )
     idempotency_key = payload.idempotency_key or idempotency_key_header
-    selected_budget = _budget_from_request(payload)
-    if selected_budget.max_search_calls < 2:
+    selected_budget = (
+        _budget_from_request(payload) if getattr(payload, "mode", None) is None else None
+    )
+    if selected_budget is not None and operation_limit(selected_budget) < 2:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="the Tavily research slice requires at least two search-call budget units",
@@ -175,19 +251,23 @@ async def create_research_run(
                 budget=selected_budget,
                 idempotency_key=idempotency_key,
                 approval_required=payload.require_approval,
+                mode=getattr(payload, "mode", None),
+                budget_resolver=(lambda version: _budget_from_request(payload, version))
+                if getattr(payload, "mode", None) is not None
+                else None,
             )
         except IdempotencyConflictError as exc:
             raise HTTPException(409, "idempotency key belongs to another request") from exc
+        response = _created_projection(run, _budget_from_request(payload, run.mode_policy_version))
         if not created:
-            return {"runId": str(run.id), "status": "queued"}
+            return response
         await EventOutbox(session, caller.tenant_id).append(
             run_id=run.id,
             event_type="run.created",
             payload={"status": "queued", "questionLength": len(run.original_question)},
         )
-        run_id = run.id
         await enqueue(session, run, settings)
-    return {"runId": str(run_id), "status": "queued"}
+    return response
 
 
 @router.get("/runs")
@@ -246,7 +326,10 @@ async def list_research_runs(
                     # Pre-fast-path runs are still in the ledger. The compact
                     # evidence footprint distinguishes a new fast run from an
                     # older definition query that used the full planner.
-                    "quickMode": is_quick_explainer(run.original_question) and count <= 2,
+                    "quickMode": is_run_quick(run) and count <= 2,
+                    "mode": run.mode,
+                    "modePolicyVersion": run.mode_policy_version,
+                    "modeResolution": "explicit" if run.mode is not None else "legacy-inferred",
                     "createdAt": run.created_at.isoformat(),
                 }
                 for run, count in rows
@@ -313,6 +396,34 @@ async def get_research_run(
         )
         if report_version is not None and report is None:
             raise HTTPException(404, "report version not found")
+        repair_outcome = None
+        report_assessment_id = (
+            report.document.get("assessmentId")
+            if report and isinstance(report.document, dict)
+            else None
+        )
+        if isinstance(report_assessment_id, str):
+            repair_assessments = list(
+                await session.scalars(
+                    select(ResearchAssessment)
+                    .where(
+                        ResearchAssessment.tenant_id == caller.tenant_id,
+                        ResearchAssessment.run_id == run_id,
+                    )
+                    .order_by(ResearchAssessment.created_at.desc())
+                    .limit(8)
+                )
+            )
+            for assessment in repair_assessments:
+                result = assessment.result
+                repair = result.get("repair") if isinstance(result, dict) else None
+                if isinstance(repair, dict) and (
+                    str(assessment.id) == report_assessment_id
+                    or repair.get("base_assessment_id") == report_assessment_id
+                ):
+                    repair_outcome = _public_repair_outcome(repair)
+                    if repair_outcome is not None:
+                        break
         # Explicit tenant/run predicates on both sides of the join. Only compact,
         # named evidence fields leave the API; artifact locations stay private.
         evidence_rows = await session.execute(
@@ -347,6 +458,13 @@ async def get_research_run(
         gaps, versions, calls = collections.gaps, collections.versions, collections.calls
         approval = None
         if run.approval_required and run.active_plan_id:
+            active_plan = await session.scalar(
+                select(ResearchPlan).where(
+                    ResearchPlan.tenant_id == caller.tenant_id,
+                    ResearchPlan.run_id == run_id,
+                    ResearchPlan.id == run.active_plan_id,
+                )
+            )
             decision = await session.scalar(
                 select(PlanApproval).where(
                     PlanApproval.tenant_id == caller.tenant_id,
@@ -354,13 +472,78 @@ async def get_research_run(
                     PlanApproval.plan_id == run.active_plan_id,
                 )
             )
+            active_questions = list(
+                (
+                    await session.execute(
+                        select(SubQuestion.id, SubQuestion.question)
+                        .where(
+                            SubQuestion.tenant_id == caller.tenant_id,
+                            SubQuestion.run_id == run_id,
+                            SubQuestion.plan_id == run.active_plan_id,
+                        )
+                        .order_by(
+                            SubQuestion.payload["planIndex"].as_integer().nulls_last(),
+                            SubQuestion.created_at,
+                            SubQuestion.id,
+                        )
+                        .limit(8)
+                    )
+                ).mappings()
+            )
+            # Approval runs never reserve bounded repair; this matches the planner split.
+            maximum_questions = (
+                planning_admission(
+                    budget, mode=run.mode, quick_mode=is_run_quick(run)
+                ).max_initial_questions
+                if budget is not None
+                else 1
+            )
+            # Time spent waiting for a decision is not research time. Each request
+            # opens a wait and the next recorded decision (or cancellation) closes it;
+            # plan edits replace the plan id without reopening the wait.
+            requested = (
+                await session.scalars(
+                    select(RunEvent.occurred_at).where(
+                        RunEvent.tenant_id == caller.tenant_id,
+                        RunEvent.run_id == run_id,
+                        RunEvent.event_type == "approval.requested",
+                    )
+                )
+            ).all()
+            decided = (
+                await session.scalars(
+                    select(PlanApproval.decided_at).where(
+                        PlanApproval.tenant_id == caller.tenant_id,
+                        PlanApproval.run_id == run_id,
+                    )
+                )
+            ).all()
+            timeline = sorted(
+                [(moment, 0) for moment in requested] + [(moment, 1) for moment in decided]
+            )
+            waited_ms, open_wait = 0, None
+            for moment, closes in timeline:
+                if not closes and open_wait is None:
+                    open_wait = moment
+                elif closes and open_wait is not None:
+                    waited_ms += max(0, int((moment - open_wait).total_seconds() * 1000))
+                    open_wait = None
+            if open_wait is not None and run.status == "cancelled" and run.cancelled_at:
+                waited_ms += max(0, int((run.cancelled_at - open_wait).total_seconds() * 1000))
+                open_wait = None
             approval = {
                 "planId": str(run.active_plan_id),
+                "waitedMs": waited_ms,
+                "waitStartedAt": open_wait.isoformat() if open_wait else None,
+                "planVersion": run.plan_version,
                 "state": decision.decision if decision else "pending",
+                "editable": bool(
+                    active_plan and isinstance(active_plan.plan.get("sub_questions"), list)
+                ),
+                "maxQuestions": maximum_questions,
                 "questions": [
-                    {"id": str(item.id), "question": item.question}
-                    for item in questions
-                    if item.plan_id == run.active_plan_id
+                    {"id": str(item["id"]), "question": item["question"]}
+                    for item in active_questions
                 ],
             }
         if report:
@@ -504,48 +687,74 @@ async def get_research_run(
                     }
                     for item in versions
                 ],
+                "retrievalAccounting": build_retrieval_accounting(
+                    calls=[
+                        {
+                            "provider": call.provider,
+                            "operation": call.operation,
+                            "outcome": call.outcome,
+                            "provider_usage": call.provider_usage,
+                        }
+                        for call in calls
+                    ],
+                    sources=[
+                        {"id": str(source.id), "provider": source.provider} for source in sources
+                    ],
+                    claim_checks=claim_checks,
+                ),
             }
         )
         assessments = source_assessments(sources, run.original_question)
         return {
-            "schemaVersion": "1.4",
+            "schemaVersion": "1.5",
             "insights": insights.model_dump(mode="json", by_alias=True),
             "runId": str(run.id),
             "status": run.status,
             "originalQuestion": run.original_question,
+            "mode": getattr(run, "mode", None),
+            "modePolicyVersion": getattr(run, "mode_policy_version", None),
+            "modeResolution": "explicit"
+            if getattr(run, "mode", None) is not None
+            else "legacy-inferred",
             "reportRequirements": run.report_requirements or [],
             "approval": approval,
             "planVersion": run.plan_version,
             "sourceCount": source_count or 0,
             "claimChecks": claim_checks,
-            "sourceLimit": source_limit(
-                budget.max_search_calls if budget else 0,
-                is_quick_explainer(run.original_question),
-            ),
+            "sourceLimit": run_source_limit(budget, is_run_quick(run)) if budget else 0,
             "errorCode": run.error_code,
             "createdAt": run.created_at.isoformat(),
             "updatedAt": run.updated_at.isoformat(),
             "budget": {
                 "maxSearchCalls": budget.max_search_calls if budget else 0,
+                "maxProviderOperations": operation_limit(budget) if budget else 0,
+                "maxSources": run_source_limit(budget, is_run_quick(run)) if budget else 0,
                 "maxWallClockMs": budget.max_wall_clock_ms if budget else 0,
                 "maxEstimatedCostUsd": float(budget.max_estimated_cost_usd) if budget else 0,
             },
-            "usage": {"searchCalls": usage.search_calls if usage else 0},
+            "usage": {
+                "searchCalls": usage.search_calls if usage else 0,
+                "providerOperations": usage.search_calls if usage else 0,
+                "reservedProviderOperations": getattr(usage, "reserved_search_calls", 0),
+                "sources": source_count or 0,
+            },
             "report": (
                 {
                     "id": str(report.id),
                     "version": report.version,
                     "markdown": report.markdown,
                     "document": report.document,
+                    "retrievalAccounting": report.retrieval_accounting,
+                    "repairOutcome": repair_outcome,
                     "answerQuality": (
                         report.document["quality"]["status"] if report.document else "not_assessed"
                     ),
-                    "publishedAt": report.updated_at.isoformat(),
+                    "publishedAt": (report.published_at or report.created_at).isoformat(),
                 }
                 if report
                 else None
             ),
-            "quickMode": is_quick_explainer(run.original_question) and (source_count or 0) <= 2,
+            "quickMode": is_run_quick(run) and (source_count or 0) <= 2,
             "sources": [
                 {
                     "id": str(source.id),
@@ -687,6 +896,14 @@ async def retry_research_run(
         )
         if budget is None:
             raise RuntimeError("run budget not found")
+        if prior.mode is not None and max_wall_clock_ms not in {None, budget.max_wall_clock_ms}:
+            raise HTTPException(
+                422,
+                {
+                    "code": "mode_budget_invalid",
+                    "message": "explicit-mode retries inherit the original time limit",
+                },
+            )
         fresh = await RunRepository(session, caller.tenant_id).create(
             user_id=caller.user_id,
             question=prior.original_question,
@@ -699,7 +916,12 @@ async def retry_research_run(
                 max_input_tokens=budget.max_input_tokens,
                 max_output_tokens=budget.max_output_tokens,
                 max_estimated_cost_usd=budget.max_estimated_cost_usd,
+                max_provider_operations=budget.max_provider_operations,
+                max_sources=budget.max_sources,
             ),
+            mode=prior.mode,
+            mode_policy_version=prior.mode_policy_version,
+            approval_required=prior.approval_required,
         )
         await EventOutbox(session, caller.tenant_id).append(
             run_id=fresh.id,
@@ -710,7 +932,6 @@ async def retry_research_run(
             },
         )
         fresh_id = fresh.id
-        fresh.approval_required = prior.approval_required
         await enqueue(session, fresh, settings)
     return {"runId": str(fresh_id), "status": "queued"}
 
@@ -777,6 +998,9 @@ async def followup_research_run(
             if gap.details.get("reportId") not in {None, str(parent_report_id)}:
                 raise HTTPException(409, "gap belongs to another report version")
         repository = RunRepository(session, caller.tenant_id)
+        requested_mode = getattr(body, "mode", None)
+        inherited_mode = requested_mode if requested_mode is not None else prior.mode
+        changed_mode = requested_mode is not None and requested_mode != prior.mode
         fresh = await repository.get_by_idempotency_key(
             user_id=caller.user_id, idempotency_key=body.idempotency_key
         )
@@ -787,6 +1011,8 @@ async def followup_research_run(
             if (
                 fresh.parent_report_id != parent_report_id
                 or fresh.original_question != expected_question
+                or fresh.mode != inherited_mode
+                or (not changed_mode and fresh.mode_policy_version != prior.mode_policy_version)
             ):
                 raise HTTPException(409, "idempotency key belongs to another request")
             linked_gap = await session.scalar(
@@ -817,6 +1043,13 @@ async def followup_research_run(
                 report_requirements=prior.report_requirements,
                 parent_report_id=parent_report_id,
                 approval_required=prior.approval_required,
+                mode=inherited_mode,
+                mode_policy_version=None if changed_mode else prior.mode_policy_version,
+                budget_resolver=(
+                    lambda version: resolve_mode_budget(str(inherited_mode), policy_version=version)
+                )
+                if changed_mode
+                else None,
                 budget=RunBudgetDefaults(
                     **{
                         field: getattr(budget, field)

@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "retrieval-benchmark-v1",
+  "status": "draft_questions_only",
+  "questionCount": 20,
+  "candidatePoolsFrozen": false,
+  "independentReviewers": 0,
+  "rankingMethods": [
+    "web_baseline",
+    "openalex_default",
+    "openalex_lexical",
+    "openalex_native_rerank"
+  ],
+  "notes": [
+    "Questions and requirements are a draft workload, not a gold-standard benchmark.",
+    "Freeze one shared candidate pool per question before ranking comparisons.",
+    "Do not enable OpenAlex discovery or raise limits based on this draft."
+  ]
+}

@@ -8,6 +8,7 @@ Create Date: 2026-09-28
 from collections.abc import Sequence
 
 from alembic import op
+from sqlalchemy import Table
 
 from research_api.db.models import Base
 
@@ -38,9 +39,26 @@ TENANT_TABLES = (
 )
 
 
+def _bootstrap_tables() -> list[Table]:
+    """Create only this revision's tables, even when env imports later models.
+
+    Later revisions own their tables' policies, grants and immutability triggers.
+    Creating those tables here exposes them at intermediate committed revisions.
+    Fail before DDL if a future core-model FK would require a later table instead
+    of silently expanding bootstrap scope with unsecured metadata dependencies.
+    """
+    tables = [Base.metadata.tables[name] for name in ("tenants", *TENANT_TABLES)]
+    allowed = set(tables)
+    for table in tables:
+        if any(foreign_key.column.table not in allowed for foreign_key in table.foreign_keys):
+            raise RuntimeError(f"0001 bootstrap table {table.name} references a later table")
+    return tables
+
+
 def upgrade() -> None:
     bind = op.get_bind()
-    Base.metadata.create_all(bind=bind)
+    tables = _bootstrap_tables()
+    Base.metadata.create_all(bind=bind, tables=tables)
 
     op.execute("ALTER TABLE tenants ENABLE ROW LEVEL SECURITY")
     op.execute("ALTER TABLE tenants FORCE ROW LEVEL SECURITY")
@@ -61,15 +79,17 @@ def upgrade() -> None:
     # The Docker development environment creates research_app. Supabase uses its
     # dashboard-provided database role instead, so grants must not assume that a
     # local-only role exists.
+    # Use exactly the validated bootstrap scope; never grant on unrelated tables
+    # already present in public or registered by a later model import.
+    table_names = ", ".join(f'public."{table.name}"' for table in tables)
     op.execute(
-        "DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'research_app') "
+        "DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'research_app') "  # noqa: S608
         "THEN GRANT USAGE ON SCHEMA public TO research_app; "
-        "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO research_app; "
-        "GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO research_app; "
+        f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE {table_names} TO research_app; "
         "END IF; END $$;"
     )
 
 
 def downgrade() -> None:
     bind = op.get_bind()
-    Base.metadata.drop_all(bind=bind)
+    Base.metadata.drop_all(bind=bind, tables=_bootstrap_tables())

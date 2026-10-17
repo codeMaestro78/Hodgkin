@@ -16,6 +16,8 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Brand, dateLabel, Icon } from "./ui";
 import { useEntrance } from "./workspace-motion";
+import { CrewEyes } from "./crew/crew-eyes";
+import "../workspace-skin.css";
 import {
   patchResearchHistory,
   subscribeResearchHistorySnapshots,
@@ -174,29 +176,26 @@ export function WorkspaceShell({
         <Icon name="plus" size={18} />
         New research
       </Link>
-      <Link
-        className="desk-library-link"
-        href="/research/reports"
-        aria-current={pathname === "/research/reports" ? "page" : undefined}
-        onClick={() => setOpen(false)}
-      >
-        <Icon name="book" size={17} /> Reports
-      </Link>
-      <Link
-        className="desk-library-link"
-        href="/research/automation"
-        aria-current={pathname === "/research/automation" ? "page" : undefined}
-        onClick={() => setOpen(false)}
-      >
-        <Icon name="layers" size={17} /> Automation
-      </Link>
-      <Link
-        className="desk-library-link"
-        href="/onboarding"
-        onClick={() => setOpen(false)}
-      >
-        <Icon name="book" size={17} /> Research preferences
-      </Link>
+      <nav className="desk-nav" aria-label="Workspace">
+        {(
+          [
+            ["/research/reports", "file", "Reports"],
+            ["/research/library", "folder", "Library"],
+            ["/research/compare", "columns", "Compare reports"],
+            ["/research/automation", "clock", "Automation"],
+          ] as const
+        ).map(([href, icon, label]) => (
+          <Link
+            key={href}
+            className="desk-library-link"
+            href={href}
+            aria-current={pathname === href ? "page" : undefined}
+            onClick={() => setOpen(false)}
+          >
+            <Icon name={icon} size={17} /> {label}
+          </Link>
+        ))}
+      </nav>
       <label className="history-search">
         <Icon name="search" size={16} />
         <input
@@ -246,7 +245,9 @@ export function WorkspaceShell({
               <span>
                 <strong>{item.question}</strong>
                 <small>
-                  {item.sourceCount} sources <span> / </span>
+                  {item.sourceCount}{" "}
+                  {item.sourceCount === 1 ? "source" : "sources"}{" "}
+                  <span> / </span>
                   {dateLabel(item.createdAt)}
                 </small>
               </span>
@@ -266,6 +267,14 @@ export function WorkspaceShell({
           </div>
         )}
       </nav>
+      <Link
+        className="desk-library-link desk-preferences-link"
+        href="/onboarding"
+        aria-current={pathname === "/onboarding" ? "page" : undefined}
+        onClick={() => setOpen(false)}
+      >
+        <Icon name="sliders" size={17} /> Research preferences
+      </Link>
       <div className="sidebar-bottom">
         <div className="local-avatar">
           <Icon name="layers" size={18} />
@@ -280,7 +289,7 @@ export function WorkspaceShell({
           disabled={signingOut}
           aria-label="Sign out"
         >
-          <Icon name="external" size={16} />
+          <Icon name="logout" size={16} />
         </button>
       </div>
       {accountError && (
@@ -336,9 +345,6 @@ export function WorkspaceShell({
             </div>
             <div className="toolbar-actions">
               {toolbar}
-              <Link className="toolbar-home" href="/onboarding">
-                Research preferences
-              </Link>
               <Link className="toolbar-home" href="/">
                 Overview
                 <Icon name="external" size={13} />
@@ -354,6 +360,7 @@ export function WorkspaceShell({
           </main>
         </div>
       </Sheet>
+      <CrewEyes />
     </div>
   );
 }

@@ -1,9 +1,17 @@
 {
-  "$id": "https://schemas.research.local/1.4/FollowupRequestSchema.json",
+  "$id": "https://schemas.research.local/1.6/FollowupRequestSchema.json",
   "title": "FollowupRequestSchema",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "properties": {
+    "mode": {
+      "type": "string",
+      "enum": [
+        "focused",
+        "balanced",
+        "deep"
+      ]
+    },
     "question": {
       "type": "string",
       "minLength": 5,

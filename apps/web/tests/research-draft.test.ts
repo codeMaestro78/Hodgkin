@@ -65,14 +65,14 @@ describe("account-scoped session draft", () => {
     const { storage } = memoryStorage();
     const key = researchDraftKey("account-a")!;
     for (const record of [
-      { version: 1, accountId: "account-b", draft },
-      { version: 2, accountId: "account-a", draft },
+      { version: 2, accountId: "account-b", draft },
+      { version: 3, accountId: "account-a", draft },
       {
-        version: 1,
+        version: 2,
         accountId: "account-a",
         draft: { ...draft, access_token: "secret" },
       },
-      { version: 1, accountId: "account-a", draft, token: "secret" },
+      { version: 2, accountId: "account-a", draft, token: "secret" },
     ]) {
       storage().setItem(key, JSON.stringify(record));
       expect(readResearchDraft("account-a", storage)).toBeNull();
@@ -97,6 +97,80 @@ describe("account-scoped session draft", () => {
     const unfinished = { ...draft, requirementsText: "x".repeat(501) };
     expect(writeResearchDraft("a", unfinished, storage)).toBe(true);
     expect(readResearchDraft("a", storage)).toEqual(unfinished);
+  });
+  it.each(["Focused", "Balanced", "Deep"])(
+    "migrates v1 %s without losing text or approval",
+    (depth) => {
+      const { storage, values } = memoryStorage();
+      const legacy = "research:draft:v1:a";
+      const unfinished = {
+        ...draft,
+        depth,
+        requirementsText: " x ".repeat(501),
+      };
+      storage().setItem(
+        legacy,
+        JSON.stringify({ version: 1, accountId: "a", draft: unfinished }),
+      );
+      const migrated = { ...unfinished, depth: depth.toLowerCase() };
+      expect(readResearchDraft("a", storage)).toEqual(migrated);
+      expect(JSON.parse(values.get(researchDraftKey("a")!)!)).toEqual({
+        version: 2,
+        accountId: "a",
+        draft: migrated,
+      });
+      expect(values.has(legacy)).toBe(false);
+    },
+  );
+  it("recovers legacy text even if migration writes or cleanup are denied", () => {
+    for (const deniedMethod of ["setItem", "removeItem"] as const) {
+      const { storage } = memoryStorage();
+      storage().setItem(
+        "research:draft:v1:a",
+        JSON.stringify({
+          version: 1,
+          accountId: "a",
+          draft: { ...draft, depth: "Balanced" },
+        }),
+      );
+      const denied = () => ({
+        ...storage(),
+        [deniedMethod]: () => {
+          throw new Error("Denied");
+        },
+      });
+      expect(readResearchDraft("a", denied)).toEqual(draft);
+    }
+  });
+  it("rejects a mismatched legacy account and unknown legacy fields", () => {
+    const { storage } = memoryStorage();
+    for (const record of [
+      { version: 1, accountId: "b", draft: { ...draft, depth: "Deep" } },
+      {
+        version: 1,
+        accountId: "a",
+        draft: { ...draft, depth: "Deep", token: "secret" },
+      },
+      { version: 1, accountId: "a", draft: { ...draft, depth: "deep" } },
+    ]) {
+      storage().setItem("research:draft:v1:a", JSON.stringify(record));
+      expect(readResearchDraft("a", storage)).toBeNull();
+    }
+  });
+  it("prefers v2 and clears both versions so an old draft cannot reappear", () => {
+    const { storage } = memoryStorage();
+    storage().setItem(
+      "research:draft:v1:a",
+      JSON.stringify({
+        version: 1,
+        accountId: "a",
+        draft: { ...draft, question: "Old question", depth: "Deep" },
+      }),
+    );
+    writeResearchDraft("a", draft, storage);
+    expect(readResearchDraft("a", storage)).toEqual(draft);
+    expect(clearResearchDraft("a", storage)).toBe(true);
+    expect(readResearchDraft("a", storage)).toBeNull();
   });
   it("clears only the requested account", () => {
     const { storage } = memoryStorage();

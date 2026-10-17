@@ -1,0 +1,120 @@
+{
+  "$id": "https://schemas.research.local/1.6/RetrievalProviderAccountingSchema.json",
+  "title": "RetrievalProviderAccountingSchema",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "provider": {
+      "type": "string",
+      "enum": [
+        "openalex",
+        "serper",
+        "tavily",
+        "parallel",
+        "browser",
+        "internal"
+      ]
+    },
+    "searchCalls": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "discovered": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "shortlisted": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "excluded": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "duplicateWork": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "unavailable": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "policyVersions": {
+      "maxItems": 10,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100
+      }
+    },
+    "countsComplete": {
+      "type": "boolean"
+    },
+    "extractedSources": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "citedInVerifiedFinding": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "provider",
+    "searchCalls",
+    "discovered",
+    "shortlisted",
+    "excluded",
+    "duplicateWork",
+    "unavailable",
+    "policyVersions",
+    "countsComplete",
+    "extractedSources",
+    "citedInVerifiedFinding"
+  ],
+  "additionalProperties": false
+}

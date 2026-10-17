@@ -8,6 +8,48 @@ export function modeDeadline(calls: number) {
         : 600_000;
 }
 
+/** Recorded limits win, even when tighter than the selected mode's defaults. */
+export function retryDeadline(run: {
+  mode?: "focused" | "balanced" | "deep" | null;
+  modePolicyVersion?: string | null;
+  budget: { maxWallClockMs?: number | null; maxSearchCalls: number };
+}) {
+  const recorded = run.budget.maxWallClockMs;
+  if (typeof recorded === "number" && Number.isFinite(recorded) && recorded > 0)
+    return recorded;
+  if (run.mode && run.modePolicyVersion === "research-mode-policy-v1") {
+    const minutes = { focused: 3, balanced: 5, deep: 10 };
+    return minutes[run.mode] * 60_000;
+  }
+  return modeDeadline(run.budget.maxSearchCalls);
+}
+
+export const runPhases = [
+  "planning",
+  "researching",
+  "verifying",
+  "writing",
+  "completed",
+] as const;
+
+/**
+ * Index of the visible phase for a recorded status. Reflection loops back into
+ * collection, so it stays in the research phase. Queued and stopped runs return
+ * -1: their position in the lifecycle is not recorded, so none is implied.
+ */
+export function runPhaseIndex(status: string) {
+  const phase: Record<string, number> = {
+    planning: 0,
+    awaiting_approval: 0,
+    researching: 1,
+    reflecting: 1,
+    verifying: 2,
+    writing: 3,
+    completed: 4,
+  };
+  return phase[status] ?? -1;
+}
+
 export function runStage(status: string) {
   const stages: Record<string, string> = {
     queued: "Queued",

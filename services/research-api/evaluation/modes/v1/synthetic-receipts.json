@@ -1,0 +1,142 @@
+{
+  "modes-01": {
+    "source_id": "synthetic:modes-01",
+    "text": "Synthetic fixture modes-01: a toy statement for offline harness validation only.",
+    "quote": "a toy statement for offline harness validation only.",
+    "semantic_label": "supported",
+    "dimension_id": "core"
+  },
+  "modes-02": {
+    "source_id": "synthetic:modes-02",
+    "text": "Synthetic fixture modes-02: a toy statement for offline harness validation only.",
+    "quote": "a toy statement for offline harness validation only.",
+    "semantic_label": "supported",
+    "dimension_id": "core"
+  },
+  "modes-03": {
+    "source_id": "synthetic:modes-03",
+    "text": "Synthetic fixture modes-03: a toy statement for offline harness validation only.",
+    "quote": "a toy statement for offline harness validation only.",
+    "semantic_label": "supported",
+    "dimension_id": "core"
+  },
+  "modes-04": {
+    "source_id": "synthetic:modes-04",
+    "text": "Synthetic fixture modes-04: a toy statement for offline harness validation only.",
+    "quote": "a toy statement for offline harness validation only.",
+    "semantic_label": "supported",
+    "dimension_id": "core"
+  },
+  "modes-05": {
+    "source_id": "synthetic:modes-05",
+    "text": "Synthetic fixture modes-05: a toy statement for offline harness validation only.",
+    "quote": "a toy statement for offline harness validation only.",
+    "semantic_label": "supported",
+    "dimension_id": "core"
+  },
+  "modes-06": {
+    "source_id": "synthetic:modes-06",
+    "text": "Synthetic fixture modes-06: a toy statement for offline harness validation only.",
+    "quote": "a toy statement for offline harness validation only.",
+    "semantic_label": "supported",
+    "dimension_id": "core"
+  },
+  "modes-07": {
+    "source_id": "synthetic:modes-07",
+    "text": "Synthetic fixture modes-07: a toy statement for offline harness validation only.",
+    "quote": "a toy statement for offline harness validation only.",
+    "semantic_label": "supported",
+    "dimension_id": "core"
+  },
+  "modes-08": {
+    "source_id": "synthetic:modes-08",
+    "text": "Synthetic fixture modes-08: a toy statement for offline harness validation only.",
+    "quote": "a toy statement for offline harness validation only.",
+    "semantic_label": "supported",
+    "dimension_id": "core"
+  },
+  "modes-09": {
+    "source_id": "synthetic:modes-09",
+    "text": "Synthetic fixture modes-09: a toy statement for offline harness validation only.",
+    "quote": "a toy statement for offline harness validation only.",
+    "semantic_label": "supported",
+    "dimension_id": "core"
+  },
+  "modes-10": {
+    "source_id": "synthetic:modes-10",
+    "text": "Synthetic fixture modes-10: a toy statement for offline harness validation only.",
+    "quote": "a toy statement for offline harness validation only.",
+    "semantic_label": "supported",
+    "dimension_id": "core"
+  },
+  "modes-11": {
+    "source_id": "synthetic:modes-11",
+    "text": "Synthetic fixture modes-11: a toy statement for offline harness validation only.",
+    "quote": "a toy statement for offline harness validation only.",
+    "semantic_label": "supported",
+    "dimension_id": "core"
+  },
+  "modes-12": {
+    "source_id": "synthetic:modes-12",
+    "text": "Synthetic fixture modes-12: a toy statement for offline harness validation only.",
+    "quote": "a toy statement for offline harness validation only.",
+    "semantic_label": "supported",
+    "dimension_id": "core"
+  },
+  "modes-13": {
+    "source_id": "synthetic:modes-13",
+    "text": "Synthetic fixture modes-13: a toy statement for offline harness validation only.",
+    "quote": "a toy statement for offline harness validation only.",
+    "semantic_label": "supported",
+    "dimension_id": "core"
+  },
+  "modes-14": {
+    "source_id": "synthetic:modes-14",
+    "text": "Synthetic fixture modes-14: a toy statement for offline harness validation only.",
+    "quote": "a toy statement for offline harness validation only.",
+    "semantic_label": "supported",
+    "dimension_id": "core"
+  },
+  "modes-15": {
+    "source_id": "synthetic:modes-15",
+    "text": "Synthetic fixture modes-15: a toy statement for offline harness validation only.",
+    "quote": "a toy statement for offline harness validation only.",
+    "semantic_label": "supported",
+    "dimension_id": "core"
+  },
+  "modes-16": {
+    "source_id": "synthetic:modes-16",
+    "text": "Synthetic fixture modes-16: a toy statement for offline harness validation only.",
+    "quote": "a toy statement for offline harness validation only.",
+    "semantic_label": "supported",
+    "dimension_id": "core"
+  },
+  "modes-17": {
+    "source_id": "synthetic:modes-17",
+    "text": "Synthetic fixture modes-17: a toy statement for offline harness validation only.",
+    "quote": "a toy statement for offline harness validation only.",
+    "semantic_label": "supported",
+    "dimension_id": "core"
+  },
+  "modes-18": {
+    "source_id": "synthetic:modes-18",
+    "text": "Synthetic fixture modes-18: a toy statement for offline harness validation only.",
+    "quote": "a toy statement for offline harness validation only.",
+    "semantic_label": "unsupported",
+    "dimension_id": "core"
+  },
+  "modes-19": {
+    "source_id": "synthetic:modes-19",
+    "text": "Synthetic fixture modes-19: a toy statement for offline harness validation only.",
+    "quote": "This quotation is intentionally absent.",
+    "semantic_label": "unsupported",
+    "dimension_id": "core"
+  },
+  "modes-20": {
+    "source_id": "synthetic:modes-20",
+    "text": "Synthetic fixture modes-20: a toy statement for offline harness validation only.",
+    "quote": "a toy statement for offline harness validation only.",
+    "semantic_label": "unsupported",
+    "dimension_id": "core"
+  }
+}

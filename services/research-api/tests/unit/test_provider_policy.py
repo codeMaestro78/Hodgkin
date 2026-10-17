@@ -141,11 +141,40 @@ def test_dependency_logging_is_enabled_correlated_and_restored(monkeypatch):
             dependency_event(
                 provider="openai",
                 operation="model",
-                outcome="consumed",
+                outcome="started",
                 started=monotonic(),
                 reason="provider-usage",
+                model="gpt-4o-mini",
+                role="writer",
+                max_attempts=3,
             )
     finally:
         dependency_run.reset(token)
     record = json.loads(stream.getvalue())
-    assert record["runId"] == str(run) and record["durationMs"] >= 0
+    assert record["runId"] == str(run)
+    assert record["durationMs"] is None
+    assert record["model"] == "gpt-4o-mini"
+    assert record["role"] == "writer"
+    assert record["maxAttempts"] == 3
+
+
+def test_model_dependency_event_logs_retry_decision_without_sensitive_content(caplog):
+    with caplog.at_level(logging.INFO, logger="research_api.dependencies"):
+        dependency_event(
+            provider="openrouter",
+            operation="model",
+            outcome="released",
+            reason="RateLimitError",
+            model="deepseek/deepseek-v4.1-flash",
+            role="writer",
+            attempt=1,
+            max_attempts=3,
+            retry_scheduled=True,
+        )
+
+    event = json.loads(caplog.records[-1].message)
+    assert event["provider"] == "openrouter"
+    assert event["model"] == "deepseek/deepseek-v4.1-flash"
+    assert event["role"] == "writer"
+    assert event["retryScheduled"] is True
+    assert "prompt" not in event and "response" not in event

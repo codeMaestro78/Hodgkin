@@ -7,11 +7,21 @@ async (page) => {
   let completed = false;
   let snapshots = 0;
   const runId = "11111111-1111-4111-8111-111111111111";
+  const unansweredQuestion = "How do the approaches compare in fault tolerance?";
+  const gaps = Array.from({ length: 18 }, (_, index) => ({
+    id: `22222222-2222-4222-8222-${String(index).padStart(12, "0")}`,
+    description: `Draft assertion requires evidence: unsupported draft ${index}`,
+    why: "The assertion failed the evidence checks.",
+    suggestedQuery: `Investigate unsupported thermal-pricing assertion ${index}`,
+    status: "open",
+    claimIds: [],
+    subQuestionIds: [],
+  }));
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     let body;
     if (path.endsWith("/session"))
-      body = { user: { name: "Fixture", email: "fixture@example.test" } };
+      body = { user: { id: "fixture-account", name: "Fixture", email: "fixture@example.test" } };
     else if (path.endsWith("/runs")) body = { runs: [] };
     else {
       snapshots += 1;
@@ -27,9 +37,19 @@ async (page) => {
         budget: { maxSearchCalls: 6, maxEstimatedCostUsd: 1 },
         usage: { searchCalls: 6 },
         sources: [],
-        subQuestions: [],
+        subQuestions: [{ id: "q1", question: unansweredQuestion, status: "complete" }],
         events: [],
         claimChecks: [],
+        insights: {
+          schemaVersion: "1.0",
+          tasks: [],
+          providerCalls: [],
+          gaps,
+          parentReportId: null,
+          parentRunId: null,
+          followupRuns: [],
+          reportVersions: [],
+        },
         report: completed
           ? {
               id: "report",
@@ -93,14 +113,47 @@ async (page) => {
   );
   await page
     .locator(".run-status-rail strong")
-    .filter({ hasText: "Evidence record ready" })
+    .filter({ hasText: "Research finished—answer not established" })
     .waitFor();
   assert(
     (await page.locator(".run-status-rail").innerText()).includes(
-      "limited result, not a full answer",
+      "No findings passed the evidence checks",
     ),
     "Empty verified findings are clearly labeled as a limited result",
   );
+  assert(
+    (await page.locator(".report-article .answer-section, .report-article h2, .report-outline").count()) === 0 &&
+      !(await page.locator(".report-article").innerText()).includes("No factual findings were published"),
+    "Zero-findings report does not render the empty Markdown body or section outline",
+  );
+  const gapSummary = page.getByText("Review 18 research gaps", { exact: true });
+  const gapDetails = page.locator("details").filter({ has: gapSummary });
+  assert(
+    !(await gapDetails.evaluate((element) => element.open)) &&
+      (await page.locator('.research-gaps[aria-label="Research gaps"] .desk-claim:visible').count()) === 0,
+    "Rejected draft cards are collapsed by default",
+  );
+  const suggestions = page.getByRole("group", { name: "Follow-up", exact: true });
+  assert(
+    (await suggestions.getByRole("button").count()) === 1 &&
+      (await suggestions.innerText()).includes(unansweredQuestion) &&
+      !(await suggestions.innerText()).includes("thermal-pricing"),
+    "Follow-up suggestions use unanswered plan questions, not unsupported draft prompts",
+  );
+  await suggestions.getByRole("button").click();
+  assert(
+    (await page.getByLabel("Continue this research", { exact: true }).inputValue()) === unansweredQuestion,
+    "Suggested follow-up prefills the unanswered research question",
+  );
+  await gapSummary.focus();
+  await page.keyboard.press("Enter");
+  assert(
+    (await gapDetails.evaluate((element) => element.open)) &&
+      (await page.locator('.research-gaps[aria-label="Research gaps"] .desk-claim:visible').count()) === 18,
+    "Keyboard users can expand and inspect every recorded draft gap",
+  );
+  await page.keyboard.press("Enter");
+  assert(!(await gapDetails.evaluate((element) => element.open)), "Research gaps can be collapsed again with the keyboard");
   assert(
     (await page.locator(".run-busy-track").count()) === 0,
     "Activity motion stops when execution completes",
@@ -110,4 +163,4 @@ async (page) => {
     fullPage: true,
   });
   return { checksPassed: checks.length, checks };
-};
+}

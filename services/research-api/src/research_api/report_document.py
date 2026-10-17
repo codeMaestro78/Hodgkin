@@ -10,7 +10,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 
-from research_api.reports import report_policy
+from research_api.mode_reports import policy_for_mode
 from research_api.schemas.generated.report_document_v1 import ReportDocumentV1
 
 _Text = Annotated[str, Field(min_length=1, max_length=1000)]
@@ -44,6 +44,7 @@ class _Input(BaseModel):
     model_config = ConfigDict(extra="forbid")
     question: Annotated[str, Field(min_length=1, max_length=10000)]
     max_search_calls: Annotated[StrictInt, Field(ge=0)]
+    mode: Literal["focused", "balanced", "deep"] | None = None
     requirements: Annotated[
         list[Annotated[str, Field(min_length=1, max_length=500, pattern=r"\S")]],
         Field(max_length=20),
@@ -66,6 +67,66 @@ class _Input(BaseModel):
 
 
 def validate_report_document(document: dict[str, Any]) -> dict[str, Any]:
+    if document.get("version") == 4:
+        from research_api.report_document_v4 import validate_report_document_v4
+
+        return validate_report_document_v4(document)
+    if document.get("version") == 3:
+        from research_api.report_document_v3 import validate_report_document_v3
+
+        return validate_report_document_v3(document)
+    if document.get("version") == 2:
+        from research_api.report_document_v2 import validate_report_document_v2
+
+        return validate_report_document_v2(document)
+    return _validate_report_document_v1(document)
+
+
+def report_diagnostics(document: dict[str, Any]) -> dict[str, Any]:
+    """Offline benchmark counters, keeping provenance distinct from assessment.
+
+    These are recorded model outcomes, not human gold labels or measured quality.
+    Historical V1 documents have no assessed coverage; report null, never zero.
+    """
+    doc = validate_report_document(document)
+    return {
+        "documentVersion": doc["version"],
+        "assessmentVersion": doc["assessmentVersion"],
+        "verifiedFindings": len(doc["findings"]),
+        "provenanceOnly": {
+            "requirementsLinked": sum(bool(row["claimIds"]) for row in doc["requirements"]),
+            "questionsLinked": sum(bool(row["claimIds"]) for row in doc["questionCoverage"]),
+        },
+        "assessed": {
+            "dimensionsTotal": len(doc["dimensions"]),
+            "dimensionsVerifiedCovered": sum(
+                row["status"] == "verified_covered" for row in doc["dimensions"]
+            ),
+            "requirementsEstablished": sum(
+                row["outcome"] == "established" for row in doc["requirementOutcomes"]
+            ),
+            "requirementsUnassessed": sum(
+                row["outcome"] == "not_assessed" for row in doc["requirementOutcomes"]
+            ),
+        }
+        if doc["version"] >= 2
+        else None,
+        "narrative": {
+            "status": doc["narrative"]["status"],
+            "reason": doc["narrative"]["reason"],
+            "blocks": len(doc["narrative"]["blocks"]),
+            "narrativeClaims": len(doc["narrative"]["narrativeClaimIds"]),
+            "proposedSentences": doc["narrative"]["proposedSentenceCount"],
+            "publishedSentences": doc["narrative"]["publishedSentenceCount"],
+        }
+        if doc["version"] >= 4
+        else None,
+        "independenceAssessed": False,
+        "humanQualityAssessed": False,
+    }
+
+
+def _validate_report_document_v1(document: dict[str, Any]) -> dict[str, Any]:
     """Validate generated shape plus internal references; return JSON-safe aliases.
 
     External citation/source existence remains the caller's responsibility. JSON
@@ -135,6 +196,7 @@ def build_report_document(
     findings: list[dict[str, Any]],
     questions: list[dict[str, Any]],
     excluded: int,
+    mode: Literal["focused", "balanced", "deep"] | None = None,
 ) -> dict[str, Any]:
     """Build V1 from caller-verified findings; never infer fulfillment from links.
 
@@ -150,9 +212,10 @@ def build_report_document(
             "findings": findings,
             "questions": questions,
             "excluded": excluded,
+            "mode": mode,
         }
     )
-    policy = report_policy(data.max_search_calls)
+    policy = policy_for_mode(data.max_search_calls, mode=data.mode)
     projected = [
         f.model_dump(mode="json", by_alias=True, exclude={"sub_question_id", "requirement_indices"})
         for f in data.findings

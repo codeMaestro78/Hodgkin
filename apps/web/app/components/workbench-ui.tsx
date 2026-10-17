@@ -5,6 +5,9 @@ import clsx from "clsx";
 import { Dialog } from "@base-ui/react/dialog";
 import { ToggleGroup as BaseToggleGroup } from "@base-ui/react/toggle-group";
 import { Toggle } from "@base-ui/react/toggle";
+import { Critter, type CritterKind } from "./crew/critter";
+
+const EMPTY_CREW: CritterKind[] = ["lens", "folio", "seal", "quill"];
 
 export function Button({
   className,
@@ -53,6 +56,11 @@ export function Empty({
 }) {
   return (
     <div className="desk-empty">
+      <Critter
+        kind={EMPTY_CREW[title.length % EMPTY_CREW.length] ?? "lens"}
+        size={38}
+        className="desk-empty-critter"
+      />
       <strong>{title}</strong>
       {children && <p>{children}</p>}
     </div>

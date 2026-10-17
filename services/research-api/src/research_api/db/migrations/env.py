@@ -7,7 +7,9 @@ from dotenv import dotenv_values
 from sqlalchemy import engine_from_config, pool
 
 from research_api.config import get_settings
+from research_api.db.assessments import ResearchAssessment  # noqa: F401
 from research_api.db.models import Base
+from research_api.db.source_relationships import SourceRelationship  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:

@@ -1,0 +1,496 @@
+{
+  "case": {
+    "$defs": {
+      "Dimension": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "tier": {
+            "enum": [
+              "core",
+              "tail"
+            ],
+            "title": "Tier",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "description",
+          "tier"
+        ],
+        "title": "Dimension",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "category": {
+        "enum": [
+          "comparison",
+          "factual",
+          "current",
+          "academic",
+          "conflicting",
+          "multi_requirement",
+          "insufficient"
+        ],
+        "title": "Category",
+        "type": "string"
+      },
+      "dimensions": {
+        "items": {
+          "$ref": "#/$defs/Dimension"
+        },
+        "minItems": 1,
+        "title": "Dimensions",
+        "type": "array"
+      },
+      "draft_answerability": {
+        "enum": [
+          "answerable",
+          "partial",
+          "insufficient",
+          "time_dependent"
+        ],
+        "title": "Draft Answerability",
+        "type": "string"
+      },
+      "draft_gold_expectations": {
+        "items": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "minItems": 1,
+        "title": "Draft Gold Expectations",
+        "type": "array"
+      },
+      "evaluation_owner": {
+        "minLength": 1,
+        "title": "Evaluation Owner",
+        "type": "string"
+      },
+      "id": {
+        "minLength": 1,
+        "title": "Id",
+        "type": "string"
+      },
+      "label_status": {
+        "const": "draft_awaiting_human_adjudication",
+        "title": "Label Status",
+        "type": "string"
+      },
+      "question": {
+        "minLength": 1,
+        "title": "Question",
+        "type": "string"
+      },
+      "reference_selection": {
+        "minLength": 1,
+        "title": "Reference Selection",
+        "type": "string"
+      },
+      "requirements": {
+        "items": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "minItems": 1,
+        "title": "Requirements",
+        "type": "array"
+      },
+      "version": {
+        "const": "modes-v1",
+        "title": "Version",
+        "type": "string"
+      }
+    },
+    "required": [
+      "version",
+      "id",
+      "category",
+      "question",
+      "evaluation_owner",
+      "label_status",
+      "draft_answerability",
+      "requirements",
+      "dimensions",
+      "draft_gold_expectations",
+      "reference_selection"
+    ],
+    "title": "Case",
+    "type": "object"
+  },
+  "observation": {
+    "$defs": {
+      "Limits": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_findings": {
+            "exclusiveMinimum": 0,
+            "title": "Candidate Findings",
+            "type": "integer"
+          },
+          "context_chars": {
+            "exclusiveMinimum": 0,
+            "title": "Context Chars",
+            "type": "integer"
+          },
+          "output_tokens": {
+            "exclusiveMinimum": 0,
+            "title": "Output Tokens",
+            "type": "integer"
+          },
+          "plan_questions": {
+            "exclusiveMinimum": 0,
+            "title": "Plan Questions",
+            "type": "integer"
+          },
+          "provider_operations": {
+            "exclusiveMinimum": 0,
+            "title": "Provider Operations",
+            "type": "integer"
+          },
+          "sources": {
+            "exclusiveMinimum": 0,
+            "title": "Sources",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "provider_operations",
+          "sources",
+          "candidate_findings",
+          "context_chars",
+          "output_tokens",
+          "plan_questions"
+        ],
+        "title": "Limits",
+        "type": "object"
+      },
+      "Measurement": {
+        "additionalProperties": false,
+        "properties": {
+          "source": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "value",
+          "source"
+        ],
+        "title": "Measurement",
+        "type": "object"
+      },
+      "Ratio": {
+        "additionalProperties": false,
+        "properties": {
+          "denominator": {
+            "minimum": 0,
+            "title": "Denominator",
+            "type": "integer"
+          },
+          "numerator": {
+            "minimum": 0,
+            "title": "Numerator",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "numerator",
+          "denominator"
+        ],
+        "title": "Ratio",
+        "type": "object"
+      },
+      "Usage": {
+        "additionalProperties": false,
+        "properties": {
+          "input_tokens": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Tokens"
+          },
+          "operations": {
+            "additionalProperties": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "propertyNames": {
+              "enum": [
+                "search",
+                "extract",
+                "browser",
+                "academic"
+              ]
+            },
+            "title": "Operations",
+            "type": "object"
+          },
+          "output_tokens": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Tokens"
+          },
+          "sources": {
+            "minimum": 0,
+            "title": "Sources",
+            "type": "integer"
+          },
+          "verified_findings": {
+            "minimum": 0,
+            "title": "Verified Findings",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "operations",
+          "sources",
+          "verified_findings",
+          "input_tokens",
+          "output_tokens"
+        ],
+        "title": "Usage",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "case_id": {
+        "minLength": 1,
+        "title": "Case Id",
+        "type": "string"
+      },
+      "dimension_states": {
+        "additionalProperties": {
+          "enum": [
+            "established",
+            "partial",
+            "not_established",
+            "unknown"
+          ],
+          "type": "string"
+        },
+        "propertyNames": {
+          "minLength": 1
+        },
+        "title": "Dimension States",
+        "type": "object"
+      },
+      "evidence_kind": {
+        "enum": [
+          "synthetic",
+          "frozen_provider_replay",
+          "live_observation"
+        ],
+        "title": "Evidence Kind",
+        "type": "string"
+      },
+      "failed": {
+        "title": "Failed",
+        "type": "boolean"
+      },
+      "human_review_reference": {
+        "anyOf": [
+          {
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Human Review Reference"
+      },
+      "human_scores": {
+        "additionalProperties": {
+          "anyOf": [
+            {
+              "maximum": 5,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "propertyNames": {
+          "enum": [
+            "directness",
+            "decision_usefulness",
+            "information_density"
+          ]
+        },
+        "title": "Human Scores",
+        "type": "object"
+      },
+      "limits": {
+        "$ref": "#/$defs/Limits"
+      },
+      "measurements": {
+        "additionalProperties": {
+          "$ref": "#/$defs/Measurement"
+        },
+        "propertyNames": {
+          "enum": [
+            "queue_wait_ms",
+            "first_useful_evidence_ms",
+            "end_to_end_ms",
+            "estimated_cost_usd",
+            "settled_cost_usd"
+          ]
+        },
+        "title": "Measurements",
+        "type": "object"
+      },
+      "metrics": {
+        "additionalProperties": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ratio"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "propertyNames": {
+          "minLength": 1
+        },
+        "title": "Metrics",
+        "type": "object"
+      },
+      "mode": {
+        "enum": [
+          "focused",
+          "balanced",
+          "deep"
+        ],
+        "title": "Mode",
+        "type": "string"
+      },
+      "policy_origin": {
+        "enum": [
+          "legacy-inferred",
+          "explicit"
+        ],
+        "title": "Policy Origin",
+        "type": "string"
+      },
+      "quality": {
+        "enum": [
+          "partial",
+          "insufficient_evidence"
+        ],
+        "title": "Quality",
+        "type": "string"
+      },
+      "receipt_sha256": {
+        "pattern": "^[a-f0-9]{64}$",
+        "title": "Receipt Sha256",
+        "type": "string"
+      },
+      "requested_mode": {
+        "anyOf": [
+          {
+            "enum": [
+              "focused",
+              "balanced",
+              "deep"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Requested Mode"
+      },
+      "snapshot": {
+        "additionalProperties": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "propertyNames": {
+          "minLength": 1
+        },
+        "title": "Snapshot",
+        "type": "object"
+      },
+      "usage": {
+        "$ref": "#/$defs/Usage"
+      },
+      "version": {
+        "const": "modes-observation-v1",
+        "title": "Version",
+        "type": "string"
+      }
+    },
+    "required": [
+      "version",
+      "case_id",
+      "mode",
+      "requested_mode",
+      "policy_origin",
+      "evidence_kind",
+      "snapshot",
+      "receipt_sha256",
+      "limits",
+      "usage",
+      "dimension_states",
+      "quality",
+      "failed",
+      "human_review_reference",
+      "metrics",
+      "human_scores",
+      "measurements"
+    ],
+    "title": "Observation",
+    "type": "object"
+  }
+}

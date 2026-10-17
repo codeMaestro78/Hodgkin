@@ -14,6 +14,7 @@ from research_api.db.models import (
     ProviderCallReservation,
     UsageLedger,
 )
+from research_api.research_limits import operation_limit
 
 
 class BudgetExceededError(RuntimeError):
@@ -178,7 +179,7 @@ class BudgetReservationRepository:
         projected_cost = (
             usage.estimated_cost_usd + usage.reserved_estimated_cost_usd + estimated_cost_usd
         )
-        if projected_calls > budget.max_search_calls:
+        if projected_calls > operation_limit(budget):
             raise BudgetExceededError("search-call budget exhausted")
         if projected_cost > budget.max_estimated_cost_usd:
             raise BudgetExceededError("estimated-cost budget exhausted")

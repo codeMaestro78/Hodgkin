@@ -99,6 +99,38 @@ async def finish_node(
                 )
 
 
+async def close_open_nodes(
+    session: Any, tenant_id: uuid.UUID, run_id: uuid.UUID, status: str
+) -> None:
+    """Close tasks an interrupted graph left running, in the caller's run-locked transaction."""
+    rows = list(
+        await session.scalars(
+            select(NodeExecution)
+            .where(
+                NodeExecution.tenant_id == tenant_id,
+                NodeExecution.run_id == run_id,
+                NodeExecution.status == "running",
+            )
+            .with_for_update()
+        )
+    )
+    outbox = EventOutbox(session, tenant_id)
+    for row in rows:
+        row.status = status
+        row.completed_at = datetime.now(UTC)
+        await outbox.append(
+            run_id=run_id,
+            event_type="task.state",
+            payload={
+                "taskId": str(row.id),
+                "nodeId": row.node_id,
+                "status": status,
+                "attempt": row.attempt,
+                "label": f"{row.node_id.replace('_', ' ')} {status}",
+            },
+        )
+
+
 def task_projection(
     row: Any,
     *,

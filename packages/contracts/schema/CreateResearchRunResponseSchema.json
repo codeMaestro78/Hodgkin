@@ -1,9 +1,50 @@
 {
-  "$id": "https://schemas.research.local/1.4/CreateResearchRunResponseSchema.json",
+  "$id": "https://schemas.research.local/1.6/CreateResearchRunResponseSchema.json",
   "title": "CreateResearchRunResponseSchema",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "properties": {
+    "mode": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "focused",
+            "balanced",
+            "deep"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "modePolicyVersion": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "modeResolution": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "explicit",
+            "legacy-inferred"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "runId": {
       "type": "string",
       "format": "uuid",

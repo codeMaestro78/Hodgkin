@@ -1,9 +1,24 @@
 {
-  "$id": "https://schemas.research.local/1.4/CreateResearchRunRequestSchema.json",
+  "$id": "https://schemas.research.local/1.6/CreateResearchRunRequestSchema.json",
   "title": "CreateResearchRunRequestSchema",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "properties": {
+    "mode": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "focused",
+            "balanced",
+            "deep"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "question": {
       "type": "string",
       "minLength": 5,
@@ -33,6 +48,16 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 50
+        },
+        "maxProviderOperations": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 50
+        },
+        "maxSources": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
         },
         "maxBrowserSessions": {
           "default": 0,

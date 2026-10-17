@@ -14,9 +14,12 @@ class SchemaVersion(StrEnum):
     field_1_2 = "1.2"
     field_1_3 = "1.3"
     field_1_4 = "1.4"
+    field_1_5 = "1.5"
+    field_1_6 = "1.6"
 
 
 class Provider(StrEnum):
+    openalex = "openalex"
     serper = "serper"
     tavily = "tavily"
     parallel = "parallel"

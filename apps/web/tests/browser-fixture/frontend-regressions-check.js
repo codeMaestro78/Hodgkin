@@ -23,10 +23,12 @@ async (page, scenario = "all") => {
         });
       if (path === "/api/auth/session")
         return reply({
-          user: { name: "Fixture", email: "fixture@example.test" },
+          user: { id: "fixture-account", name: "Fixture", email: "fixture@example.test" },
         });
       if (path === "/api/research/runs") return reply({ runs: [] });
       if (path === "/api/onboarding") return reply({ profile: null });
+      if (/^\/api\/research\/reports\/[^/]+\/shares$/.test(path))
+        return reply([]);
       snapshots++;
       if (outage || remainingFailures-- > 0)
         return reply({ error: "Snapshot temporarily unavailable" }, 503);
@@ -242,7 +244,7 @@ async (page, scenario = "all") => {
       }
       if (path === "/api/auth/session")
         return reply({
-          user: { name: "Fixture", email: "fixture@example.test" },
+          user: { id: "fixture-account", name: "Fixture", email: "fixture@example.test" },
         });
       return reply({ runs: [] });
     });
@@ -282,7 +284,7 @@ async (page, scenario = "all") => {
         body: JSON.stringify({
           runs: [],
           profile: null,
-          user: { name: "Fixture", email: "fixture@example.test" },
+          user: { id: "fixture-account", name: "Fixture", email: "fixture@example.test" },
         }),
       }),
     );
@@ -315,4 +317,4 @@ async (page, scenario = "all") => {
     await page.unroute("**/api/**");
   }
   return { checksPassed: checks.length, checks };
-};
+}

@@ -13,7 +13,10 @@ from research_api.graph import builder
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("calls,questions", [(6, 3), (12, 6), (20, 8)])
-async def test_real_worker_bounds_sources_and_concurrency(monkeypatch, calls, questions) -> None:
+@pytest.mark.parametrize("route", ["legacy", "tavily", "serper"])
+async def test_real_worker_bounds_sources_and_concurrency(
+    monkeypatch, calls, questions, route
+) -> None:
     question_ids = [str(uuid.uuid4()) for _ in range(questions)]
     records = {
         key: SimpleNamespace(id=uuid.UUID(key), question=key, status="pending", attempts=0)
@@ -24,6 +27,7 @@ async def test_real_worker_bounds_sources_and_concurrency(monkeypatch, calls, qu
     collection_started = False
     session_count = 0
     setup_sessions = set()
+    discovery_instances = []
 
     class Session:
         def __init__(self):
@@ -47,7 +51,12 @@ async def test_real_worker_bounds_sources_and_concurrency(monkeypatch, calls, qu
             if entity is ResearchRun:
                 # Collection cleanup reads cancellation intent under the real
                 # lifecycle lock; this fixture models an active, uncancelled run.
-                return SimpleNamespace(concurrency_limit=3, cancellation_requested_at=None)
+                return SimpleNamespace(
+                    concurrency_limit=3,
+                    cancellation_requested_at=None,
+                    mode=None,
+                    active_plan_id=None,
+                )
             if entity is SubQuestion:
                 collection_started = True
                 key = str(statement.compile().params["id_1"])
@@ -77,13 +86,27 @@ async def test_real_worker_bounds_sources_and_concurrency(monkeypatch, calls, qu
     monkeypatch.setattr(
         builder, "TavilyAdapter", lambda **_kwargs: SimpleNamespace(aclose=AsyncMock())
     )
+
+    def discovery(**_kwargs):
+        instance = SimpleNamespace(aclose=AsyncMock())
+        discovery_instances.append(instance)
+        return instance
+
+    monkeypatch.setattr(builder, "SerperAdapter", discovery)
     monkeypatch.setattr(builder, "_cancel_if_requested", AsyncMock(return_value=False))
     monkeypatch.setattr(builder, "_transition", AsyncMock())
     monkeypatch.setattr(builder, "start_node", AsyncMock(return_value=uuid.uuid4()))
     monkeypatch.setattr(builder, "finish_node", AsyncMock())
     monkeypatch.setattr(builder, "EventOutbox", lambda *_args: SimpleNamespace(append=AsyncMock()))
     worker = (
-        builder.build_graph(Settings(_env_file=None, TAVILY_API_KEY="test"))
+        builder.build_graph(
+            Settings(
+                _env_file=None,
+                TAVILY_API_KEY="test",
+                SERPER_API_KEY="fixture",
+                SERPER_DISCOVERY_ENABLED=True,
+            )
+        )
         .nodes["research_worker"]
         .bound.afunc
     )
@@ -93,6 +116,7 @@ async def test_real_worker_bounds_sources_and_concurrency(monkeypatch, calls, qu
             "run_id": str(uuid.uuid4()),
             "sub_question_ids": question_ids,
             "quick_mode": False,
+            **({"discovery_provider": route} if route != "legacy" else {}),
         }
     )
     assert len(result["source_ids"]) <= calls
@@ -100,3 +124,6 @@ async def test_real_worker_bounds_sources_and_concurrency(monkeypatch, calls, qu
     assert peak == 3
     assert all(record.status == "complete" for record in records.values())
     assert len(setup_sessions) == 1, "Worker setup must reuse one tenant transaction"
+    assert len(discovery_instances) == (1 if route == "serper" else 0)
+    for instance in discovery_instances:
+        instance.aclose.assert_awaited_once()

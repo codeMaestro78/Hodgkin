@@ -1,0 +1,41 @@
+{
+  "$id": "https://schemas.research.local/1.6/RetrievalExtractionOutcomesSchema.json",
+  "title": "RetrievalExtractionOutcomesSchema",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "succeeded": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "failed": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "uncertain": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "pending": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "other": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "succeeded",
+    "failed",
+    "uncertain",
+    "pending",
+    "other"
+  ],
+  "additionalProperties": false
+}

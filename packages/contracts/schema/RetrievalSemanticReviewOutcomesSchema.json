@@ -1,0 +1,41 @@
+{
+  "$id": "https://schemas.research.local/1.6/RetrievalSemanticReviewOutcomesSchema.json",
+  "title": "RetrievalSemanticReviewOutcomesSchema",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "supports": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "partially_supports": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "contradicts": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "unrelated": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "notRecorded": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "supports",
+    "partially_supports",
+    "contradicts",
+    "unrelated",
+    "notRecorded"
+  ],
+  "additionalProperties": false
+}

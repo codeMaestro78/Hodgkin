@@ -1,7 +1,7 @@
 .onboarding-page {
   min-height: 100dvh;
   background: #fff;
-  color: #181c20;
+  color: #1e1b18;
 }
 .onboarding-header {
   display: grid;
@@ -15,7 +15,7 @@
   gap: 10px;
   text-align: center;
   font-size: 12px;
-  color: #64717b;
+  color: #746e67;
 }
 .onboarding-progress progress {
   display: block;
@@ -25,14 +25,13 @@
   border: 0;
   border-radius: 4px;
   overflow: hidden;
-  background: #e8ecef;
+  background: #eeebe8;
 }
 .onboarding-progress progress::-webkit-progress-bar {
-  background: #e8ecef;
+  background: #eeebe8;
 }
 .onboarding-progress progress::-webkit-progress-value {
   background: #a96142;
-  transition: width 180ms ease-out;
 }
 .onboarding-progress progress::-moz-progress-bar {
   background: #a96142;
@@ -41,7 +40,7 @@
   justify-self: end;
   border: 0;
   background: transparent;
-  color: #64717b;
+  color: #746e67;
   font: inherit;
   font-size: 13px;
   padding: 12px;
@@ -66,7 +65,7 @@
   align-items: center;
   gap: 12px;
   font-size: 12px;
-  color: #87929b;
+  color: var(--muted);
 }
 .onboarding-step-nav > span::first-letter {
   font-variant-numeric: tabular-nums;
@@ -94,7 +93,7 @@
   max-width: 650px;
 }
 .onboarding-description {
-  color: #64717b;
+  color: #746e67;
   font-size: 15px;
   line-height: 1.7;
   margin: 0 0 30px;
@@ -114,7 +113,7 @@
 }
 .onboarding-fields label span {
   font-weight: 400;
-  color: #64717b;
+  color: #746e67;
 }
 .onboarding-fields input,
 .onboarding-fields textarea {
@@ -123,11 +122,11 @@
   box-sizing: border-box;
   font: inherit;
   font-size: 14px;
-  border: 1px solid #dce2e7;
+  border: 1px solid #e4e1dc;
   border-radius: 8px;
   padding: 14px 16px;
   background: #fff;
-  color: #181c20;
+  color: #1e1b18;
 }
 .onboarding-fields textarea {
   resize: vertical;
@@ -136,7 +135,7 @@
 }
 .onboarding-fields input::placeholder,
 .onboarding-fields textarea::placeholder {
-  color: #74818c;
+  color: var(--muted);
 }
 .onboarding-options {
   display: grid;
@@ -157,20 +156,20 @@
   gap: 14px;
   text-align: left;
   min-height: 84px;
-  border: 1px solid #dce2e7;
+  border: 1px solid #e4e1dc;
   border-radius: 9px;
   background: #fff;
   padding: 18px;
-  color: #181c20;
+  color: #1e1b18;
   font: inherit;
   cursor: pointer;
   transition:
-    background-color 140ms ease,
-    border-color 140ms ease;
+    background-color var(--motion-press) var(--ease),
+    border-color var(--motion-press) var(--ease);
 }
 .onboarding-options button > svg {
   flex-shrink: 0;
-  color: #64717b;
+  color: #746e67;
 }
 .onboarding-options strong {
   display: block;
@@ -183,7 +182,7 @@
   margin-top: 5px;
   font-size: 12px;
   line-height: 1.5;
-  color: #64717b;
+  color: #746e67;
 }
 .onboarding-options.three-columns button {
   flex-direction: column;
@@ -194,9 +193,11 @@
 .onboarding-options.three-columns small {
   margin-top: 0;
 }
-.onboarding-options button:hover,
-.onboarding-chips button:hover {
-  border-color: #a96142;
+@media (hover: hover) and (pointer: fine) {
+  .onboarding-options button:hover,
+  .onboarding-chips button:hover {
+    border-color: #a96142;
+  }
 }
 .onboarding-options button[aria-pressed="true"],
 .onboarding-chips button[aria-pressed="true"] {
@@ -214,16 +215,19 @@
   margin-top: 22px;
 }
 .onboarding-chips button {
-  border: 1px solid #dce2e7;
+  border: 1px solid #e4e1dc;
   border-radius: 100px;
-  background: #f7f8fa;
+  background: #fffcfa;
   padding: 9px 14px;
   font: inherit;
   font-size: 13px;
-  color: #33424d;
+  color: #453f37;
   cursor: pointer;
   text-align: left;
   line-height: 1.5;
+  transition:
+    background-color var(--motion-press) var(--ease),
+    border-color var(--motion-press) var(--ease);
 }
 .onboarding-organisation {
   margin-top: 24px;
@@ -243,29 +247,29 @@
 .depth-options button > span {
   font-size: 13px;
   line-height: 1.65;
-  color: #64717b;
+  color: #746e67;
 }
 .onboarding-note {
   font-size: 12px;
   line-height: 1.65;
-  color: #64717b;
+  color: #746e67;
   margin-top: 18px;
 }
 .onboarding-review {
   margin: 0;
-  border-top: 1px solid #e5e9ed;
+  border-top: 1px solid #ebe8e5;
 }
 .onboarding-review > div {
   display: grid;
   grid-template-columns: 110px minmax(0, 1fr) 42px;
   gap: 16px;
   padding: 18px 0;
-  border-bottom: 1px solid #e5e9ed;
+  border-bottom: 1px solid #ebe8e5;
   align-items: start;
 }
 .onboarding-review dt {
   font-size: 12px;
-  color: #64717b;
+  color: #746e67;
   padding-top: 4px;
 }
 .onboarding-review dd {
@@ -289,7 +293,7 @@
   gap: 14px;
   margin-top: 24px;
   padding: 20px;
-  background: #f7f8fa;
+  background: #fffcfa;
   border-radius: 8px;
 }
 .onboarding-expectations > svg {
@@ -303,10 +307,10 @@
   margin: 8px 0 0;
   font-size: 12px;
   line-height: 1.7;
-  color: #64717b;
+  color: #746e67;
 }
 .onboarding-save-state {
-  color: #64717b;
+  color: #746e67;
   font-size: 12px;
   min-height: 20px;
   margin: 18px 0 8px;
@@ -326,9 +330,9 @@
   cursor: pointer;
 }
 .onboarding-back {
-  background: #f7f8fa;
-  border: 1px solid #e5e9ed;
-  color: #46545f;
+  background: #fffcfa;
+  border: 1px solid #ebe8e5;
+  color: #57514a;
 }
 .onboarding-continue {
   display: inline-flex;
@@ -337,9 +341,12 @@
   background: #a96142;
   color: #fff;
   border: 1px solid #a96142;
+  transition: background-color var(--motion-press) var(--ease);
 }
-.onboarding-continue:hover:not(:disabled) {
-  background: #8e4e33;
+@media (hover: hover) and (pointer: fine) {
+  .onboarding-continue:hover:not(:disabled) {
+    background: #8e4e33;
+  }
 }
 .onboarding-page button:disabled {
   cursor: default;
@@ -347,9 +354,9 @@
 }
 .onboarding-error {
   padding: 12px 16px;
-  background: #fff4f1;
+  background: var(--danger-soft);
   border: 1px solid #e8c3b6;
-  color: #8b3524;
+  color: var(--danger);
   font-size: 13px;
   line-height: 1.6;
   border-radius: 8px;
@@ -358,14 +365,14 @@
   margin: 24px 0 0;
   font-size: 11px;
   line-height: 1.7;
-  color: #64717b;
+  color: #746e67;
 }
 .onboarding-page :is(button, input, textarea, a):focus-visible {
   outline: 2px solid #a96142;
   outline-offset: 4px;
 }
 .onboarding-step {
-  animation: onboarding-enter 180ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+  animation: onboarding-enter 180ms var(--ease) both;
 }
 @keyframes onboarding-enter {
   from {
@@ -375,6 +382,14 @@
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+@keyframes onboarding-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
   }
 }
 @media (max-width: 960px) {
@@ -429,7 +444,7 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .onboarding-step {
-    animation: none;
+    animation: onboarding-fade 180ms var(--ease) both;
   }
   .onboarding-page * {
     transition: none !important;

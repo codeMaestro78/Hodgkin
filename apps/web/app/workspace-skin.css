@@ -1,0 +1,315 @@
+/* Workspace skin: the public site's sand and paper, ink for actions, copper for citations only. */
+html .evidence-desk {
+  --desk-sand: #f7f2ed;
+  --desk-sand-deep: #efe8e0;
+  --desk-paper: #fffcfa;
+  --desk-line: #efe6dc;
+  --desk-line-strong: #e3d8cc;
+  --desk-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --desk-raised:
+    0 0 0 1px rgb(37 37 34 / 6%), 0 1px 2px -1px rgb(37 37 34 / 6%),
+    0 2px 4px rgb(37 37 34 / 4%);
+  --desk-lifted: var(--desk-raised), 0 24px 48px -28px rgb(84 62 38 / 24%);
+}
+html .evidence-desk ::selection {
+  background: #f3d6c6;
+}
+
+/* Shell: the sidebar sits on sand; the work sits on a raised paper sheet. */
+html .evidence-desk.workspace-shell {
+  background: var(--desk-sand);
+}
+html .evidence-desk .workspace-sidebar,
+html .desk-mobile-history {
+  background: var(--desk-sand);
+  border-right: 0;
+}
+html .evidence-desk .workspace-body {
+  margin: 8px 8px 8px 0;
+  border-radius: 20px;
+  background: var(--desk-paper);
+  box-shadow: var(--desk-raised);
+}
+html .evidence-desk.sidebar-collapsed .workspace-body {
+  margin-left: 8px;
+}
+html .evidence-desk .workspace-toolbar {
+  border-bottom-color: var(--desk-line);
+}
+
+/* Primary actions are ink pills. */
+html .evidence-desk .new-research,
+html .desk-mobile-history .new-research,
+html .evidence-desk .desk-button-primary {
+  background: var(--ink);
+  color: var(--desk-paper);
+  border-radius: 100px;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 10%),
+    0 6px 14px -8px rgb(37 37 34 / 45%);
+}
+html .evidence-desk .desk-button {
+  border-radius: 100px;
+  transition:
+    transform 160ms var(--desk-out),
+    background-color 200ms var(--desk-out),
+    box-shadow 200ms var(--desk-out);
+}
+html .evidence-desk .desk-button:active:not(:disabled),
+html .evidence-desk .new-research:active {
+  transform: scale(0.98);
+}
+html .evidence-desk .desk-button-outline {
+  border-color: transparent;
+  background: #fff;
+  box-shadow: var(--desk-raised);
+}
+
+/* Navigation: the current place is a white raised pill. */
+html .desk-library-link {
+  border-radius: 12px;
+  transition:
+    background-color 180ms var(--desk-out),
+    box-shadow 180ms var(--desk-out);
+}
+html .desk-library-link[aria-current] {
+  background: #fff;
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: var(--desk-raised);
+}
+html .evidence-desk .history-list a[aria-current],
+html .desk-mobile-history .history-list a[aria-current] {
+  border-color: transparent;
+  box-shadow: var(--desk-raised);
+}
+html .evidence-desk .history-list a,
+html .desk-mobile-history .history-list a {
+  border-radius: 12px;
+}
+html .evidence-desk .local-avatar,
+html .desk-mobile-history .local-avatar {
+  color: var(--ink);
+  box-shadow: var(--desk-raised);
+}
+html .evidence-desk .sidebar-bottom,
+html .desk-mobile-history .sidebar-bottom {
+  border-color: var(--desk-line-strong);
+}
+
+/* Composer */
+html .desk-composer-main {
+  position: relative;
+}
+html .evidence-desk .desk-composer {
+  position: relative;
+  z-index: 1;
+  border: 0;
+  border-radius: 22px;
+  padding: 26px;
+  box-shadow: var(--desk-lifted);
+}
+html .evidence-desk .desk-composer textarea {
+  border: 0;
+  border-radius: 14px;
+  background: var(--desk-paper);
+  box-shadow: inset 0 0 0 1px var(--desk-line-strong);
+  transition:
+    box-shadow 180ms var(--desk-out),
+    background-color 180ms var(--desk-out);
+}
+html .evidence-desk .desk-composer textarea:focus {
+  outline: none;
+  background: #fff;
+  box-shadow:
+    inset 0 0 0 1.5px var(--ink),
+    0 0 0 4px rgb(37 37 34 / 6%);
+}
+html .evidence-desk .desk-toggle-item {
+  border: 0;
+  border-radius: 14px;
+  background: var(--desk-paper);
+  box-shadow: inset 0 0 0 1px var(--desk-line-strong);
+  transition:
+    box-shadow 200ms var(--desk-out),
+    background-color 200ms var(--desk-out),
+    transform 160ms var(--desk-out);
+}
+html .evidence-desk .desk-toggle-item:active {
+  transform: scale(0.985);
+}
+html .evidence-desk .desk-toggle-item[data-pressed] {
+  background: #fff;
+  box-shadow:
+    inset 0 0 0 1.5px var(--ink),
+    0 10px 22px -16px rgb(37 37 34 / 40%);
+}
+html .evidence-desk .depth-limit {
+  color: var(--ink);
+}
+html .evidence-desk .desk-toggle-item:not([data-pressed]) .depth-limit {
+  color: var(--muted);
+}
+html .evidence-desk .desk-composer-footer {
+  border-top-color: var(--desk-line);
+}
+html .evidence-desk .desk-composer-footer kbd {
+  border-color: var(--desk-line-strong);
+  background: var(--desk-paper);
+  box-shadow: 0 1px 0 var(--desk-line-strong);
+}
+html .evidence-desk .desk-scope {
+  border: 0;
+  border-radius: 22px;
+  background: var(--desk-sand);
+  box-shadow: inset 0 0 0 1px var(--desk-line);
+}
+html .evidence-desk .desk-badge {
+  border-radius: 100px;
+  padding: 4px 10px;
+  background: #fff;
+  color: var(--ink);
+  box-shadow: var(--desk-raised);
+}
+html .evidence-desk .desk-templates button {
+  border-top-color: var(--desk-line-strong);
+}
+
+/* The crew perches on the composer's top edge. */
+html .desk-perch {
+  position: absolute;
+  right: 28px;
+  bottom: 100%;
+  z-index: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  margin-bottom: -10px;
+  pointer-events: auto;
+}
+.desk-perch [data-critter] {
+  animation: desk-perch-in 700ms var(--desk-out) both;
+}
+.desk-perch [data-critter]:nth-child(2) {
+  animation-delay: 120ms;
+}
+.desk-perch [data-critter]:nth-child(3) {
+  animation-delay: 240ms;
+}
+@keyframes desk-perch-in {
+  from {
+    transform: translateY(60%);
+  }
+}
+html .desk-composer-heading {
+  padding-right: 200px;
+}
+/* The quill writes while a run is starting. */
+.desk-composer-main:has(.desk-composer[aria-busy="true"])
+  .desk-perch
+  [data-critter="quill"]
+  svg {
+  animation: desk-scribble 420ms ease-in-out infinite alternate;
+}
+@keyframes desk-scribble {
+  to {
+    transform: rotate(-8deg) translateY(-2px);
+  }
+}
+
+/* Empty states get a peeking crew member. */
+html .desk-empty {
+  display: grid;
+  justify-items: start;
+}
+html .desk-empty-critter {
+  margin-bottom: 10px;
+}
+html .evidence-desk .desk-empty a {
+  color: var(--ink);
+  text-decoration-color: var(--desk-line-strong);
+  text-underline-offset: 3px;
+}
+
+/* Entrances: one short, staggered rise per page mount. */
+@media (prefers-reduced-motion: no-preference) {
+  html .desk-composer-heading,
+  html .desk-composer-main > .desk-composer,
+  html .desk-templates,
+  html .desk-scope {
+    animation: desk-rise 640ms var(--desk-out) both;
+  }
+  html .desk-composer-main > .desk-composer {
+    animation-delay: 70ms;
+  }
+  html .desk-scope {
+    animation-delay: 140ms;
+  }
+  html .desk-templates {
+    animation-delay: 210ms;
+  }
+}
+@keyframes desk-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .desk-perch [data-critter] {
+    animation: none;
+  }
+}
+html[data-input-modality="keyboard"] .desk-composer-heading,
+html[data-input-modality="keyboard"] .desk-composer-main > .desk-composer,
+html[data-input-modality="keyboard"] .desk-templates,
+html[data-input-modality="keyboard"] .desk-scope {
+  animation: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  html .evidence-desk .new-research:hover,
+  html .evidence-desk .desk-button-primary:hover:not(:disabled) {
+    background: #3a3833;
+  }
+  html .evidence-desk .desk-button-outline:hover:not(:disabled) {
+    background: #fff;
+    box-shadow:
+      var(--desk-raised),
+      0 8px 18px -10px rgb(84 62 38 / 30%);
+  }
+  html .evidence-desk .history-list a:hover,
+  html .desk-library-link:hover {
+    background: rgb(255 255 255 / 65%);
+  }
+  html .evidence-desk .desk-toggle-item:hover:not([data-pressed]) {
+    border-color: transparent;
+    box-shadow: inset 0 0 0 1px #cfc2b3;
+  }
+  html .evidence-desk .desk-templates button:hover strong {
+    color: var(--ink);
+  }
+}
+
+@media (max-width: 1000px) {
+  html .evidence-desk .workspace-body {
+    margin: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  html .desk-composer-heading {
+    padding-right: 0;
+    margin-bottom: 58px;
+  }
+}
+@media (max-width: 760px) {
+  html .desk-perch {
+    right: 18px;
+  }
+  .desk-perch [data-critter]:nth-child(3) {
+    display: none;
+  }
+  html .evidence-desk .desk-composer {
+    padding: 20px;
+  }
+}

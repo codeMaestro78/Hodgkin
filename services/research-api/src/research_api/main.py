@@ -11,12 +11,16 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from research_api.api import router as research_router
 from research_api.auth import identity_transport
 from research_api.checkpointing import CheckpointPool
-from research_api.config import get_settings
+from research_api.comparison_api import router as comparison_router
+from research_api.config import configuration_files, get_settings
 from research_api.db.runtime_security import validate_runtime_role
 from research_api.db.session import engine
 from research_api.dispatcher import dispatch_loop
 from research_api.events.wakeups import event_wakeups
+from research_api.library_api import router as library_router
+from research_api.providers.http_clients import provider_http_transport
 from research_api.runtime_api import router as runtime_router
+from research_api.sharing_exports_api import router as sharing_exports_router
 from research_api.telemetry import dependency_logging, operation_event, request_id
 
 
@@ -74,6 +78,13 @@ class RequestTiming:
             operation_event(
                 "http.request",
                 started=started,
+                outcome=(
+                    "failed"
+                    if status_code >= 500
+                    else "rejected"
+                    if status_code >= 400
+                    else "succeeded"
+                ),
                 statusCode=status_code,
                 firstByteMs=first_byte_ms,
                 route=getattr(scope.get("route"), "path", "unmatched"),
@@ -88,6 +99,23 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         async with AsyncExitStack() as stack:
             await stack.enter_async_context(identity_transport())
             settings = get_settings()
+            await stack.enter_async_context(
+                provider_http_transport(
+                    timeout_seconds=settings.PROVIDER_TIMEOUT_SECONDS,
+                    worker_concurrency=settings.WORKER_CONCURRENCY,
+                )
+            )
+            operation_event(
+                "runtime.configuration",
+                started=monotonic(),
+                envFiles=configuration_files(),
+                modelRoutes=settings.model_routing_snapshot(),
+                modelCredentialsConfigured={
+                    role: settings.model_api_key(settings.model_route(role).provider) is not None
+                    for role in ("planner", "writer", "claim_review")
+                },
+                redisWakeupsEnabled=settings.SSE_REDIS_WAKEUPS_ENABLED,
+            )
             await stack.enter_async_context(
                 event_wakeups.transport(
                     settings.REDIS_URL
@@ -113,6 +141,9 @@ app = FastAPI(title="Research API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(RequestTiming)
 app.include_router(research_router)
 app.include_router(runtime_router)
+app.include_router(comparison_router)
+app.include_router(library_router)
+app.include_router(sharing_exports_router)
 
 
 @app.get("/health", tags=["health"])
@@ -127,14 +158,35 @@ async def readiness() -> dict[str, str]:
     try:
         await validate_runtime_role(engine)
         async with engine.connect() as connection:
+            migration_table_exists = await connection.scalar(
+                text("SELECT to_regclass('public.alembic_version') IS NOT NULL")
+            )
+            migration_ready = bool(
+                migration_table_exists
+                and await connection.scalar(
+                    text(
+                        "SELECT EXISTS (SELECT 1 FROM public.alembic_version "
+                        "WHERE version_num >= '0019')"
+                    )
+                )
+            )
+            if not migration_ready:
+                raise HTTPException(503, "database migrations through 0019 are required")
             ready = await connection.scalar(
                 text(
                     "SELECT to_regclass('public.runtime_jobs') "
-                    "IS NOT NULL AND to_regclass('research_checkpoints.checkpoints') IS NOT NULL"
+                    "IS NOT NULL AND to_regclass('research_checkpoints.checkpoints') IS NOT NULL "
+                    "AND to_regclass('public.projects') IS NOT NULL "
+                    "AND to_regclass('public.library_items') IS NOT NULL "
+                    "AND to_regclass('public.report_shares') IS NOT NULL "
+                    "AND to_regclass('public.report_exports') IS NOT NULL "
+                    "AND EXISTS (SELECT 1 FROM information_schema.columns "
+                    "WHERE table_schema='public' AND table_name='research_runs' "
+                    "AND column_name='model_routing')"
                 )
             )
         if not ready:
-            raise HTTPException(503, "database migration 0007 is required")
+            raise HTTPException(503, "database schema required by this API is incomplete")
     except HTTPException:
         raise
     except Exception as exc:

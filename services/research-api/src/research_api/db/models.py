@@ -14,6 +14,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    LargeBinary,
     Numeric,
     String,
     Text,
@@ -184,8 +185,11 @@ class ResearchRun(Base, TenantScopedMixin, TimestampMixin):
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id"), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
     original_question: Mapped[str] = mapped_column(Text, nullable=False)
+    mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    mode_policy_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
     normalized_question: Mapped[str] = mapped_column(Text, nullable=False)
     report_requirements: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    model_routing: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     active_plan_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     plan_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     thread_id: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
@@ -402,6 +406,8 @@ class Budget(Base, TenantScopedMixin):
     run_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("research_runs.id"), nullable=False)
     max_wall_clock_ms: Mapped[int] = mapped_column(Integer, nullable=False)
     max_search_calls: Mapped[int] = mapped_column(Integer, nullable=False, default=12)
+    max_provider_operations: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_sources: Mapped[int | None] = mapped_column(Integer, nullable=True)
     max_browser_sessions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     max_reflection_rounds: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     max_input_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -574,7 +580,65 @@ class Report(Base, TenantScopedMixin, TimestampMixin):
     markdown: Mapped[str] = mapped_column(Text, nullable=False)
     # Nullable for historical Markdown reports; never infer a retrospective assessment.
     document: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    # Captured before publication; NULL means this legacy report has no snapshot.
+    retrieval_accounting: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    content_hash: Mapped[str | None] = mapped_column(String(64))
+
+
+class ReportShare(Base, TenantScopedMixin):
+    __tablename__ = "report_shares"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id", "user_id"], ["users.tenant_id", "users.id"]),
+        ForeignKeyConstraint(["tenant_id", "report_id"], ["reports.tenant_id", "reports.id"]),
+        UniqueConstraint("token_hash"),
+        CheckConstraint("expires_at > created_at", name="ck_report_share_expiry"),
+        Index("ix_report_shares_owner", "tenant_id", "user_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    report_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    # Only a SHA-256 digest of the high-entropy bearer secret is persisted.
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ReportExport(Base, TenantScopedMixin):
+    __tablename__ = "report_exports"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id", "user_id"], ["users.tenant_id", "users.id"]),
+        ForeignKeyConstraint(["tenant_id", "report_id"], ["reports.tenant_id", "reports.id"]),
+        UniqueConstraint(
+            "tenant_id",
+            "user_id",
+            "report_id",
+            "format",
+            "renderer_version",
+            name="uq_report_exports_owner_report_format_renderer",
+        ),
+        CheckConstraint("format IN ('markdown','bibtex')", name="ck_report_export_format"),
+        CheckConstraint(
+            "size_bytes BETWEEN 0 AND 1048576 AND octet_length(content) = size_bytes",
+            name="ck_report_export_size",
+        ),
+        Index("ix_report_exports_owner", "tenant_id", "user_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    report_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    report_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    format: Mapped[str] = mapped_column(String(16), nullable=False)
+    renderer_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    document_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    artifact_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    content: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class Evaluation(Base, TenantScopedMixin, TimestampMixin):
@@ -593,3 +657,57 @@ class Evaluation(Base, TenantScopedMixin, TimestampMixin):
     benchmark_case_id: Mapped[str] = mapped_column(String(200), nullable=False)
     evaluator_version: Mapped[str] = mapped_column(String(100), nullable=False)
     metrics: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+
+
+class Project(Base, TenantScopedMixin):
+    __tablename__ = "projects"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "user_id", "id", name="uq_project_owner_id"),
+        ForeignKeyConstraint(["tenant_id", "user_id"], ["users.tenant_id", "users.id"]),
+        CheckConstraint(
+            "length(btrim(name)) BETWEEN 1 AND 100 AND name = btrim(name)", name="ck_project_name"
+        ),
+        Index("ix_projects_owner", "tenant_id", "user_id", "id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class LibraryItem(Base, TenantScopedMixin):
+    __tablename__ = "library_items"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id", "user_id"], ["users.tenant_id", "users.id"]),
+        ForeignKeyConstraint(
+            ["tenant_id", "user_id", "project_id"],
+            ["projects.tenant_id", "projects.user_id", "projects.id"],
+        ),
+        ForeignKeyConstraint(["tenant_id", "report_id"], ["reports.tenant_id", "reports.id"]),
+        ForeignKeyConstraint(["tenant_id", "source_id"], ["sources.tenant_id", "sources.id"]),
+        UniqueConstraint("tenant_id", "user_id", "report_id", name="uq_library_report"),
+        UniqueConstraint("tenant_id", "user_id", "source_id", name="uq_library_source"),
+        CheckConstraint("(report_id IS NULL) <> (source_id IS NULL)", name="ck_library_target"),
+        CheckConstraint("length(notes) <= 2000", name="ck_library_notes"),
+        CheckConstraint(
+            "jsonb_typeof(tags) = 'array' AND jsonb_array_length(tags) <= 10 "
+            "AND NOT jsonb_path_exists(tags, '$[*] ? (@.type() != \"string\")') "
+            'AND NOT jsonb_path_exists(tags, \'$[*] ? (@ like_regex "^.{41,}$" flag "s")\')',
+            name="ck_library_tags",
+        ),
+        Index("ix_library_owner_cursor", "tenant_id", "user_id", "id"),
+        Index("ix_library_project", "tenant_id", "user_id", "project_id", "id"),
+        Index("ix_library_report", "tenant_id", "report_id"),
+        Index("ix_library_source", "tenant_id", "source_id"),
+        Index("ix_library_tags", "tags", postgresql_using="gin"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    report_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    source_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    project_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    tags: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
