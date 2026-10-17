@@ -18,6 +18,7 @@ export function CrewEyes() {
     let pointer: { x: number; y: number } | null = null;
     let frame = 0;
     const current = new WeakMap<HTMLElement, { x: number; y: number }>();
+    const lean = new WeakMap<HTMLElement, { x: number; y: number }>();
 
     const tick = () => {
       frame = 0;
@@ -35,10 +36,20 @@ export function CrewEyes() {
         now.x += (target.x - now.x) * 0.2;
         now.y += (target.y - now.y) * 0.2;
         current.set(el, now);
-        if (Math.abs(target.x - now.x) + Math.abs(target.y - now.y) > 0.01)
+        /* The body is heavier than the gaze: it trails with a slower lerp. */
+        const body = lean.get(el) ?? { x: 0, y: 0 };
+        body.x += (target.x - body.x) * 0.075;
+        body.y += (target.y - body.y) * 0.075;
+        lean.set(el, body);
+        if (
+          Math.abs(target.x - now.x) + Math.abs(target.y - now.y) > 0.01 ||
+          Math.abs(target.x - body.x) + Math.abs(target.y - body.y) > 0.004
+        )
           moving = true;
         el.style.setProperty("--lx", (now.x * REACH).toFixed(2));
         el.style.setProperty("--ly", (now.y * REACH).toFixed(2));
+        el.style.setProperty("--px", body.x.toFixed(3));
+        el.style.setProperty("--py", body.y.toFixed(3));
       });
       if (moving) frame = requestAnimationFrame(tick);
     };

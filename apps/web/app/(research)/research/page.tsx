@@ -93,8 +93,12 @@ export default function ResearchPage() {
       controller.abort();
       controller = new AbortController();
       const { signal } = controller;
-      checkingAccount.current = true;
-      setDraftReady(false);
+      // A focus recheck must not blank a ready composer. The POST still binds
+      // to the expected account, while a changed identity resets the draft below.
+      if (!accountId.current) {
+        checkingAccount.current = true;
+        setDraftReady(false);
+      }
       try {
         const response = await fetch("/api/auth/session", {
           cache: "no-store",
@@ -110,6 +114,8 @@ export default function ResearchPage() {
         accountId.current = id;
         if (previousId) {
           // Never carry the previous account's in-memory text into a new scope.
+          checkingAccount.current = true;
+          setDraftReady(false);
           draftRef.current = { ...emptyResearchDraft };
           editedFields.current.clear();
           editedQuestion.current = false;

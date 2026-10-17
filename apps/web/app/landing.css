@@ -22,6 +22,14 @@
   background: var(--lp-paper);
   color: var(--lp-ink);
 }
+/* The landing keeps a clean paper edge: the document scrollbar hides
+   while scrolling itself stays untouched (wheel, trackpad, Lenis). */
+html:has(.lp) {
+  scrollbar-width: none;
+}
+html:has(.lp)::-webkit-scrollbar {
+  display: none;
+}
 .lp ::selection {
   background: #f3d6c6;
 }
@@ -2446,8 +2454,15 @@ html.lenis body {
   font-weight: 500;
 }
 .lp-tour-view {
+  /* scroll-x stays for narrow panels, but no rail paints inside the card;
+     the rise-in animation never opens a transient scrollbar (18px overshoot). */
   overflow-x: auto;
+  overflow-y: clip;
+  scrollbar-width: none;
   animation: lp-tour-in 520ms var(--lp-out) both;
+}
+.lp-tour-view::-webkit-scrollbar {
+  display: none;
 }
 .lp-tour-view:focus-visible {
   outline-offset: -3px;

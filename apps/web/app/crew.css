@@ -2,6 +2,9 @@
 .critter {
   --lx: 0;
   --ly: 0;
+  --px: 0;
+  --py: 0;
+  position: relative;
   display: inline-block;
   width: var(--crit-size);
   line-height: 0;
@@ -12,6 +15,28 @@
   width: 100%;
   height: auto;
   overflow: visible;
+  transform-origin: 50% 96%;
+  /* Cursor lean: the whole character shifts and tips toward the pointer. */
+  translate: calc(var(--px) * 1.3px) calc(var(--py) * 0.9px);
+  rotate: calc(var(--px) * 2.3deg);
+}
+.crit-hopper {
+  display: block;
+  transform-origin: 50% 96%;
+}
+.crit-shadow {
+  position: absolute;
+  left: 19%;
+  bottom: 2%;
+  width: 62%;
+  height: 6.5%;
+  border-radius: 50%;
+  background: radial-gradient(
+    50% 50% at 50% 50%,
+    rgb(37 37 34 / 0.17),
+    transparent 72%
+  );
+  pointer-events: none;
 }
 .crit-pupil {
   transform: translate(calc(var(--lx) * 1px), calc(var(--ly) * 1px));
@@ -28,6 +53,31 @@
 }
 .critter[data-pose="peek"] .crit-legs {
   display: none;
+}
+.critter[data-pose="peek"] .crit-shadow {
+  display: none;
+}
+/* Personality parts: origins in viewBox space, parts start neutral. */
+.crit-flap {
+  transform-box: view-box;
+  transform-origin: 40px 10px;
+}
+.crit-glint {
+  transform-box: view-box;
+  transform-origin: 30px 30px;
+}
+.crit-check {
+  stroke-dasharray: 14 15;
+}
+.crit-spark {
+  transform-box: view-box;
+  transform-origin: 52px 12px;
+  opacity: 0;
+  transform: scale(0.4);
+}
+.crit-plum {
+  transform-box: view-box;
+  transform-origin: 32px 15px;
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -60,15 +110,75 @@
       transform: translateY(-7px) rotate(4deg);
     }
   }
+  /* Idle hop: squash at the feet, hang, land, settle. Never in sync —
+     each kind wins its own cycle length and a different first hop. */
+  .critter-folio {
+    --hop-dur: 10.8s;
+    --hop-wait: 4s;
+  }
+  .critter-lens {
+    --hop-dur: 12.6s;
+    --hop-wait: 4.8s;
+  }
+  .critter-seal {
+    --hop-dur: 11.4s;
+    --hop-wait: 5.4s;
+  }
+  .critter-quill {
+    --hop-dur: 8.6s;
+    --hop-wait: 3.4s;
+  }
+  .crit-hopper {
+    animation: crit-hop var(--hop-dur, 10.8s) linear
+      calc(var(--crit-delay, 0ms) + var(--hop-wait, 4s)) infinite;
+  }
+  /* The shadow stays on the ground while the body is in the air. */
+  .crit-shadow {
+    animation: crit-shadow-hop var(--hop-dur, 10.8s) linear
+        calc(var(--crit-delay, 0ms) + var(--hop-wait, 4s)) infinite,
+      crit-shadow-glow 3.4s cubic-bezier(0.45, 0, 0.55, 1)
+        var(--crit-delay, 0ms) infinite;
+  }
+  /* Personality loops, one per character. */
+  .critter-folio .crit-flap {
+    animation: crit-flap 9.4s ease-in-out calc(var(--crit-delay, 0ms) + 2.2s)
+      infinite;
+  }
+  .critter-lens .crit-glint {
+    animation: crit-glint 7.6s cubic-bezier(0.45, 0, 0.55, 1)
+      calc(var(--crit-delay, 0ms) + 1.6s) infinite;
+  }
+  .critter-seal .crit-check {
+    animation: crit-check 13s cubic-bezier(0.23, 1, 0.32, 1)
+      calc(var(--crit-delay, 0ms) + 6s) infinite;
+  }
+  .critter-seal .crit-spark {
+    animation: crit-spark 13s cubic-bezier(0.23, 1, 0.32, 1)
+      calc(var(--crit-delay, 0ms) + 6s) infinite;
+  }
+  .critter-quill .crit-plum {
+    animation: crit-plum 5.2s ease-in-out calc(var(--crit-delay, 0ms) + 0.9s)
+      infinite;
+  }
 }
 @keyframes crit-blink {
   0%,
-  93%,
+  90.6%,
   100% {
     transform: scaleY(1);
   }
-  95% {
-    transform: scaleY(0.1);
+  92% {
+    transform: scaleY(0.06);
+  }
+  93.5% {
+    transform: scaleY(1);
+  }
+  /* A real blink often comes in a pair: second pass, half closed. */
+  94.8% {
+    transform: scaleY(0.34);
+  }
+  96.2% {
+    transform: scaleY(1);
   }
 }
 @keyframes crit-breathe {
@@ -93,5 +203,138 @@
   72%,
   90% {
     transform: translate(0.4px, 1.6px);
+  }
+}
+
+/* Load order: crouch (feet planted, squash) → rise with stretch →
+   fall under gravity → land squash → rebound → settle. */
+@keyframes crit-hop {
+  0%,
+  8%,
+  100% {
+    transform: scale(1, 1);
+  }
+  1.2% {
+    transform: scale(1.05, 0.92);
+    animation-timing-function: cubic-bezier(0.16, 0.84, 0.3, 1);
+  }
+  3% {
+    transform: translateY(-7px) scale(0.94, 1.06);
+    animation-timing-function: cubic-bezier(0.6, 0, 0.83, 0.3);
+  }
+  4.2% {
+    transform: scale(1.12, 0.87);
+    animation-timing-function: cubic-bezier(0.22, 1.4, 0.36, 1);
+  }
+  5.6% {
+    transform: translateY(-1.6px) scale(0.99, 1.02);
+  }
+  7% {
+    transform: scale(1.02, 0.985);
+  }
+}
+@keyframes crit-shadow-hop {
+  0%,
+  8%,
+  100% {
+    transform: scale(1, 1);
+  }
+  1.2% {
+    transform: scale(1.14, 0.9);
+  }
+  3% {
+    transform: scale(0.68, 0.55);
+  }
+  4.2% {
+    transform: scale(1.18, 0.85);
+  }
+  5.6% {
+    transform: scale(0.9, 0.94);
+  }
+  7% {
+    transform: scale(1.02, 0.98);
+  }
+}
+@keyframes crit-shadow-glow {
+  50% {
+    opacity: 0.82;
+  }
+}
+/* Folio: the dog-ear flutters once, like a page catching air. */
+@keyframes crit-flap {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  36% {
+    transform: rotate(3.4deg);
+  }
+  40.5% {
+    transform: rotate(-1.3deg);
+  }
+  44% {
+    transform: rotate(1.7deg);
+  }
+  48% {
+    transform: rotate(0deg);
+  }
+}
+/* Lens: the glass glint rides around the rim, as if scanning text. */
+@keyframes crit-glint {
+  0%,
+  100% {
+    transform: rotate(-6deg);
+    opacity: 0.75;
+  }
+  50% {
+    transform: rotate(34deg);
+    opacity: 0.95;
+  }
+}
+/* Seal: the check draws itself, holds, fades — re-verified. */
+@keyframes crit-check {
+  0%,
+  58% {
+    stroke-dashoffset: 14;
+    opacity: 0;
+  }
+  68%,
+  88% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  96%,
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+}
+@keyframes crit-spark {
+  0%,
+  66%,
+  82%,
+  100% {
+    opacity: 0;
+    transform: scale(0.4) rotate(0deg);
+  }
+  71% {
+    opacity: 1;
+    transform: scale(1) rotate(26deg);
+  }
+}
+/* Quill: restless — the ink tuft sways almost constantly. */
+@keyframes crit-plum {
+  0%,
+  100% {
+    transform: rotate(-3deg);
+  }
+  30% {
+    transform: rotate(2deg);
+  }
+  55% {
+    transform: rotate(-1.2deg);
+  }
+  78% {
+    transform: rotate(1.8deg);
   }
 }

@@ -59,7 +59,8 @@ function Folio() {
           d="M14 6h26l14 14v34a8 8 0 0 1-8 8H14a8 8 0 0 1-8-8V14a8 8 0 0 1 8-8Z"
           fill="#e5bd6d"
         />
-        <path d="M40 6v8a6 6 0 0 0 6 6h8Z" fill="#f2d9a3" />
+        <path d="M40 6v8a6 6 0 0 0 6 6h8Z" fill="#f2d9a3" className="crit-flap" />
+
         <path
           d="M17 48h18M17 53h11"
           stroke="#c99844"
@@ -95,6 +96,7 @@ function Lens() {
         <circle cx="30" cy="30" r="18.5" fill="#b8d5bf" />
         <path
           d="M17 22a15 15 0 0 1 9-8"
+          className="crit-glint"
           stroke="#fff"
           strokeOpacity=".7"
           strokeWidth="2.6"
@@ -132,11 +134,17 @@ function Seal() {
         <Eyes left={25} right={39} y={30} />
         <path
           d="M27.5 40.5l3.2 3.2 6-6"
+          className="crit-check"
           stroke={INK}
           strokeWidth="2.2"
           strokeLinecap="round"
           strokeLinejoin="round"
           fill="none"
+        />
+        <path
+          d="M52 7.2l1.5 3.9 3.9 1.5-3.9 1.5-1.5 3.9-1.5-3.9-3.9-1.5 3.9-1.5Z"
+          fill="#e5bd6d"
+          className="crit-spark"
         />
       </g>
     </>
@@ -149,13 +157,15 @@ function Quill() {
     <>
       <Legs x={[26, 38]} from={62} to={71} />
       <g className="crit-body">
-        <path d="M24 15 32 1l8 14Z" fill={INK} />
-        <path
-          d="M32 7v6"
-          stroke="#e5bd6d"
-          strokeWidth="1.6"
-          strokeLinecap="round"
-        />
+        <g className="crit-plum">
+          <path d="M24 15 32 1l8 14Z" fill={INK} />
+          <path
+            d="M32 7v6"
+            stroke="#e5bd6d"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+          />
+        </g>
         <rect x="13" y="12" width="38" height="52" rx="19" fill="#d4948a" />
         <path
           d="M19 29a13 13 0 0 1 6-10"
@@ -216,9 +226,12 @@ export function Critter({
         } as CSSProperties
       }
     >
-      <svg viewBox="0 0 64 74" width={size} height={(size * 74) / 64}>
-        <Body />
-      </svg>
+      <span className="crit-hopper">
+        <svg viewBox="0 0 64 74" width={size} height={(size * 74) / 64}>
+          <Body />
+        </svg>
+      </span>
+      <span className="crit-shadow" />
     </span>
   );
 }
