@@ -60,3 +60,112 @@ the eventual 60), sufficient to catch regressions in claim precision and
 citation correctness before the full benchmark is built out — see
 [deployment.md](./deployment.md) and the twelve-week plan referenced
 there.
+
+## Live cross-mode runner
+
+`services/research-api/scripts/live_mode_evaluation.py` runs the real graph
+(configured model + Tavily) for each `evaluation/modes/v1` case and explicit mode,
+and writes `modes-observation-v1` records with `evidence_kind: live_observation`:
+
+```sh
+cd services/research-api
+uv run python scripts/live_mode_evaluation.py --output /path/outside/repo --max-model-usd 3.00
+uv run python scripts/evaluate_modes.py aggregate --input /path/outside/repo/observations.json
+```
+
+- It creates a disposable loopback database, migrates it to head, and drops it on exit.
+  Hosted database URLs are never read. Only provider keys and model routing come from
+  `.env`. Object storage must be the local LocalStack endpoint.
+- Before each run it admits work only if settled model spend plus that mode's worst-case
+  model cost fits `--max-model-usd`. Worst case is the run token ceilings at the
+  configured pricing rate. Tavily credits are recorded per run but not priced.
+- Receipts are appended per run, so a re-run resumes without repeating work or
+  forgetting spend. Use `--cases` and `--modes` for smoke runs.
+- Observations make no quality claims. Dimension states stay `unknown`, and rubric
+  metrics and human scores stay null, until blinded human review adjudicates the draft
+  gold labels.
+
+## Academic retrieval evaluation
+
+The retrieval benchmark is maintained separately from cross-mode report
+evaluation in
+[`services/research-api/evaluation/retrieval/v1`](../services/research-api/evaluation/retrieval/v1/manifest.json).
+It currently contains 20 draft questions with explicit requirements and a
+blinded-adjudication rubric, but no frozen candidate pools or human labels.
+It is therefore not a release benchmark. See the
+[OpenAlex exploratory results](./implementation/openalex-retrieval-evaluation-2026-10-17.md)
+for the 12-question, single-reviewer diagnostic and its limitations. Keep
+OpenAlex disabled until the independent, controlled-pool and end-to-end
+usefulness gates pass.
+
+The offline packet/scorer is available without provider access. Given a frozen
+`retrieval-candidate-pool-v1` artifact containing one shared candidate union and
+each method's rank list, create the reviewer packet and protected private map:
+
+```sh
+cd services/research-api
+uv run python -m research_api.retrieval_review prepare \
+  --pool /secure/eval/pool.json \
+  --cases evaluation/retrieval/v1/cases.jsonl \
+  --packet /secure/eval/reviewer-a.json \
+  --private-map /secure/eval/private-map-a.json \
+  --seed 31
+uv run python -m research_api.retrieval_review prepare \
+  --pool /secure/eval/pool.json \
+  --cases evaluation/retrieval/v1/cases.jsonl \
+  --packet /secure/eval/reviewer-b.json \
+  --private-map /secure/eval/private-map-b.json \
+  --seed 83
+```
+
+Assign exactly one packet to each reviewer. Candidate order is randomized
+separately while blind IDs remain stable across the two packets. Their review
+records must include the packet's `packetSha256` and follow this shape:
+
+```json
+[
+  {
+    "reviewerId": "reviewer-a",
+    "packetSha256": "<packet hash copied from reviewer-a.json>",
+    "cases": [
+      {
+        "caseId": "R01",
+        "labels": [
+          {
+            "blindId": "R01-C<opaque-id>",
+            "relevance": "direct",
+            "reason": "Short evidence-based rationale.",
+            "requirementMatches": {"population": "yes"},
+            "requirementReasons": {"population": "The abstract matches the stated population."},
+            "confidence": "high"
+          }
+        ]
+      }
+    ]
+  }
+]
+```
+
+Repeat a complete label for every candidate in every case. After both reviewers
+complete every candidate and requirement, score the same frozen pool; provide a
+third-reviewer adjudication artifact if any labels disagree:
+
+```sh
+uv run python -m research_api.retrieval_review score \
+  --pool /secure/eval/pool.json \
+  --private-map /secure/eval/private-map-a.json \
+  --packets /secure/eval/reviewer-a.json /secure/eval/reviewer-b.json \
+  --reviewers /secure/eval/reviews.json \
+  --adjudication /secure/eval/adjudication.json \
+  --cutoff 10 \
+  --output /secure/eval/score.json
+```
+
+The tool writes files with mode `0600`, refuses to overwrite them, binds both
+review packets and the private method mapping to the full pool's canonical
+SHA-256, and reports
+candidate-pool recall rather than corpus recall. The reviewer packet intentionally
+omits provider, route, rank, URL, and internal candidate identities; title or
+abstract text can still reveal a publisher. This capability does not itself
+create a frozen pool, provide labels, make a provider request, or establish
+end-to-end answer usefulness.

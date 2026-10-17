@@ -1,7 +1,7 @@
 # Explicit Research Modes and Comprehensive Reports — Implementation Plan
 
-**Status:** Proposed implementation plan; no application behavior is changed by this document.  
-**Prepared:** 2026-10-16  
+**Status:** Partially implemented locally; this remains the forward plan and acceptance contract. See the [implementation status and validation receipt](./research-modes-implementation-status.md) for the current checkout.
+**Plan prepared:** 2026-10-16 · **Current-state review:** 2026-10-17
 **Scope:** Focused, Balanced, and Deep research contracts, planning, evidence coverage, report composition, and quality evaluation.  
 **Primary goal:** Make the three modes perform meaningfully different, server-enforced research strategies and produce reports whose depth follows the evidence—not merely a larger word count.
 
@@ -9,7 +9,7 @@ This plan is grounded in the checked-out code and the existing implementation no
 
 ## 1. Executive decision
 
-Implement explicit, versioned research modes on the existing LangGraph/PostgreSQL runtime. Keep one orchestrator, one durable run lifecycle, and one evidence-verification path. Add a persisted plan-coverage matrix and an independently evaluated report-quality result. Separate source ceilings from provider-operation ceilings. Compose reports only from verified evidence and visibly unresolved coverage.
+Implement explicit, versioned research modes on the existing LangGraph/PostgreSQL runtime. Keep one orchestrator, one existing run lifecycle, and one evidence-verification path. Add a persisted plan-coverage matrix and an independently evaluated report-quality result. Separate source ceilings from provider-operation ceilings. Compose reports only from verified evidence and visibly unresolved coverage.
 
 Do **not** add CrewAI, a second workflow engine, an unconstrained “research until satisfied” loop, or a minimum word-count target. Consider LangGraph-native `Send` fan-out only after a matched benchmark shows that graph-level visibility or recovery is worth replacing the current persisted-subquestion/worker behavior.
 
@@ -19,40 +19,43 @@ The mode contract is not complete until all three properties are true:
 2. The mode changes the planned coverage and bounded effort strategy—not just headings, token ceilings, or UI labels.
 3. Matched evaluation demonstrates the intended quality/effort trade-offs while the existing exact-span and semantic evidence gates remain unchanged.
 
-## 2. Current-state audit (verified in this checkout)
+## 2. Current-state audit (verified 2026-10-17)
 
-### 2.1 What already exists
+This section supersedes the original 2026-10-16 inventory. Implementation is local and uncommitted; it is not proof of hosted schema, deployment, or product behavior.
 
-- The research composer in [`apps/web/app/(research)/research/page.tsx`](../../apps/web/app/%28research%29/research/page.tsx) offers Focused, Balanced, and Deep descriptions, with current UI ceilings of 6, 12, and 20 calls and 3, 5, and 10 minutes.
-- [`docs/implementation/mode-specific-research-reports.md`](./mode-specific-research-reports.md) documents mode-shaped report sections, evidence/context/output ceilings, candidate claim ceilings, passage selection, and evidence-only report composition. This work must be retained and extended, not rebuilt.
-- [`docs/implementation/phase1-quality-foundations.md`](./phase1-quality-foundations.md) documents structured report document v1, run requirements, conservative quality labels, and immutable historical behavior.
-- The request already carries `reportRequirements`; requirements are persisted in the run brief and included in planner/writer inputs.
-- `ReportDocumentV1` has mode, requirements, sections, associations, and question-coverage/provenance data. Its current “addressed” semantics mean evidence-linked, not proof that the requirement is satisfied.
-- Claims still pass exact-span and semantic support checks before publication. A report may be completed as an execution while answer quality is partial or insufficient.
-- Research execution already uses LangGraph with persisted plans/subquestions, durable job/checkpoint infrastructure, PostgreSQL run state, bounded provider calls, and tenant-scoped persistence.
-- The graph contains planner, parallel research work, reflector/repair path, verifier, and synthesizer. Current workers are implemented with persisted subquestions and internal parallel task execution.
-- Existing source-count, output-token, candidate-finding, active-time, cost, and provider-call limits are ceilings. They are not guarantees of a particular source count, finding count, report length, or answer completeness.
+| Area | Current checkout | Remaining gate |
+|---|---|---|
+| Explicit mode and budgets | Focused/Balanced/Deep, server-owned policy, separate source and operation ceilings, tighten-only overrides, and mode-preserving retry/follow-up are implemented locally. | Hosted migration/deployment not verified; rerun full gates on the release commit. |
+| Planning and coverage | Versioned coverage dimensions, criteria, requirement routing, edit validation, and persisted criterion assessments are implemented locally. | Assessments describe the verified ledger, not literature-wide completeness; `answered` remains unavailable. |
+| Source identity | Observed DOI/content/publisher relationships are persisted with provenance and tenant-scoped keys, and exposed only when both endpoints are cited by the report. Unknown class/independence stays unknown. | Academic metadata adapters and source-lineage classification remain future work; observed edges do not prove independence. |
+| Report contract | Immutable report v3 adds scoped provenance and potential conflict records; immutable report v4 adds an evidence-verified narrative projection. v1/v2/v3 readers remain intact. Conflict nominations require verified claims linked to reviewed criteria and remain unresolved. | Disposable migration/bootstrap and report readers are validated locally; hosted migration/deployment are not. V3/V4 do not adjudicate contradictions or certify completeness. |
+| Report composition | Graph `research-v9-evidence-narrative` adds a mode-specific narrative pass (Phase 4): the model orders verified findings into answer/dimension/synthesis/trade-off/implication blocks and may propose new explanatory claims, which publish only after the existing exact-span and fully supportive semantic gate. Rendered text is exact claim text only; there is no free connective prose. | Narrative depth is bounded by verified evidence and remaining time; readability and Deep-mode usefulness are unmeasured until Phase 6. |
+| Repair | Bounded one-round repair is implemented locally for eligible Balanced/Deep runs, with base-report fallback and tested admission/cancellation/replay behavior. | Live quality/cost/latency and broad browser acceptance remain open; see the status and repair design documents. |
+| Evaluation | A 20-case fixture, rubric, schema, and 60 synthetic observations support offline harness checks. | No live matched 20 × 3 evaluation or blinded human adjudication; Phase 6 remains blocked. |
+| Persistence and rollout | Repository migration head is `0019`; disposable PostgreSQL validation through `0018` exercised report snapshots, and `0019` reapplies brief/budget immutability guards on databases that had already run the older `0013`. | Migrations `0016`–`0019` are checkout-only here. Shared local DB status was last recorded at `0015`; target identity, backups, and deployed graph versions remain unverified. Do not run the current app against a database below `0018`; apply `0019` before relying on the strengthened guards. |
 
-### 2.2 Confirmed contract/behavior gaps
+The exact validated local commands and receipts are in the [status document](./research-modes-implementation-status.md). Its synthetic benchmark is not live quality or latency evidence.
+
+### 2.1 Original product semantics retained
+
+The mode descriptions and product constraints below remain intended behavior, not evidence that a quality difference has been demonstrated. Budgets are ceilings, not promises of source counts, finding counts, report length, or completeness.
+
+### 2.2 Remaining contract/behavior gaps
 
 | Area | Current behavior | Required change |
 |---|---|---|
-| Mode request | Composer sends `budgetOverrides.maxSearchCalls` but does not send the selected mode. `CreateResearchRunRequestSchema` has no mode field. | Submit an explicit mode. Resolve policy version and permitted ceilings on the server. |
-| Mode identity | `reports.report_policy(calls)` infers Focused/Balanced/Deep from call thresholds. | Mode identity must remain explicit even when a user tightens a Deep budget. Keep a separate legacy resolver for old clients/runs. |
-| Budget semantics | `max_search_calls` is used as a provider-operation budget and also as the source ceiling. Search and extraction both consume operations, so “sources” and calls are not equivalent. | Separate provider operations, unique source count, time, model token/cost, and repair budgets. Never increase a mode ceiling based on client input. |
-| Plan representation | Planner output has flat questions, rationales, success criteria, and desired source classes. | Persist plan dimensions and explicit mappings from user requirements to planned subquestions and evidence. |
-| Source classes | Planner emits `source_classes`, while ingestion currently records `source_class="unknown"`. | Define a trustworthy classification contract and consume it in planning/evaluation; unknown remains a valid honest value. |
-| Coverage | Current report associations describe provenance/evidence links, not independent requirement satisfaction. No explicit pre-search coverage matrix is enforced. | Persist per-dimension states, evidence/claim links, and assessment basis. Do not call a dimension covered merely because it has a linked source. |
-| Reflection | Current runtime reflector checks for failed subquestions and available budget; repair chooses the first failed question. The older `docs/reflection.md` describes a materially richer gap/marginal-gain reflector than this runtime. | Reconcile docs and code, then implement bounded, evidence-driven repair from uncovered dimensions or material contradictions. |
-| Report composition | Current mode report work adds structured sections but report prose is constrained by verified findings. | Improve synthesis and comparison completeness without admitting unverified facts or padding empty sections. |
-| Evaluation | [`docs/evaluation.md`](../evaluation.md) describes broad quality metrics and a 60-question benchmark, but that is not evidence the complete benchmark has run. | Build and execute a reproducible cross-mode benchmark before making quality/depth claims. |
-| Product claims | Pricing/UI copy currently makes mode and export/usage claims that must be compared with actual server entitlements. | Treat marketing/plan enforcement as a separate release gate; do not promise unsupported mode access, quotas, or exports. |
+| Report-level provenance | Implemented locally (Phase 3): report v3+ exposes observed relationships scoped to cited report sources; independence remains unknown. | Academic lineage classification remains future work; observed edges never upgrade independence. |
+| Conflicts | Implemented locally (Phase 3): criterion review may nominate potential conflicts among verified claims; report v3+ publishes them as unresolved with both sides. | Adjudication is not implemented; conflicts are never presented as confirmed or resolved. |
+| Narrative depth | Implemented locally (Phase 4): report v4 persists ordered narrative blocks whose every sentence references a published claim and its citations; new explanatory claims pass the existing gate. | Human readability and cross-mode usefulness are unproven until Phase 6. No word-count target. |
+| Adaptive repair | One bounded round is implemented locally for eligible Balanced/Deep runs without plan approval; Focused, approval-required, and older jobs do not repair. The base report survives a no-gain round. | Validate live quality/cost/latency before wider release; keep concurrent admission, cancellation, and replay gates green. |
+| Evaluation | Fixture/rubric and synthetic observations exist, but draft labels are not human gold and measurements are null. | Keep the live 20-question × 3-mode benchmark as a separately authorized, blinded, pre-registered release gate. |
+| Product claims | Report depth, Deep superiority, independence, latency, and cost outcomes have not been established. | Do not promise these outcomes until Phase 6 evidence and entitlement checks pass. |
 
-### 2.3 Documentation drift to resolve first
+### 2.3 Documentation and compatibility rules
 
-The two existing implementation docs contain different graph-version rollout descriptions (`research-v3` versus `research-v4`), while current code has a later provider-specific graph version string. `docs/reflection.md` also describes inputs, decisions, delta sizes, and a default round limit that do not match the inspected runtime path. Before implementation, inspect the actual graph-version constants, migrations, running deployment version, and worker compatibility rules; update documentation to reflect observed behavior. Do not edit stored graph versions or reinterpret historical runs to make the prose consistent.
+New explicit-mode jobs use v13 criterion-budget graphs with repair disabled by default. Setting `BOUNDED_GAP_REPAIR_ENABLED=true` pins new jobs to v14 repair-capable graphs. Existing explicit v7–v12 jobs retain their pinned graph semantics, including whether repair was available; legacy v3/v4/v5 behavior remains compatibility-sensitive. Repository migration head `0019` is not proof of a hosted revision. Before rollout, inspect the target database and deployed worker compatibility independently. Never edit stored graph versions or reinterpret historical runs to make documentation consistent.
 
-Validation counts in prior documents are dated receipts, not a current test result. Re-run the applicable checks for each implementation phase.
+Validation counts in the status document are dated local receipts, not a current test result. Re-run all applicable checks on the exact release commit.
 
 ## 3. Product semantics
 
@@ -79,15 +82,17 @@ Deep is not an automatic systematic review, exhaustive literature search, PRISMA
 
 ## 4. Target architecture and data contracts
 
+The following sections define acceptance rules for the target system. Several are implemented locally; consult Section 2 and the linked status receipt before treating a requirement as outstanding or complete. They are not evidence of hosted rollout.
+
 ### 4.1 Request contract and server-owned policy
 
-Add `mode: "focused" | "balanced" | "deep"` to the create-run request in the TypeScript contract and generated Python/API models. New web clients always send it. For compatibility, old clients may omit it for a bounded deprecation window; the server resolves those requests through a clearly named `legacy-inferred` policy and records that fact. Do not silently pretend an old run explicitly selected a mode.
+The local implementation adds `mode: "focused" | "balanced" | "deep"` to the create-run request in the TypeScript contract and generated Python/API models. New web clients send it. For compatibility, old clients may omit it for a bounded deprecation window; the server resolves those requests through a clearly named `legacy-inferred` policy and records that fact. Do not silently pretend an old run explicitly selected a mode. Retain the rules below as contract acceptance criteria.
 
 The client must **not** select `modePolicyVersion` or specify server-owned repair/source-class/corroboration policy. The server resolves a policy version (e.g. `research-mode-policy-v1`) at admission and persists an immutable snapshot with the run. This avoids a client selecting a weaker/older policy while still making historical behavior reproducible.
 
 #### Explicit mode versus the fast-explainer shortcut
 
-The current composer recognizes short evergreen “What is/Who is/Define/Explain” prompts and forces a two-operation fast-explainer budget, regardless of the selected depth. The UI discloses that behavior, but a user can still select Deep and receive a Focused-sized run whose report policy is inferred from the small budget. For new explicit-mode requests, **the selected mode wins**: Deep must not be silently routed through the fast-explainer policy. If a compact fast answer remains desirable, expose it as a distinct, explicit choice (or preserve it only for legacy requests) and show its effective scope before submission. Test Deep + an evergreen short question end-to-end, including stored mode, plan, report metadata, and UI labels.
+The earlier implementation silently reduced some short evergreen questions to a two-operation fast-explainer budget. The current local explicit-mode contract preserves the selected mode, including Deep, and the status receipt records the relevant regression coverage. Treat any compact fast-answer path as a separate explicit product choice (or legacy-only behavior); never infer a smaller mode from question wording or budget. Re-run the Deep + evergreen end-to-end case on the release commit, checking stored mode, plan, report metadata, and UI labels.
 
 Recommended request shape (illustrative; generated contracts remain authoritative):
 
@@ -119,7 +124,7 @@ Rules:
 
 Mode and policy must be present in create responses/run projections and preserved through every derived-run path, not just initial submission. Update the run read projection in `services/research-api/src/research_api/api.py`, shared projection contracts, and the web run-status/report types. A retry inherits the original mode, policy version, report requirements, and effective limits unless the user explicitly requests a new mode under a new idempotency identity. A follow-up defaults to the parent run’s mode/policy and records that parent relationship; changing mode must be explicit and reflected in the request fingerprint. The retry action and deadline display in `apps/web/app/(research)/research/[runId]/page.tsx`, `apps/web/lib/run-status.ts`, and follow-up client/API paths must use persisted mode/policy—not infer them again from `maxSearchCalls`.
 
-The UI’s saved composer draft currently stores capitalized values (`Focused`, `Balanced`, `Deep`) under draft schema v1. If the API-facing contract changes to lowercase values, add a versioned draft parser/migration that reads existing v1 drafts and converts them safely. Do not discard a valid user draft because of an enum casing migration.
+The UI’s saved composer draft previously stored capitalized values (`Focused`, `Balanced`, `Deep`) under draft schema v1. The local implementation includes a compatibility migration; retain this acceptance case and verify it on the release commit so existing drafts are not discarded by the lowercase API enum.
 
 ### 4.2 Budget model
 
@@ -148,7 +153,7 @@ report document/schema version expected by this run
 planner/report prompt or graph protocol version already supported by the runtime
 ```
 
-The checked-out `ResearchRun`, `Budget`, and `UsageLedger` models do not currently persist explicit mode/policy or separate provider-operation/source limits and usage. Therefore an **additive database migration is required**, not optional, for this contract. The repository migration head is `0012` as of this plan review; verify the intended target database’s revision independently before any migration. Prefer typed run columns for mode/policy version and explicit Budget/UsageLedger fields for independently enforced units. Keep the current budget row as the source of truth; do not duplicate enforcement values in an opaque brief. Store only the remaining bounded immutable plan/policy details in the run brief or versioned plan artifact.
+The local schema now persists explicit mode/policy and independent provider-operation/source limits through additive migrations `0013`–`0015` (report v3/v4 acceptance is added by `0016`/`0017`; immutable retrieval-accounting snapshots by `0018`; forward brief/budget guards by `0019`); the checked-out Alembic head is `0019`. These migrations are not thereby applied to Supabase or any deployment. Keep Budget/UsageLedger authoritative for admission/accounting, do not duplicate ceilings in an opaque brief, and verify the exact target revision before hosted rollout.
 
 Old runs retain their original interpretation and report bytes. No backfill may claim a historical run selected a mode it never recorded. If a legacy display label is derived from the old budget, mark it as inferred/legacy.
 
@@ -169,9 +174,9 @@ Do not use keyword overlap as proof of coverage. Do not let the writer self-cert
 
 ### 4.5 Report document evolution
 
-Keep report document v1 and all existing published versions readable and immutable. If adding plan dimensions, assessed coverage, source relationships, disagreements, or report requirements outcome changes, define a versioned v2 contract rather than changing v1 semantics in place.
+Keep report document v1 and every published version readable and immutable. Local report v2 currently carries assessed dimensions, criterion-backed requirement outcomes, and claim-linked comparisons. If v2 artifacts have been persisted in any target environment, do not add conflict or relationship fields by changing v2 in place; introduce the next report version (currently expected to be v3) and retain v1/v2 readers. Confirm persisted versions before choosing the version number.
 
-V2 should contain stable IDs and explicit references, not display indices alone:
+The next report version (v3 if v2 has been persisted) should contain stable IDs and explicit references, not display indices alone:
 
 - run/mode/policy/report version provenance;
 - original question and requirement outcomes: `established`, `partially_established`, `not_established`, `not_assessed` (with reasons and supporting claim IDs);
@@ -185,6 +190,14 @@ V2 should contain stable IDs and explicit references, not display indices alone:
 - answer-quality status kept separate from execution `completed`.
 
 No report sentence should claim “comprehensive,” “answered,” “independent,” “current,” or “systematic” unless a specific versioned check supports that label. `answered` remains unavailable until a separate, tested acceptance policy is implemented. “No unresolved gaps” means none were recorded, not that completeness is proven.
+
+#### Required report-level source relationships and conflict records
+
+Persisted `same_content`, `same_work`, and `same_publisher` observations are provenance edges, not independence decisions. The report version must link edges to its stable source IDs and retain the edge kind, observed basis, and categorical confidence. Keep `sourceIndependence.status = unknown` until a separately validated lineage method supports a stronger result; never infer independence from different URLs, domains, publishers, or DOI values alone. Missing metadata remains explicitly unknown.
+
+Conflict records must be anchored to at least two already verified claim IDs and their citation/source references. Record the affected dimension/criteria, whether the disagreement remains unresolved, the assessment basis/version, and a concise non-factual status reason. A model may nominate a conflict for review; nomination alone is not a confirmed conflict. Do not delete either supported side to make the report appear consistent, and do not generate a resolution not present in the evidence. If there are no assessed conflict records, say none were recorded rather than “no conflicts found.”
+
+Acceptance checks: dangling/cross-run source or claim IDs reject publication; relationship bases are preserved byte-for-byte in the immutable document; unresolved conflict sides both remain visible; unassessed conflict status cannot become resolved; v1/v2 readers remain unchanged; tenant authorization and report-version pinning apply to every referenced record.
 
 ## 5. Research execution behavior by mode
 
@@ -206,23 +219,15 @@ Dispatch planned subquestions using current durable task/worker records and exis
 
 For Balanced/Deep, try to cover requested source classes and obtain corroboration where useful/available. Failure to find a class is an explicit coverage limitation, not a reason to fabricate sources or classify unknown sources based on domain guesswork. Source-independence relationships are represented as `unknown` until supported by metadata or validated relationships.
 
-### 5.3 Adaptive gap repair
+### 5.3 Bounded repair (implemented locally; live evaluation pending)
 
-First reconcile `docs/reflection.md`, graph routing, defaults, `RunBudgetDefaults`, and recovery behavior. Then replace “repair the first failed subquestion” with a bounded repair decision derived from:
+Bounded gap repair is implemented for new explicit Balanced and Deep jobs that do not require plan approval, only when the job is pinned to the opt-in v14 graph. New explicit jobs use v13 and do not repair by default. Previously pinned v10–v12 jobs retain their original graph semantics; Focused and approval-required jobs do not repair. Repair runs at most one delta round; planning reserves its allowance, and admission rechecks operation, source, time, token, and cost budgets. Delta claims pass the same exact-span and semantic evidence gate; the base assessment remains the fallback, and uncertain paid calls are not blindly replayed. Concurrent admission, cancellation, replay, fallback, and legacy-graph behavior have local integration coverage.
 
-- planned dimensions and required criteria;
-- verified claim/evidence links and exact citation checks;
-- known contradictions and unresolved material gaps;
-- remaining operation/source/time/token/cost budget;
-- prior repair attempts and their measured yield.
-
-The model may propose the next gap/query, but deterministic policy chooses whether and how much work to admit. Bound both total repair tasks and repair operations; do not rely on an LLM estimate of marginal gain as the only stop condition. Stop if no eligible uncovered dimension exists, the repair reserve is exhausted, or the additional task cannot fit remaining budgets. Persist the decision and inputs needed to explain it.
-
-Initial candidate limits for evaluation only (not final user promises): Focused 0–1 repair tasks, Balanced 1–2, Deep 1–4. Measure useful verified coverage gained per added provider/model cost before adopting these. Do not call the number “rounds” unless it corresponds to an actual full graph iteration; task and round units must be distinct in API, logs, and UI.
+This is a local implementation status, not evidence that repair improves answer quality or is safe/fast enough for production. Live latency, cost, and quality remain unmeasured; broader browser/mobile/accessibility validation also remains open. Keep automatic repair off in production until the separately authorized evaluation passes. See the [bounded repair design](./bounded-gap-repair-design.md) and [implementation status](./research-modes-implementation-status.md) for mechanics and validation receipts.
 
 ### 5.4 Composition and report depth
 
-The synthesizer turns the verified claim ledger and assessed coverage into a coherent report. It may group, compare, prioritize, and explain relationships only when every factual statement is supported by linked verified findings and a deterministic alignment check confirms claim/citation integrity. New connective reasoning must be separately checked; a simple sentence reorder is not enough for a coherent comprehensive report, and free-form unchecked narrative is not acceptable.
+The report layer turns the verified claim ledger, assessed coverage, source relationships, and reviewed conflicts into a coherent report. It may group, compare, prioritize, and explain relationships only when every factual statement is supported by linked verified findings and a deterministic alignment check confirms claim/citation integrity. A simple sentence reorder is not enough for a useful report, and free-form unchecked narrative is not acceptable. The evidence-verified narrative protocol and its tests are specified in Phase 4 below; no minimum word count is a quality gate.
 
 Report acceptance is completeness of supported dimensions and usefulness, not length. If evidence is thin, return a compact partial/insufficient-evidence report with clear gaps. Do not render empty headings or repeat generic limitation text merely to resemble a long report.
 
@@ -236,16 +241,16 @@ Tables are generated only when there are at least two comparable alternatives an
 
 ## 6. Implementation order and file-level work
 
-### Phase 0 — Baseline and consistency (no behavior change)
+### Phase 0 — Baseline and consistency (partially complete; no new behavior)
 
 1. Confirm git root/status; preserve unrelated user changes.
-2. Pin the checked-out migration head (`0012` at review time) and reconcile graph compatibility: current code accepts `research-v4` and `research-v5-serper`, plus the documented empty-requirements `research-v3` compatibility case; unknown versions fail closed. The graph builder also contains a literal `research-v5-serper` check. Reconcile these with `mode-specific-research-reports.md`, `phase1-quality-foundations.md`, `durable-runtime.md`, and worker compatibility tests. Verify the actual deployment/database separately; repo head is not proof of hosted state.
-3. Use provider-receipt replay/frozen fixtures for deterministic regression baselines; fixed seeds do not make live search/model results deterministic. Keep live-provider latency/quality measurements as a separate, explicitly approved and budgeted experiment. Record a versioned baseline artifact with effective limits, plan dimensions, operations, sources, verified findings, answer quality, stage latency, and estimated/settled cost.
-4. Create a versioned benchmark fixture and rubric before collecting labels. Proposed location: `services/research-api/evaluation/modes/v1/` with `cases.jsonl`, `rubric.md`, and privacy/licensing-reviewed replay fixtures. Start with 20 questions spanning comparison, factual explanation, current information, academic evidence, conflicting evidence, multi-requirement, and insufficient-evidence cases. Record a named evaluation owner, label required dimensions and answerability, specify how reference evidence is selected, and adjudicate disagreements with a second reviewer. Expand toward the 60-case benchmark in `docs/evaluation.md` after the starter set is usable; do not treat “20 cases” as a completed benchmark until those artifacts and labels exist.
+2. Pin the checked-out migration head (`0019` in this checkout) and graph compatibility (new explicit jobs use v13 by default; v14 repair requires explicit opt-in; pinned v7–v12 explicit jobs and legacy v3/v4/v5 retain their respective semantics). Verify target database and deployed worker versions separately; repository state is not proof of hosted state.
+3. A versioned 20-case fixture, rubric, schema, and authored synthetic receipts now exist under `services/research-api/evaluation/modes/v1/`. They provide offline harness/reproducibility checks only. They are not provider-receipt replay, application execution, human labels, or a measured quality/latency/cost baseline.
+4. Preserve live-provider measurements as a separate, explicitly approved and budgeted experiment. Before a quality comparison, name the evaluation owner, adjudicate reference dimensions/answerability, approve evidence privacy/licensing, freeze snapshots and thresholds, and record receipt hashes, mode limits, coverage, quality, latency, and settled cost.
 
-**Exit gate:** a deterministic replay baseline and graph-compatibility matrix are reproducible; no budget/evidence behavior changed. The phase artifact includes the fixture/rubric version, model/prompt/schema/graph versions, receipt hashes, and per-mode baseline summary. Suggested checks from `services/research-api/`: `uv run alembic heads` (expect `0012` in this checkout; independently inspect the target database), `uv run pytest tests/integration/test_phase1_replay.py tests/integration/test_durable_runtime.py tests/integration/test_discovery_receipts.py`, and from the repository root `pnpm --filter @research/contracts generate` followed by `pnpm --filter @research/contracts check:generated`; regenerate Pydantic models with `services/research-api/scripts/generate-pydantic.sh CreateResearchRunRequestSchema` and inspect the resulting diff. Live-provider results are explicitly marked nondeterministic and are not required for this gate.
+**Exit gate:** graph/migration compatibility checks are reproducible and the offline harness verifies its fixtures and hashes. The stronger measured baseline remains open until there are real, fixed-snapshot observations; synthetic baseline output cannot satisfy it. Re-run all checks on the final implementation commit. Inspect any target DB independently before migration. Live-provider work remains outside this documentation update.
 
-### Phase 1 — Explicit mode and independent budget semantics
+### Phase 1 — Explicit mode and independent budget semantics (implemented locally; release gates remain)
 
 Likely files (verify generated-code workflow before editing):
 
@@ -256,7 +261,7 @@ Likely files (verify generated-code workflow before editing):
 - `packages/contracts/src/research.ts`, `packages/contracts/schema/CreateResearchRunRequestSchema.json`, `packages/contracts/schema/ResearchRunProjectionSchema.json`, fixtures, and `packages/contracts/schema/manifest.json` — add request/response enums and compatibility rules.
 - Generation/check chain: update canonical Zod contracts; run `packages/contracts/scripts/generate-json-schema.ts` (including manifest); run `packages/contracts/scripts/check-generated.ts`; update the explicit mapping in `services/research-api/scripts/generate-pydantic.sh`; regenerate `create_research_run_request.py` and projection models; verify generated diffs are clean and schemas parse. Never hand-edit generated output only.
 - `services/research-api/src/research_api/api.py` — resolve mode policy, enforce only-tighten overrides, serialize mode/policy/source/operation totals in run reads, and carry the snapshot through retry/follow-up creation.
-- `services/research-api/src/research_api/db/models.py`, `repositories/runs.py`, and a **required additive Alembic migration after verified head `0012`** — persist mode/policy and separate source ceilings from provider operations/usage. Keep Budget/UsageLedger authoritative for admission/accounting.
+- `services/research-api/src/research_api/db/models.py`, `repositories/runs.py`, and the additive Alembic migrations — this contract is implemented locally by `0013`–`0015`; any future schema change must branch from the then-current verified head. Keep Budget/UsageLedger authoritative for admission/accounting.
 - `apps/web/lib/run-status.ts`, `apps/web/app/(research)/research/[runId]/page.tsx`, and follow-up client/UI paths — render persisted mode and use it for retry/deadline behavior; do not infer mode from old call-count thresholds for new runs.
 - `services/research-api/src/research_api/research_limits.py` and budget schemas — introduce explicit units and legacy translation; keep old fields until all clients/workers are migrated.
 
@@ -271,7 +276,7 @@ Likely files (verify generated-code workflow before editing):
 - Existing capitalized draft values restore correctly after enum migration; the BFF forwards mode unchanged; source and provider-operation counts are distinct in payload, methodology, and UI.
 - Contract generation is reproducible: Zod → JSON Schema + manifest → generated Pydantic has no uncommitted generated diff after the check pass.
 
-### Phase 2 — Persisted coverage plan and truthful source metadata
+### Phase 2 — Persisted coverage plan and truthful source metadata (implemented locally; report projection completed in Phase 3)
 
 Likely files:
 
@@ -284,33 +289,50 @@ Likely files:
 
 **Exit gate:** every planned requirement/dimension has persisted identity and state; evidence links are provenance only until the assessment gate; cross-tenant reads/writes are denied; source-class unknown is never silently upgraded.
 
-### Phase 3 — Gap-aware bounded repair and resilient partial execution
+### Phase 3 — Report-level source provenance and conflicts (implemented locally)
+
+Implemented locally as report v3 on graph v8 with migration `0016`; see the [status document](./research-modes-implementation-status.md) for receipts. The original scope is retained below for audit.
 
 Likely files:
 
-- `services/research-api/src/research_api/graph/builder.py` — inspect and modify reflector, routing, delta planner, and task persistence; repair uncovered dimensions/contradictions, not just failed tasks.
-- `services/research-api/src/research_api/repositories/*`, budget/accounting modules, graph job/version handling — reserve repair spend atomically; persist decision/attempt result; safely resume without duplicating uncertain paid calls.
-- `services/research-api/src/research_api/db/models.py` and migration only if existing plan/task records cannot store typed data safely.
-- `docs/reflection.md`, `docs/agents.md`, `docs/research-workflow.md`, `docs/evaluation.md` — update only after implementation behavior and tested limits are established.
-- unit, PostgreSQL integration, graph replay, cancellation, and provider-failure injection tests.
+- `services/research-api/src/research_api/coverage.py`, `criterion_review.py`, and `graph/builder.py` — nominate possible disagreements only among verified findings, validate claim/criterion/dimension references, and preserve unresolved/unknown states. Avoid classifying a conflict from opposite sentiment alone.
+- `services/research-api/src/research_api/db/source_relationships.py`, `repositories/source_relationships.py`, and assessment persistence — load relationships only within the report’s tenant/run/source set; preserve first-observed basis and stable IDs.
+- `services/research-api/src/research_api/report_document_v2.py` and `packages/contracts/src/report.ts` — add report-level conflict and relationship projection in a new immutable report schema version if any v2 has been published/persisted in the target. Keep independence unknown unless a versioned, evidence-backed method supports a stronger status.
+- `packages/contracts` generated schemas/Pydantic, `apps/web/lib/report-document.ts`, report UI, Markdown/export/share/comparison readers — retain old-version rendering and expose lineage/conflict evidence links without making unsupported claims.
+- tests for dangling IDs, cross-run/tenant references, replay, source deletion/retention, conflicting supported claims, unknown metadata, unresolved disagreement, and historical v1/v2 reads.
 
-**Exit gate:** kill/restart between repair decision, reservation, dispatch, result persistence, and graph checkpoint; prove no duplicate uncertain charge/operation; cancellation and approval remain correct; partial successful evidence survives worker failure.
+**Exit gate:** every relationship/conflict row is version-bound and references only authorized report sources and verified claims; both sides of material unresolved disagreement remain visible; unknown is not upgraded; old report versions remain unchanged; readers show the assessment basis and underlying evidence.
 
-### Phase 4 — Structured report v2 and mode-specific synthesis
+### Phase 4 — Evidence-verified narrative composition (implemented locally)
+
+Implemented locally as report v4 on graph v9 with migration `0017`; migration `0018` adds a separate immutable retrieval-accounting snapshot without changing the v4 document contract. See the [status document](./research-modes-implementation-status.md) for the protocol and receipts. The original scope is retained below for audit. Before Phase 4, the composer copied exact verified findings into generic sections. Add enough evidence-grounded explanation to make reports useful while preserving the claim ledger as the only factual publication authority.
 
 Likely files:
 
-- `services/research-api/src/research_api/report_document.py` and new generated `report_document_v2` contract — immutable report v2 with dimension assessment, claim-backed requirements, conflict and source relationship data.
-- `services/research-api/src/research_api/reports.py` and synthesis node in `graph/builder.py` — coherent mode-specific composition from admitted claims, coverage states, and quality outcomes.
-- report repository/publication transaction, API serializers, export/share/comparison consumers — preserve exact version selection and v1 reads; publish claims, citations, document, and Markdown atomically.
-- `packages/contracts/src/*`, schema fixtures/generators, web report types and report UI components — render proper mode-specific report hierarchy and explicit completeness states.
-- tests for empty, partial, conflicting, overlong, unsupported prose, missing table cells, and citations.
+- `services/research-api/src/research_api/graph/builder.py` and `grounding.py` — generate bounded candidate factual sentences/paragraph blocks from preserved source passages and the existing verified ledger. Each new factual proposition must become a claim with exact source spans, semantic review, and stable citations through the existing gate; do not treat a prose-level alignment heuristic as proof of support.
+- `services/research-api/src/research_api/report_document_v2.py` or the next immutable version and `mode_composer.py` — persist ordered narrative blocks with claim/citation IDs, covered dimension, section role, and explicit supported transitions. Reject every factual sentence without accepted claim references.
+- `model_budget.py`, assessment manifest/repositories, and publication transaction — reserve/account for added model work using existing ledger rules; pin inputs before dispatch; replay only validated receipts; keep uncertain calls recovery-needed rather than redispatching blindly.
+- contracts, Pydantic generation, report API/export/share/comparison readers, and `apps/web/app/components/report-coverage.tsx` — render the richer report and its citations while keeping legacy reports intact.
+- tests for partial/empty evidence, contradictions, table cells, generated prose with unsupported additions, citations, replay after crash, output bounds, reduced/human readability review, and all three mode structures.
 
-**Exit gate:** every factual report sentence maps to verified claim/citation IDs; tables do not invent values; v1 documents render byte-for-byte/semantically unchanged; empty evidence never gets a fake summary; user requirements show established/partial/not-established/unknown with a basis.
+**Exit gate:** every factual sentence maps to one or more fully verified claim/citation IDs; unsupported connective facts cannot publish; mode differences change report organization and evidence detail rather than only headings; no word-count target overrides evidence; failed/empty runs remain concise and honest; added model cost and latency are visible and accounted.
 
-### Phase 5 — Cross-mode evaluation, then product claims
+### Phase 5 — Design and implement bounded repair
 
-Use at least 20 fixed benchmark questions × 3 modes (60 evaluated outputs) for the first gate; expand toward the 60-question repository ambition after process is stable. Use fixed model/provider/prompt/schema snapshots and record all deviations. Benchmark outputs may involve paid providers; schedule them only with explicit approval and provider spend caps.
+This phase is implemented locally after Phases 3 and 4, as documented in [bounded-gap-repair-design.md](./bounded-gap-repair-design.md). It admits at most one bounded round for eligible Balanced/Deep runs without approval. The original report is the fallback; live quality, latency, and cost are still unmeasured. The design requirements below remain the release acceptance contract.
+
+Likely files:
+
+- `services/research-api/src/research_api/graph/builder.py`, `coverage.py`, and `mode_planning.py` — choose only eligible unresolved dimensions/conflicts and construct bounded delta tasks without regenerating the whole report.
+- Budget/admission repositories, `model_budget.py`, `ingestion.py`, job/checkpoint/version handling, and assessment persistence — atomically reserve every required operation/source/time/token/cost unit, preserve accounting uncertainty, and make the decision/request/result replay-compatible.
+- API/events/UI and `docs/reflection.md` — distinguish repair proposed/admitted/running/completed/rejected, explain stop reasons, and preserve collected evidence through cancellation/failure.
+- concurrency, migration, transaction, crash-injection, replay, cancellation, approval, and worker-restart tests.
+
+**Exit gate:** failure injection at decision → reservation → dispatch → provider result → persistence → checkpoint proves no over-budget work, duplicate uncertain dispatch, dropped prior evidence, or false completion; cancellation/approval remain correct; source-level and tenant authorization hold.
+
+### Phase 6 — Cross-mode evaluation, then product claims (separately gated)
+
+Use at least 20 fixed benchmark questions × 3 modes (60 evaluated outputs) for the first live/human gate; expand toward the 60-question repository ambition after process is stable. This is a separate authorization and release gate, not an automatic continuation of Phases 3–5. Use fixed model/provider/prompt/schema/graph snapshots and record deviations. Benchmark outputs may involve paid providers; schedule only after explicit approval, provider spend caps, accepted gold labels, blinded review, and preregistered margins. The synthetic offline harness does not count toward these 60 outputs.
 
 Compare modes on:
 
@@ -467,7 +489,7 @@ Until the final benchmark passes, describe the behavior as “mode-specific rese
 - [`research/page.tsx`](../../apps/web/app/%28research%29/research/page.tsx) — current composer mode labels and submitted limits.
 - [`run-status.ts`](../../apps/web/lib/run-status.ts) and [`research run page`](../../apps/web/app/%28research%29/research/%5BrunId%5D/page.tsx) — current call-count-derived retry deadline and run UI lifecycle actions.
 - [`api.py`](../../services/research-api/src/research_api/api.py), [`reports.py`](../../services/research-api/src/research_api/reports.py), [`research_limits.py`](../../services/research-api/src/research_api/research_limits.py), [`builder.py`](../../services/research-api/src/research_api/graph/builder.py), and [`runs.py`](../../services/research-api/src/research_api/repositories/runs.py) — current admission, mode inference, limits, graph behavior, and persistence.
-- [`jobs.py`](../../services/research-api/src/research_api/jobs.py) and the migration directory `services/research-api/src/research_api/db/migrations/versions/` — checked-out graph compatibility and migration chain (head `0012` at review time).
+- [`jobs.py`](../../services/research-api/src/research_api/jobs.py) and the migration directory `services/research-api/src/research_api/db/migrations/versions/` — checked-out graph compatibility and migration chain (head `0019` in this checkout; target deployment state must be verified separately).
 - Contract generation: `packages/contracts/scripts/generate-json-schema.ts`, `packages/contracts/scripts/check-generated.ts`, and `services/research-api/scripts/generate-pydantic.sh`.
 - [`pricing page`](../../apps/web/app/pricing/page.tsx) — current public tier/mode/export claims; verify against server enforcement before release.
 
