@@ -22,9 +22,15 @@ import ReactMarkdown from "react-markdown";
 import {
   EditResearchPlanRequestSchema,
   EditResearchPlanResponseSchema,
-  ReportDocumentV1Schema,
+  type ReportDocument,
 } from "@research/contracts";
-import type { z } from "zod";
+import {
+  hasNumericalFinding,
+  parseReportDocument,
+} from "../../../../lib/report-document";
+import { ReportCoverage } from "../../../components/report-coverage";
+import { RetrievalAccountingPanel } from "../../../components/retrieval-accounting";
+import { RepairOutcome } from "../../../components/repair-outcome";
 import { publishResearchHistory } from "../../../../lib/research-history-events";
 import { reportExport } from "../../../../lib/report-export";
 import {
@@ -172,9 +178,16 @@ type Run = {
     version: number;
     markdown: string;
     publishedAt: string;
-    document?: z.infer<typeof ReportDocumentV1Schema> | null;
+    retrievalAccounting?: RunInsights["retrievalAccounting"];
+    document?: ReportDocument | null;
     answerQuality?:
       "answered" | "partial" | "insufficient_evidence" | "not_assessed";
+    repairOutcome?: {
+      status: "repaired" | "stopped";
+      reason?: string;
+      newSourceCount?: number;
+      verifiedFindingCount?: number;
+    } | null;
   } | null;
   sources: Source[];
   subQuestions: { id: string; question: string; status: string }[];
@@ -1064,11 +1077,10 @@ export default function LiveRunWorkspace() {
       setBusy(false);
     }
   }
-  const documentResult = useMemo(
-    () => ReportDocumentV1Schema.safeParse(run?.report?.document),
+  const reportDocument = useMemo(
+    () => parseReportDocument(run?.report?.document),
     [run?.report?.document],
   );
-  const reportDocument = documentResult.success ? documentResult.data : null;
   const stopped = run?.status === "failed" || run?.status === "cancelled";
   const limitedReport =
     run?.status === "completed" &&
@@ -1319,6 +1331,17 @@ export default function LiveRunWorkspace() {
                       : (reportDocument?.quality.reason ??
                         "This historical report has no structured coverage assessment. Its existing evidence checks remain available.")}
                   </p>
+                  {hasNumericalFinding(reportDocument) && (
+                    <p className="desk-help" role="note">
+                      Source-reported numerical findings: recorded quotations
+                      and support checks do not validate original measurements
+                      or establish independent corroboration. Inspect the
+                      underlying study before relying on a figure.
+                    </p>
+                  )}
+                  {run.report.repairOutcome && (
+                    <RepairOutcome outcome={run.report.repairOutcome} />
+                  )}
                   {limitedReport && (
                     <Button
                       variant="outline"
@@ -1332,24 +1355,13 @@ export default function LiveRunWorkspace() {
                     </Button>
                   )}
                   {reportDocument && (
-                    <details>
-                      <summary>Question and report requirements</summary>
-                      <p className="desk-help">
-                        Evidence links are not proof that a requirement is fully
-                        satisfied.
-                      </p>
-                      <ul>
-                        {reportDocument.requirements.map((requirement) => (
-                          <li key={requirement.id}>
-                            <strong>{requirement.text}</strong>
-                            {" — "}
-                            {requirement.status === "addressed"
-                              ? "Evidence linked; completeness not established"
-                              : "Unresolved"}
-                          </li>
-                        ))}
-                      </ul>
-                    </details>
+                    <ReportCoverage
+                      document={reportDocument}
+                      sources={run.sources.map(({ id, title }) => ({
+                        id,
+                        title,
+                      }))}
+                    />
                   )}
                 </section>
               )}
@@ -2343,6 +2355,15 @@ export default function LiveRunWorkspace() {
                         setActiveSource(id);
                         changeTab("sources");
                       }}
+                    />
+                    <RetrievalAccountingPanel
+                      accounting={
+                        run.report?.retrievalAccounting ??
+                        settledInsights?.retrievalAccounting
+                      }
+                      publishedSnapshot={Boolean(
+                        run.report?.retrievalAccounting,
+                      )}
                     />
                     {settledInsights && (
                       <ExecutionView

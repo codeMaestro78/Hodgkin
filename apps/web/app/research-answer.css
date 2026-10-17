@@ -109,6 +109,29 @@ html
   --q-dot: #a3361f;
 }
 
+.repair-outcome {
+  grid-column: 2;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-left: 2px solid var(--ans-copper);
+  border-radius: 0 10px 10px 0;
+  background: color-mix(in srgb, var(--ans-paper) 72%, var(--ans-sand));
+  color: var(--ans-ink);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.repair-outcome strong {
+  display: block;
+  font-weight: 600;
+}
+.repair-outcome p {
+  margin: 2px 0 0;
+  color: var(--ans-body);
+}
+.repair-outcome[data-status="stopped"] {
+  border-left-color: #a3361f;
+}
+
 /* Run record: metrics, stage rail and orchestration joined into one strip. */
 .report-scroll[data-answer-ready] .research-signal {
   display: flex;
@@ -718,6 +741,34 @@ html .report-scroll[data-answer-ready] .report-orchestration {
 }
 .method-summary > header > span {
   font-size: 12px;
+  color: var(--ans-muted);
+}
+.retrieval-accounting {
+  display: grid;
+  gap: 8px;
+  margin: 18px 0 24px;
+  padding: 14px 0;
+  border-top: 1px solid var(--ans-line);
+  border-bottom: 1px solid var(--ans-line);
+  color: var(--ans-ink);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.retrieval-accounting h3,
+.retrieval-accounting p,
+.retrieval-accounting ul {
+  margin: 0;
+}
+.retrieval-accounting h3 {
+  font-size: 13px;
+  font-weight: 650;
+}
+.retrieval-accounting ul {
+  display: grid;
+  gap: 4px;
+  padding-left: 18px;
+}
+.retrieval-accounting .desk-help {
   color: var(--ans-muted);
 }
 .method-stats {

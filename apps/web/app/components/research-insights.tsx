@@ -204,6 +204,20 @@ export function ExecutionView({
   const repairs = tasks.filter(
     (item) => item.nodeId === "planner_delta" && item.status !== "queued",
   ).length;
+  const requiredApproval = tasks.some(
+    (item) => item.nodeId === "approval_gate" && item.status === "paused",
+  );
+  const published = tasks.some(
+    (item) => item.nodeId === "synthesizer" && item.status === "completed",
+  );
+  const repairCaption =
+    repairs > 0
+      ? `Coverage repair returned to the planner ${repairs === 1 ? "once" : `${repairs} times`}`
+      : requiredApproval
+        ? "Plan approval was required; automatic coverage repair was unavailable for this run"
+        : published
+          ? "No coverage repair was recorded for this run"
+          : "Coverage repair has not been recorded yet";
   if (!tasks.length)
     return (
       <Empty title="No execution records">
@@ -272,8 +286,7 @@ export function ExecutionView({
       </div>
       <p className="desk-help">
         Persisted execution states. Collection tasks can run in parallel;
-        assessment follows collection. Coverage repair loops back to the planner
-        when the budget allows.
+        assessment follows collection.
       </p>
       {view === "graph" ? (
         <div className="execution-graph">
@@ -332,11 +345,7 @@ export function ExecutionView({
               <path d="M392 2 V14 Q392 24 382 24 H18 Q8 24 8 14 V6" />
               <path className="orch-loop-head" d="m3 10 5-6 5 6" />
             </svg>
-            <span>
-              {repairs > 0
-                ? `Coverage repair returned to the planner ${repairs === 1 ? "once" : `${repairs} times`}`
-                : "Coverage repair returns to the planner when budget allows"}
-            </span>
+            <span>{repairCaption}</span>
           </div>
         </div>
       ) : (
