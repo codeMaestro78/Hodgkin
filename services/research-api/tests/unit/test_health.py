@@ -22,13 +22,20 @@ def test_health_alias_matches_liveness() -> None:
     }
 
 
-def test_readiness_requires_model_routing_column(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_readiness_requires_current_schema_and_model_routing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     class State:
-        query = ""
+        queries: list[str] = []
 
     class Connection:
         async def scalar(self, statement: object) -> bool:
-            State.query = str(statement)
+            query = str(statement)
+            State.queries.append(query)
+            if "to_regclass('public.alembic_version')" in query:
+                return True
+            if "version_num >= '0019'" in query:
+                return True
             return False
 
     class Engine:
@@ -46,16 +53,19 @@ def test_readiness_requires_model_routing_column(monkeypatch: pytest.MonkeyPatch
         asyncio.run(main.readiness())
 
     assert error.value.status_code == 503
-    assert "model_routing" in State.query
-    assert "research_runs" in State.query
-    assert "0012" in error.value.detail
+    assert any("model_routing" in query and "research_runs" in query for query in State.queries)
+    assert any("version_num >= '0019'" in query for query in State.queries)
+    assert "schema required" in error.value.detail
 
 
 def test_readiness_succeeds_when_current_schema_is_present(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    queries: list[str] = []
+
     class Connection:
-        async def scalar(self, _statement: object) -> bool:
+        async def scalar(self, statement: object) -> bool:
+            queries.append(str(statement))
             return True
 
     class Engine:
@@ -70,3 +80,54 @@ def test_readiness_succeeds_when_current_schema_is_present(
     monkeypatch.setattr(main, "validate_runtime_role", validate_role)
 
     assert asyncio.run(main.readiness())["status"] == "ok"
+    assert any("version_num >= '0019'" in query for query in queries)
+
+
+def test_readiness_rejects_a_database_without_alembic_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Connection:
+        async def scalar(self, statement: object) -> bool:
+            return "to_regclass('public.alembic_version')" in str(statement)
+
+    class Engine:
+        @asynccontextmanager
+        async def connect(self):
+            yield Connection()
+
+    async def validate_role(_engine: object) -> None:
+        return None
+
+    monkeypatch.setattr(main, "engine", Engine())
+    monkeypatch.setattr(main, "validate_runtime_role", validate_role)
+
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(main.readiness())
+
+    assert error.value.status_code == 503
+    assert "0019" in error.value.detail
+
+
+def test_readiness_rejects_a_database_behind_the_required_revision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Connection:
+        async def scalar(self, statement: object) -> bool:
+            return "to_regclass('public.alembic_version')" in str(statement)
+
+    class Engine:
+        @asynccontextmanager
+        async def connect(self):
+            yield Connection()
+
+    async def validate_role(_engine: object) -> None:
+        return None
+
+    monkeypatch.setattr(main, "engine", Engine())
+    monkeypatch.setattr(main, "validate_runtime_role", validate_role)
+
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(main.readiness())
+
+    assert error.value.status_code == 503
+    assert "migrations through 0019" in error.value.detail

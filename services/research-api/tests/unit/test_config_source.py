@@ -44,3 +44,20 @@ def test_later_dotenv_file_overrides_models_without_erasing_service_auth(tmp_pat
     settings = Settings(_env_file=(service, root))
     assert settings.LLM_MODEL_NAME == "desired-model"
     assert settings.SUPABASE_URL == "https://auth.example.test"
+
+
+def test_empty_provider_credentials_are_treated_as_unset():
+    settings = Settings(
+        _env_file=None,
+        OPENAI_API_KEY="",
+        OPENROUTER_API_KEY="  ",
+        TAVILY_API_KEY="",
+        SERPER_API_KEY="",
+        OPENALEX_API_KEY="",
+    )
+
+    assert settings.OPENAI_API_KEY is None
+    assert settings.OPENROUTER_API_KEY is None
+    assert settings.TAVILY_API_KEY is None
+    assert settings.SERPER_API_KEY is None
+    assert settings.OPENALEX_API_KEY is None

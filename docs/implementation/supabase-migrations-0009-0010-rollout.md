@@ -1,4 +1,12 @@
-# Alembic 0009–0012 production rollout and recovery
+# Historical Alembic 0009–0012 rollout notes and current recovery guidance
+
+> **Current-checkout warning (2026-10-17):** this document was originally
+> written for revisions `0009`–`0012`. The current checkout's Alembic head is
+> `0019`; this guide is not a complete deployment checklist for the current
+> API. Before deploying this code, inspect the target database's actual
+> revision and review/apply every required migration through the current
+> checkout head. Do not infer that Supabase is at `0019` from this document or
+> from local Alembic state.
 
 These instructions cover Alembic revisions `0009` (private projects/library),
 `0010` (published-report immutability, report shares, and stored Markdown /
@@ -25,23 +33,31 @@ Alembic as the migration authority; it does not use `supabase/migrations` or
 
 ## Apply
 
-After the preconditions pass, from `services/research-api` run:
+For the historical `0009`–`0012` release only, after the preconditions pass,
+from `services/research-api` run:
 
 ```sh
 uv run alembic upgrade head
 uv run alembic current
 ```
 
-The expected head is `0012`. If the target is at `0008`, this applies `0009`
-through `0012` in order. `0010` intentionally keeps old application writers
+The historical release ended at `0012`. The current checkout ends at `0019`;
+running `alembic upgrade head` from this checkout applies every pending
+revision through that head. Review those later migration files and rehearse
+them on a disposable database before applying them to any shared target.
+`0010` intentionally keeps old application writers
 compatible: legacy published inserts receive `published_at` from the database,
 may have a null stored `content_hash`, and are still immutable after insert.
 The current writer stores a SHA-256 hash; readers compute one for legacy rows
 that do not have it.
 
+For the historical release, verify `0012` and the checks below. For the
+current checkout, verify `alembic current` reports at least `0019` and that
+the API `/health/ready` endpoint succeeds before deploying matching code.
 Verify before deploying the UI that:
 
-- `alembic_version` is `0012`;
+- the target revision matches the release being deployed (current checkout:
+  `0019`; historical `0009`–`0012` release: `0012`);
 - `research_runs.model_routing` exists and is readable/writable by the runtime
   role as required by the API;
 - `projects`, `library_items`, `report_shares`, and `report_exports` exist;

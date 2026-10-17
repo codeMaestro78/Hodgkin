@@ -158,6 +158,20 @@ async def readiness() -> dict[str, str]:
     try:
         await validate_runtime_role(engine)
         async with engine.connect() as connection:
+            migration_table_exists = await connection.scalar(
+                text("SELECT to_regclass('public.alembic_version') IS NOT NULL")
+            )
+            migration_ready = bool(
+                migration_table_exists
+                and await connection.scalar(
+                    text(
+                        "SELECT EXISTS (SELECT 1 FROM public.alembic_version "
+                        "WHERE version_num >= '0019')"
+                    )
+                )
+            )
+            if not migration_ready:
+                raise HTTPException(503, "database migrations through 0019 are required")
             ready = await connection.scalar(
                 text(
                     "SELECT to_regclass('public.runtime_jobs') "
@@ -172,7 +186,7 @@ async def readiness() -> dict[str, str]:
                 )
             )
         if not ready:
-            raise HTTPException(503, "database migrations through 0012 are required")
+            raise HTTPException(503, "database schema required by this API is incomplete")
     except HTTPException:
         raise
     except Exception as exc:

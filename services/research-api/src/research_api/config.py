@@ -3,7 +3,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from research_api.model_routing import ModelRole, ModelRoute
@@ -91,6 +91,23 @@ class Settings(BaseSettings):
     SUPABASE_PUBLISHABLE_KEY: str | None = None
     DEVELOPMENT_TENANT_ID: str | None = None
     DEVELOPMENT_USER_ID: str | None = None
+
+    @field_validator(
+        "OPENAI_API_KEY",
+        "OPENROUTER_API_KEY",
+        "TAVILY_API_KEY",
+        "SERPER_API_KEY",
+        "OPENALEX_API_KEY",
+        "INTERNAL_SERVICE_AUTH",
+        mode="before",
+    )
+    @classmethod
+    def empty_optional_secrets_are_unset(cls, value: object) -> object:
+        if isinstance(value, SecretStr):
+            return value if value.get_secret_value().strip() else None
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     def model_route(self, role: ModelRole) -> ModelRoute:
         provider = getattr(self, f"LLM_{role.upper()}_PROVIDER") or self.LLM_PROVIDER
