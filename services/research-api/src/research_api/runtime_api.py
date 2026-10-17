@@ -26,7 +26,7 @@ from research_api.events.outbox import EventOutbox
 from research_api.graph.builder import PlannedQuestion, PlannerOutput
 from research_api.jobs import enqueue, lock_registry, refresh_due
 from research_api.lifecycle import lock_run
-from research_api.mode_reports import policy_for_mode
+from research_api.mode_planning import CoveragePlan, attach_coverage_plan, planning_admission
 from research_api.repositories.runs import RunBudgetDefaults, RunRepository
 from research_api.research_limits import is_run_quick, operation_limit, run_source_limit
 from research_api.schemas.generated.approval_request import ApprovalRequest
@@ -132,19 +132,16 @@ async def edit_plan(
         if current is None or budget is None:
             raise HTTPException(409, "the active research plan could not be loaded")
         try:
-            original = PlannerOutput.model_validate(current.plan)
+            original = PlannerOutput.model_validate(
+                {"sub_questions": current.plan.get("sub_questions")}
+                if run.mode is not None
+                else current.plan
+            )
         except ValidationError as exc:
             raise HTTPException(409, "this research plan format cannot be edited") from exc
-        maximum = (
-            1
-            if is_run_quick(run)
-            else min(
-                policy_for_mode(
-                    operation_limit(budget), mode=run.mode, max_sources=run_source_limit(budget)
-                ).question_count,
-                operation_limit(budget) // 2,
-            )
-        )
+        # Approval runs never reserve bounded repair; this matches the planner split.
+        admission = planning_admission(budget, mode=run.mode, quick_mode=is_run_quick(run))
+        maximum = admission.max_initial_questions
         if len(questions) > maximum:
             raise HTTPException(
                 422,
@@ -171,12 +168,33 @@ async def edit_plan(
             }
         )
         version = run.plan_version + 1
+        plan_payload = current.plan | edited.model_dump(mode="json")
+        coverage: CoveragePlan | None = None
+        if run.mode is not None:
+            if run.mode_policy_version is None:
+                raise HTTPException(409, "the explicit research policy snapshot is missing")
+            try:
+                coverage = attach_coverage_plan(
+                    run_id=run.id,
+                    question=run.original_question,
+                    requirements=run.report_requirements or [],
+                    questions=[item.model_dump(mode="json") for item in edited.sub_questions],
+                    mode=run.mode,
+                    policy_version=run.mode_policy_version,
+                    operations=operation_limit(budget),
+                    sources=run_source_limit(budget),
+                    repair_operations=admission.repair_operations_reserved,
+                    repair_sources=admission.repair_sources_reserved,
+                )
+            except ValueError as exc:
+                raise HTTPException(422, "edited coverage plan is invalid: " + str(exc)) from exc
+            plan_payload["coverage"] = coverage.model_dump(mode="json")
         replacement = ResearchPlan(
             tenant_id=caller.tenant_id,
             run_id=run_id,
             plan_version=version,
             parent_plan_version=run.plan_version,
-            plan=current.plan | edited.model_dump(mode="json"),
+            plan=plan_payload,
         )
         session.add(replacement)
         await session.flush()
@@ -187,7 +205,13 @@ async def edit_plan(
                 run_id=run_id,
                 plan_id=replacement.id,
                 question=item.question,
-                payload=item.model_dump(mode="json") | {"planIndex": index},
+                payload=item.model_dump(mode="json")
+                | {"planIndex": index}
+                | (
+                    {"dimensionIds": [str(key) for key in coverage.question_dimensions[index]]}
+                    if coverage is not None
+                    else {}
+                ),
                 status="pending",
                 attempts=0,
             )

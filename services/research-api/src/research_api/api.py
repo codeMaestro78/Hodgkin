@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 
 from research_api.auth import authenticated_caller as _caller
 from research_api.config import get_settings
+from research_api.db.assessments import ResearchAssessment
 from research_api.db.models import (
     Budget,
     Citation,
@@ -33,8 +34,8 @@ from research_api.events.outbox import EventOutbox
 from research_api.events.wakeups import event_wakeups
 from research_api.execution import prior_dependencies, task_projection
 from research_api.jobs import enqueue, lock_registry, refresh_due
+from research_api.mode_planning import planning_admission
 from research_api.mode_policy import resolve_mode_budget
-from research_api.mode_reports import policy_for_mode
 from research_api.reliability import claim_status, source_assessments
 from research_api.repositories.runs import (
     IdempotencyConflictError,
@@ -47,6 +48,7 @@ from research_api.research_limits import (
     operation_limit,
     run_source_limit,
 )
+from research_api.retrieval_accounting import build_retrieval_accounting
 from research_api.schemas.generated.create_research_run_request import CreateResearchRunRequest
 from research_api.schemas.generated.followup_request import FollowupRequest
 from research_api.schemas.generated.public_claim_check import PublicClaimCheck
@@ -55,6 +57,36 @@ from research_api.snapshots import load_collections
 
 router = APIRouter(prefix="/research", tags=["research"])
 AfterSequenceQuery = Annotated[int, Query(ge=0, alias="after")]
+
+_PUBLIC_REPAIR_REASONS = frozenset(
+    {
+        "claim_capacity_exhausted",
+        "failed",
+        "insufficient_time",
+        "no_delta_claims",
+        "no_new_evidence",
+        "no_verified_delta_claims",
+        "timeout",
+    }
+)
+
+
+def _public_repair_outcome(value: object) -> dict[str, object] | None:
+    """Expose only the durable user-facing repair result, never internal failure detail."""
+    if not isinstance(value, dict) or value.get("status") not in {"repaired", "stopped"}:
+        return None
+    result: dict[str, object] = {"status": value["status"]}
+    reason = value.get("reason")
+    if isinstance(reason, str) and reason in _PUBLIC_REPAIR_REASONS:
+        result["reason"] = reason
+    for source_key, public_key in (
+        ("new_source_count", "newSourceCount"),
+        ("delta_claim_count", "verifiedFindingCount"),
+    ):
+        count = value.get(source_key)
+        if isinstance(count, int) and not isinstance(count, bool) and 0 <= count <= 40:
+            result[public_key] = count
+    return result
 
 
 def _created_projection(run: ResearchRun, budget: RunBudgetDefaults) -> dict[str, object]:
@@ -159,7 +191,7 @@ def _budget_from_request(
                 mode, request.budget_overrides, policy_version=policy_version
             )
         except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
+            raise HTTPException(422, {"code": "mode_budget_invalid", "message": str(exc)}) from exc
     defaults = RunBudgetDefaults()
     overrides = request.budget_overrides
     if overrides is None:
@@ -364,6 +396,34 @@ async def get_research_run(
         )
         if report_version is not None and report is None:
             raise HTTPException(404, "report version not found")
+        repair_outcome = None
+        report_assessment_id = (
+            report.document.get("assessmentId")
+            if report and isinstance(report.document, dict)
+            else None
+        )
+        if isinstance(report_assessment_id, str):
+            repair_assessments = list(
+                await session.scalars(
+                    select(ResearchAssessment)
+                    .where(
+                        ResearchAssessment.tenant_id == caller.tenant_id,
+                        ResearchAssessment.run_id == run_id,
+                    )
+                    .order_by(ResearchAssessment.created_at.desc())
+                    .limit(8)
+                )
+            )
+            for assessment in repair_assessments:
+                result = assessment.result
+                repair = result.get("repair") if isinstance(result, dict) else None
+                if isinstance(repair, dict) and (
+                    str(assessment.id) == report_assessment_id
+                    or repair.get("base_assessment_id") == report_assessment_id
+                ):
+                    repair_outcome = _public_repair_outcome(repair)
+                    if repair_outcome is not None:
+                        break
         # Explicit tenant/run predicates on both sides of the join. Only compact,
         # named evidence fields leave the API; artifact locations stay private.
         evidence_rows = await session.execute(
@@ -430,15 +490,11 @@ async def get_research_run(
                     )
                 ).mappings()
             )
+            # Approval runs never reserve bounded repair; this matches the planner split.
             maximum_questions = (
-                1
-                if is_run_quick(run)
-                else min(
-                    policy_for_mode(
-                        operation_limit(budget), mode=run.mode, max_sources=run_source_limit(budget)
-                    ).question_count,
-                    operation_limit(budget) // 2,
-                )
+                planning_admission(
+                    budget, mode=run.mode, quick_mode=is_run_quick(run)
+                ).max_initial_questions
                 if budget is not None
                 else 1
             )
@@ -631,11 +687,26 @@ async def get_research_run(
                     }
                     for item in versions
                 ],
+                "retrievalAccounting": build_retrieval_accounting(
+                    calls=[
+                        {
+                            "provider": call.provider,
+                            "operation": call.operation,
+                            "outcome": call.outcome,
+                            "provider_usage": call.provider_usage,
+                        }
+                        for call in calls
+                    ],
+                    sources=[
+                        {"id": str(source.id), "provider": source.provider} for source in sources
+                    ],
+                    claim_checks=claim_checks,
+                ),
             }
         )
         assessments = source_assessments(sources, run.original_question)
         return {
-            "schemaVersion": "1.4",
+            "schemaVersion": "1.5",
             "insights": insights.model_dump(mode="json", by_alias=True),
             "runId": str(run.id),
             "status": run.status,
@@ -673,6 +744,8 @@ async def get_research_run(
                     "version": report.version,
                     "markdown": report.markdown,
                     "document": report.document,
+                    "retrievalAccounting": report.retrieval_accounting,
+                    "repairOutcome": repair_outcome,
                     "answerQuality": (
                         report.document["quality"]["status"] if report.document else "not_assessed"
                     ),
@@ -824,7 +897,13 @@ async def retry_research_run(
         if budget is None:
             raise RuntimeError("run budget not found")
         if prior.mode is not None and max_wall_clock_ms not in {None, budget.max_wall_clock_ms}:
-            raise HTTPException(422, "explicit-mode retries inherit the original time limit")
+            raise HTTPException(
+                422,
+                {
+                    "code": "mode_budget_invalid",
+                    "message": "explicit-mode retries inherit the original time limit",
+                },
+            )
         fresh = await RunRepository(session, caller.tenant_id).create(
             user_id=caller.user_id,
             question=prior.original_question,

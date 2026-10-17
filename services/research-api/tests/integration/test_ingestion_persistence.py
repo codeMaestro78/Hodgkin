@@ -29,6 +29,7 @@ from research_api.db.models import (
     User,
 )
 from research_api.db.session import tenant_session
+from research_api.db.source_relationships import SourceIdentityRecord, SourceRelationship
 from research_api.events.outbox import EventOutbox
 from research_api.ingestion import (
     ProviderRecoveryNeededError,
@@ -43,8 +44,9 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
-async def run_context():
+async def run_context(request):
     tenant, user = uuid.uuid4(), uuid.uuid4()
+    mode = getattr(request, "param", None)
     engine = create_async_engine(os.environ["TEST_DATABASE_ADMIN_URL"])
     try:
         async with async_sessionmaker(engine)() as session, session.begin():
@@ -54,7 +56,8 @@ async def run_context():
             run = await RunRepository(session, tenant).create(
                 user_id=user,
                 question="Compare evidence from multiple sources",
-                budget=RunBudgetDefaults(max_search_calls=20),
+                budget=RunBudgetDefaults(max_search_calls=20) if mode is None else None,
+                mode=mode,
             )
             run_id = run.id
         yield tenant, run_id
@@ -358,6 +361,138 @@ async def persist(ingestor, context, items, quick=False):
         publication_dates={},
         quick_mode=quick,
     )
+
+
+async def source_observations(context):
+    tenant, run = context
+    async with tenant_session(str(tenant)) as session:
+        identities = list(
+            await session.scalars(
+                select(SourceIdentityRecord).where(SourceIdentityRecord.run_id == run)
+            )
+        )
+        links = list(
+            await session.scalars(
+                select(SourceRelationship).where(SourceRelationship.run_id == run)
+            )
+        )
+    return identities, links
+
+
+@pytest.mark.parametrize("run_context", [None, "focused", "balanced", "deep"], indirect=True)
+async def test_source_identity_hook_explicit_modes_only_and_observed_doi(run_context, request):
+    items = [
+        _PreparedSource(
+            "https://doi.org/10.1234/observed",
+            "https://doi.org/10.1234/observed",
+            "a" * 64,
+            "fixture/first",
+            [],
+        ),
+        _PreparedSource(
+            "https://dx.doi.org/10.1234/OBSERVED",
+            "https://dx.doi.org/10.1234/OBSERVED",
+            "b" * 64,
+            "fixture/second",
+            [],
+        ),
+    ]
+    async with mock_ingestor() as (ingestor, _):
+        ids = await persist(ingestor, run_context, items)
+        first = await source_observations(run_context)
+        assert await persist(ingestor, run_context, items) == ids
+    identities, links = await source_observations(run_context)
+    if request.node.callspec.params["run_context"] is None:
+        assert identities == links == []
+    else:
+        assert len(first[0]) == len(identities) == 2
+        assert all(row.work_id == "doi:10.1234/observed" for row in identities)
+        assert all(row.publisher is None for row in identities)
+        assert len(first[1]) == len(links) == 1
+        assert links[0].kind == "same_work"
+    assert all(
+        s.source_class == "unknown" and s.publisher is None for s in (await durable(run_context))[0]
+    )
+
+
+@pytest.mark.parametrize("run_context", ["focused"], indirect=True)
+async def test_relationship_failure_rolls_back_source_event_identity_and_link_batch(
+    run_context,
+    monkeypatch,
+):
+    original = ingestion.persist_source_relationships
+
+    async def fail_after_persist(session, tenant, run, **kwargs):
+        await original(session, tenant, run, **kwargs)
+        raise RuntimeError("relationship persistence failed")
+
+    monkeypatch.setattr(ingestion, "persist_source_relationships", fail_after_persist)
+    items = [
+        prepared(0),
+        _PreparedSource(
+            "https://example.test/same-content",
+            "https://example.test/same-content",
+            prepared(0).content_hash,
+            "fixture/copy",
+            [],
+        ),
+    ]
+    async with mock_ingestor() as (ingestor, _):
+        with pytest.raises(RuntimeError, match="relationship persistence failed"):
+            await persist(ingestor, run_context, items)
+    snapshot = await durable(run_context)
+    assert snapshot[0] == snapshot[1] == []
+    assert await source_observations(run_context) == ([], [])
+
+
+@pytest.mark.parametrize("run_context", ["focused"], indirect=True)
+async def test_reused_sources_are_not_identity_backfilled(run_context, monkeypatch):
+    async with mock_ingestor() as (ingestor, _):
+        with monkeypatch.context() as patch:
+            patch.setattr(ingestion, "persist_source_relationships", AsyncMock(return_value=0))
+            ids = await persist(ingestor, run_context, [prepared(0)])
+        assert await persist(ingestor, run_context, [prepared(0)]) == ids
+    assert await source_observations(run_context) == ([], [])
+
+
+@pytest.mark.parametrize("run_context", ["focused"], indirect=True)
+@pytest.mark.parametrize("fail_relationships", [False, True])
+async def test_explicit_extraction_keeps_paid_settlement_separate_from_metadata(
+    run_context,
+    monkeypatch,
+    fail_relationships,
+):
+    if fail_relationships:
+        original = ingestion.persist_source_relationships
+
+        async def fail_after_persist(*args, **kwargs):
+            await original(*args, **kwargs)
+            raise RuntimeError("relationship transaction failed")
+
+        monkeypatch.setattr(ingestion, "persist_source_relationships", fail_after_persist)
+    async with mock_ingestor() as (ingestor, fetched):
+        if fail_relationships:
+            with pytest.raises(RuntimeError, match="relationship transaction failed"):
+                await ingest(ingestor, run_context)
+        else:
+            assert len(await ingest(ingestor, run_context)) == 6
+    snapshot = await durable(run_context)
+    assert_paid(snapshot, 6)
+    assert len(fetched) == 6
+    identities, links = await source_observations(run_context)
+    assert (
+        len(snapshot[0]) == len(snapshot[1]) == len(identities) == (0 if fail_relationships else 6)
+    )
+    assert links == []
+    assert all(row.work_id is None and row.publisher is None for row in identities)
+
+
+async def test_legacy_metadata_does_not_call_relationship_repository(run_context, monkeypatch):
+    hook = AsyncMock(side_effect=AssertionError("legacy relationship persistence"))
+    monkeypatch.setattr(ingestion, "persist_source_relationships", hook)
+    async with mock_ingestor() as (ingestor, _):
+        assert len(await persist(ingestor, run_context, [prepared(0)])) == 1
+    hook.assert_not_awaited()
 
 
 async def test_parallel_metadata_batches_enforce_ceiling_and_unique_sources(run_context):

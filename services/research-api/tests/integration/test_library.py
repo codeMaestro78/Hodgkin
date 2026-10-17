@@ -29,8 +29,8 @@ from research_api.db.models import Report, ResearchRun, Source, Tenant, User
 pytestmark = pytest.mark.integration
 
 
-@pytest.fixture(scope="module", params=["fresh", "upgrade"])
-def database(request):
+@pytest.fixture(scope="module")
+def database():
     admin_url = make_url(os.environ["TEST_DATABASE_ADMIN_URL"])
     admin = create_engine(admin_url, isolation_level="AUTOCOMMIT")
     name = "research_library_test_" + uuid.uuid4().hex
@@ -54,11 +54,10 @@ def database(request):
                     importlib.import_module(
                         f"research_api.db.migrations.versions.{version}"
                     ).upgrade()
-                if request.param == "upgrade":
-                    # 0001 uses current metadata. Remove just our new tables to
-                    # represent an existing 0008 installation before upgrading.
-                    connection.exec_driver_sql("DROP TABLE library_items")
-                    connection.exec_driver_sql("DROP TABLE projects")
+                # 0001 intentionally creates only its historical tables. A real
+                # 0008 installation has no library tables until this migration.
+                assert connection.scalar(text("SELECT to_regclass('public.library_items') IS NULL"))
+                assert connection.scalar(text("SELECT to_regclass('public.projects') IS NULL"))
                 importlib.import_module(
                     "research_api.db.migrations.versions.0009_library"
                 ).upgrade()

@@ -1,5 +1,5 @@
 {
-  "$id": "https://schemas.research.local/1.5/LibraryItemSchema.json",
+  "$id": "https://schemas.research.local/1.6/LibraryItemSchema.json",
   "title": "LibraryItemSchema",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",

@@ -30,8 +30,78 @@ GRAPH_VERSION = "research-v4"
 # Older binaries reject this version instead of resuming a Serper receipt with
 # Tavily. Existing v3/v4 jobs retain their original discovery semantics.
 SERPER_GRAPH_VERSION = "research-v5-serper"
-MODE_GRAPH_VERSION = "research-v6-modes"
-MODE_SERPER_GRAPH_VERSION = "research-v6-modes-serper"
+# v7 checkpoints include pre-reflection, write-once evidence assessment. Local
+# v6 checkpoints must fail closed rather than resume into a different topology.
+PREVIOUS_MODE_GRAPH_VERSION = "research-v7-assessed-modes"
+PREVIOUS_MODE_SERPER_GRAPH_VERSION = "research-v7-assessed-modes-serper"
+# v8 checkpoints publish report V3 without narrative composition; they resume
+# unchanged. v9 adds the evidence-verified narrative pass and report V4.
+PROVENANCE_MODE_GRAPH_VERSION = "research-v8-report-provenance"
+PROVENANCE_MODE_SERPER_GRAPH_VERSION = "research-v8-report-provenance-serper"
+NARRATIVE_MODE_GRAPH_VERSION = "research-v9-evidence-narrative"
+NARRATIVE_MODE_SERPER_GRAPH_VERSION = "research-v9-evidence-narrative-serper"
+# v9 checkpoints resume without repair. v10 may admit one bounded, budgeted
+# repair round (child plan + delta assessment) for Balanced and Deep runs.
+MODE_GRAPH_VERSION = "research-v10-bounded-repair"
+MODE_SERPER_GRAPH_VERSION = "research-v10-bounded-repair-serper"
+# v11 keeps the v10 explicit-mode report/repair topology and pins OpenAlex as
+# an available academic route. OpenAlex is selected only for academic-planned
+# tasks; other tasks retain the separately pinned Tavily/Serper route.
+OPENALEX_GRAPH_VERSION = "research-v6-openalex"
+OPENALEX_SERPER_GRAPH_VERSION = "research-v6-openalex-serper"
+MODE_OPENALEX_GRAPH_VERSION = "research-v11-bounded-repair-openalex"
+MODE_OPENALEX_SERPER_GRAPH_VERSION = "research-v11-bounded-repair-openalex-serper"
+# v12 changes the criterion-review model request's output cap. Older jobs keep
+# their original request fingerprint so recovery cannot redispatch that call.
+EXPANDED_MODE_GRAPH_VERSION = "research-v12-criterion-budget"
+EXPANDED_MODE_SERPER_GRAPH_VERSION = "research-v12-criterion-budget-serper"
+EXPANDED_MODE_OPENALEX_GRAPH_VERSION = "research-v12-criterion-budget-openalex"
+EXPANDED_MODE_OPENALEX_SERPER_GRAPH_VERSION = "research-v12-criterion-budget-openalex-serper"
+# v13 keeps the criterion-budget contract but disables automatic repair by
+# default. v14 opts in to the same bounded repair contract; existing v10-v12
+# jobs retain their pinned semantics.
+SAFE_MODE_GRAPH_VERSION = "research-v13-criterion-budget"
+SAFE_MODE_SERPER_GRAPH_VERSION = "research-v13-criterion-budget-serper"
+SAFE_MODE_OPENALEX_GRAPH_VERSION = "research-v13-criterion-budget-openalex"
+SAFE_MODE_OPENALEX_SERPER_GRAPH_VERSION = "research-v13-criterion-budget-openalex-serper"
+REPAIR_MODE_GRAPH_VERSION = "research-v14-criterion-budget-bounded-repair"
+REPAIR_MODE_SERPER_GRAPH_VERSION = "research-v14-criterion-budget-bounded-repair-serper"
+REPAIR_MODE_OPENALEX_GRAPH_VERSION = "research-v14-criterion-budget-bounded-repair-openalex"
+REPAIR_MODE_OPENALEX_SERPER_GRAPH_VERSION = (
+    "research-v14-criterion-budget-bounded-repair-openalex-serper"
+)
+
+
+def graph_version_for(settings: Settings, *, explicit_mode: bool) -> str:
+    """Pin discovery and bounded-repair capabilities when the job is created."""
+    if explicit_mode:
+        repair_versions = settings.BOUNDED_GAP_REPAIR_ENABLED
+        if settings.OPENALEX_DISCOVERY_ENABLED:
+            if settings.SERPER_DISCOVERY_ENABLED:
+                return (
+                    REPAIR_MODE_OPENALEX_SERPER_GRAPH_VERSION
+                    if repair_versions
+                    else SAFE_MODE_OPENALEX_SERPER_GRAPH_VERSION
+                )
+            return (
+                REPAIR_MODE_OPENALEX_GRAPH_VERSION
+                if repair_versions
+                else SAFE_MODE_OPENALEX_GRAPH_VERSION
+            )
+        if settings.SERPER_DISCOVERY_ENABLED:
+            return (
+                REPAIR_MODE_SERPER_GRAPH_VERSION
+                if repair_versions
+                else SAFE_MODE_SERPER_GRAPH_VERSION
+            )
+        return REPAIR_MODE_GRAPH_VERSION if repair_versions else SAFE_MODE_GRAPH_VERSION
+    if settings.OPENALEX_DISCOVERY_ENABLED:
+        return (
+            OPENALEX_SERPER_GRAPH_VERSION
+            if settings.SERPER_DISCOVERY_ENABLED
+            else OPENALEX_GRAPH_VERSION
+        )
+    return SERPER_GRAPH_VERSION if settings.SERPER_DISCOVERY_ENABLED else GRAPH_VERSION
 
 
 async def lock_registry(session: AsyncSession, tenant: uuid.UUID) -> DispatchRegistry:
@@ -70,13 +140,7 @@ async def enqueue(
             tenant_id=run.tenant_id,
             user_id=run.user_id,
             batch_id=batch_id,
-            graph_version=(
-                MODE_SERPER_GRAPH_VERSION
-                if settings.SERPER_DISCOVERY_ENABLED
-                else MODE_GRAPH_VERSION
-            )
-            if run.mode is not None
-            else (SERPER_GRAPH_VERSION if settings.SERPER_DISCOVERY_ENABLED else GRAPH_VERSION),
+            graph_version=graph_version_for(settings, explicit_mode=run.mode is not None),
         )
     )
     registry.next_due_at = datetime.now(UTC)
@@ -159,9 +223,7 @@ async def schedule_due(session: AsyncSession, tenant: uuid.UUID, settings: Setti
                     run_id=run.id,
                     tenant_id=tenant,
                     user_id=run.user_id,
-                    graph_version=SERPER_GRAPH_VERSION
-                    if settings.SERPER_DISCOVERY_ENABLED
-                    else GRAPH_VERSION,
+                    graph_version=graph_version_for(settings, explicit_mode=run.mode is not None),
                 )
             )
             await EventOutbox(session, tenant).append(
@@ -274,9 +336,39 @@ async def claim(tenant: uuid.UUID, owner: uuid.UUID, settings: Settings) -> JobF
         # Consult the locked, immutable run brief, never checkpoint/model output;
         # do not upgrade the stored version or redispatch incompatible receipts.
         graph_compatible = (
-            job.graph_version in {MODE_GRAPH_VERSION, MODE_SERPER_GRAPH_VERSION}
+            job.graph_version
+            in {
+                PREVIOUS_MODE_GRAPH_VERSION,
+                PREVIOUS_MODE_SERPER_GRAPH_VERSION,
+                PROVENANCE_MODE_GRAPH_VERSION,
+                PROVENANCE_MODE_SERPER_GRAPH_VERSION,
+                NARRATIVE_MODE_GRAPH_VERSION,
+                NARRATIVE_MODE_SERPER_GRAPH_VERSION,
+                MODE_GRAPH_VERSION,
+                MODE_SERPER_GRAPH_VERSION,
+                MODE_OPENALEX_GRAPH_VERSION,
+                MODE_OPENALEX_SERPER_GRAPH_VERSION,
+                EXPANDED_MODE_GRAPH_VERSION,
+                EXPANDED_MODE_SERPER_GRAPH_VERSION,
+                EXPANDED_MODE_OPENALEX_GRAPH_VERSION,
+                EXPANDED_MODE_OPENALEX_SERPER_GRAPH_VERSION,
+                SAFE_MODE_GRAPH_VERSION,
+                SAFE_MODE_SERPER_GRAPH_VERSION,
+                SAFE_MODE_OPENALEX_GRAPH_VERSION,
+                SAFE_MODE_OPENALEX_SERPER_GRAPH_VERSION,
+                REPAIR_MODE_GRAPH_VERSION,
+                REPAIR_MODE_SERPER_GRAPH_VERSION,
+                REPAIR_MODE_OPENALEX_GRAPH_VERSION,
+                REPAIR_MODE_OPENALEX_SERPER_GRAPH_VERSION,
+            }
             if run.mode is not None
-            else job.graph_version in {GRAPH_VERSION, SERPER_GRAPH_VERSION}
+            else job.graph_version
+            in {
+                GRAPH_VERSION,
+                SERPER_GRAPH_VERSION,
+                OPENALEX_GRAPH_VERSION,
+                OPENALEX_SERPER_GRAPH_VERSION,
+            }
             or (job.graph_version == "research-v3" and run.report_requirements == [])
         )
         if not graph_compatible or job.attempts >= 5:

@@ -55,6 +55,7 @@ def operation_event(
         "db.connection.acquire",
         "db.snapshot.collections",
         "auth.verify",
+        "auth.verify.coalesced",
         "http.headers",
     }
     routine |= operation == "http.request" and (

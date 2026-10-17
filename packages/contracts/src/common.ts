@@ -1,12 +1,13 @@
 import { z } from "zod";
 
-export const SCHEMA_VERSION = "1.5" as const;
-// Persisted 1.1–1.4 snapshots remain readable; new extensions emit 1.5.
+export const SCHEMA_VERSION = "1.6" as const;
+// Persisted 1.1–1.5 snapshots remain readable; report provenance emits 1.6.
 export const SchemaVersionSchema = z.enum([
   "1.1",
   "1.2",
   "1.3",
   "1.4",
+  "1.5",
   SCHEMA_VERSION,
 ]);
 export const UuidSchema = z.uuid();
@@ -27,6 +28,7 @@ export const RunStatusSchema = z.enum([
 ]);
 
 export const ProviderSchema = z.enum([
+  "openalex",
   "serper",
   "tavily",
   "parallel",
@@ -43,6 +45,7 @@ export const ProviderOperationSchema = z.enum([
 ]);
 
 export const SourceClassSchema = z.enum([
+  "academic",
   "official",
   "primary",
   "paper",

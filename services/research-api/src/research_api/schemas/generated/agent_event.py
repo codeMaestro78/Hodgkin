@@ -26,6 +26,7 @@ class SchemaVersion(StrEnum):
     field_1_3 = "1.3"
     field_1_4 = "1.4"
     field_1_5 = "1.5"
+    field_1_6 = "1.6"
 
 
 class Status(StrEnum):
@@ -90,6 +91,7 @@ class AgentEvent3(BaseModel):
 
 
 class SourceClass(StrEnum):
+    academic = "academic"
     official = "official"
     primary = "primary"
     paper = "paper"

@@ -580,6 +580,8 @@ class Report(Base, TenantScopedMixin, TimestampMixin):
     markdown: Mapped[str] = mapped_column(Text, nullable=False)
     # Nullable for historical Markdown reports; never infer a retrospective assessment.
     document: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    # Captured before publication; NULL means this legacy report has no snapshot.
+    retrieval_accounting: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     content_hash: Mapped[str | None] = mapped_column(String(64))

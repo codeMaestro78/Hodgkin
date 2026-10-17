@@ -74,6 +74,11 @@ class Settings(BaseSettings):
     # New jobs only; queued/checkpointed runs retain their original discovery route.
     SERPER_DISCOVERY_ENABLED: bool = False
     SERPER_API_KEY: SecretStr | None = None
+    # Opt-in for newly queued jobs; the job graph version pins this route.
+    OPENALEX_DISCOVERY_ENABLED: bool = False
+    OPENALEX_API_KEY: SecretStr | None = None
+    # New explicit-mode runs keep bounded repair off unless this is explicitly enabled.
+    BOUNDED_GAP_REPAIR_ENABLED: bool = False
     DISCOVERY_RETRY_AFTER_MAX_SECONDS: float = Field(default=5, ge=0, le=30)
     OBJECT_STORAGE_ENDPOINT: str = "http://localhost:54566"
     OBJECT_STORAGE_BUCKET: str = "research-artifacts"

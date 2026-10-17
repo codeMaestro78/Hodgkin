@@ -1,5 +1,5 @@
 {
-  "$id": "https://schemas.research.local/1.5/ProviderOperationSchema.json",
+  "$id": "https://schemas.research.local/1.6/ProviderOperationSchema.json",
   "title": "ProviderOperationSchema",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "string",

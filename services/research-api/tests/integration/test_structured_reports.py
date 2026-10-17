@@ -7,6 +7,7 @@ The real writer and verifier orchestration run against deterministic model repli
 source ingestion/artifact reads and every model boundary are replaced locally.
 """
 
+import hashlib
 import json
 import os
 import uuid
@@ -285,6 +286,32 @@ async def test_graph_persists_only_verified_findings_and_conservative_requiremen
     assert snapshot["reportRequirements"] == REQUIREMENTS
     assert snapshot["report"]["document"] == document
     assert snapshot["report"]["answerQuality"] == document["quality"]["status"]
+    accounting = snapshot["report"]["retrievalAccounting"]
+    assert "Retrieval accounting (recorded at publication)" in snapshot["report"]["markdown"]
+    assert (
+        "Answer usefulness, dimension relevance, and source independence were not assessed."
+        in snapshot["report"]["markdown"]
+    )
+    assert accounting["schemaVersion"] == "1.1"
+    assert accounting["answerUsefulness"] == "not_assessed"
+    assert accounting["dimensionRelevance"] == "not_assessed"
+    assert accounting["sourceIndependence"] == "not_assessed"
+    async with tenant_session(str(harness.tenant)) as session:
+        stored_report = await session.get(models.Report, uuid.UUID(snapshot["report"]["id"]))
+        assert stored_report is not None
+        expected_hash = hashlib.sha256(
+            json.dumps(
+                {
+                    "markdown": stored_report.markdown,
+                    "document": stored_report.document,
+                    "retrievalAccounting": stored_report.retrieval_accounting,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        assert stored_report.content_hash == expected_hash
     assert harness.planner.await_count == harness.writer.await_count == 1
     assert all(requirement in harness.planner.call_args.args[1] for requirement in REQUIREMENTS)
     assert harness.writer.call_args.kwargs["question"] == QUESTION

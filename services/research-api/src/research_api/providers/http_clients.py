@@ -18,6 +18,7 @@ import httpx
 class ProviderHttpClients:
     tavily: httpx.AsyncClient
     serper: httpx.AsyncClient
+    openalex: httpx.AsyncClient
 
 
 _provider_clients: ContextVar[ProviderHttpClients | None] = ContextVar(
@@ -34,6 +35,8 @@ def get_provider_http_client(provider: str) -> httpx.AsyncClient | None:
         return clients.tavily
     if provider == "serper":
         return clients.serper
+    if provider == "openalex":
+        return clients.openalex
     raise ValueError(f"unsupported HTTP provider: {provider}")
 
 
@@ -61,8 +64,14 @@ async def provider_http_transport(
             limits=limits,
             follow_redirects=False,
         ) as serper,
+        httpx.AsyncClient(
+            base_url="https://api.openalex.org",
+            timeout=timeout,
+            limits=limits,
+            follow_redirects=False,
+        ) as openalex,
     ):
-        clients = ProviderHttpClients(tavily=tavily, serper=serper)
+        clients = ProviderHttpClients(tavily=tavily, serper=serper, openalex=openalex)
         token: Token[ProviderHttpClients | None] = _provider_clients.set(clients)
         try:
             yield clients

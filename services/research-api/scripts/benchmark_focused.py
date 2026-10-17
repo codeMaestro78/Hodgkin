@@ -95,6 +95,7 @@ async def benchmark(
     from research_api.dispatcher import execute
     from research_api.events.wakeups import event_wakeups
     from research_api.providers.http_clients import provider_http_transport
+    from research_api.report_document import report_diagnostics
     from research_api.repositories.runs import RunBudgetDefaults, RunRepository
 
     admin = create_async_engine(os.environ["TEST_DATABASE_ADMIN_URL"])
@@ -217,7 +218,11 @@ async def benchmark(
                         "quality": report.document["quality"]
                         if report and report.document
                         else None,
+                        "documentDiagnostics": report_diagnostics(report.document)
+                        if report and report.document
+                        else None,
                         "coverage": {
+                            "associationOnly": True,
                             "requirementsTotal": len(report.document["requirements"]),
                             "requirementsAddressed": sum(
                                 row["status"] == "addressed"

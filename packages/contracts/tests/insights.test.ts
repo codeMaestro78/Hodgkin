@@ -64,4 +64,70 @@ describe("evidence desk boundaries", () => {
         .success,
     ).toBe(false);
   });
+
+  it("accepts source-stage accounting without converting unknown quality into zero", () => {
+    const snapshot = {
+      schemaVersion: "1.4",
+      tasks: [],
+      providerCalls: [],
+      gaps: [],
+      parentReportId: null,
+      parentRunId: null,
+      followupRuns: [],
+      reportVersions: [],
+      retrievalAccounting: {
+        schemaVersion: "1.1",
+        providers: [
+          {
+            provider: "openalex",
+            searchCalls: 1,
+            discovered: 6,
+            shortlisted: 2,
+            excluded: 4,
+            duplicateWork: 1,
+            unavailable: 1,
+            policyVersions: ["academic-lexical-topk-v1"],
+            countsComplete: true,
+            extractedSources: 2,
+            citedInVerifiedFinding: 1,
+          },
+        ],
+        extractionCalls: 2,
+        extractionOutcomes: {
+          succeeded: 1,
+          failed: 1,
+          uncertain: 0,
+          pending: 0,
+          other: 0,
+        },
+        extractedSources: 2,
+        citedInVerifiedFinding: 1,
+        citationChecks: 2,
+        exactSpanVerifiedCitations: 1,
+        semanticReviewOutcomes: {
+          supports: 1,
+          partially_supports: 0,
+          contradicts: 0,
+          unrelated: 0,
+          notRecorded: 1,
+        },
+        publishedClaims: 1,
+        answerUsefulness: "not_assessed",
+        dimensionRelevance: "not_assessed",
+        sourceIndependence: "not_assessed",
+      },
+    };
+    expect(RunInsightsSchema.parse(snapshot).retrievalAccounting).toEqual(
+      snapshot.retrievalAccounting,
+    );
+    expect(
+      RunInsightsSchema.safeParse({
+        ...snapshot,
+        retrievalAccounting: {
+          ...snapshot.retrievalAccounting,
+          dimensionRelevance: 0,
+        },
+      }).success,
+    ).toBe(false);
+  });
 });

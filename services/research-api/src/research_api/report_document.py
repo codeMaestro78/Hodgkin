@@ -67,6 +67,66 @@ class _Input(BaseModel):
 
 
 def validate_report_document(document: dict[str, Any]) -> dict[str, Any]:
+    if document.get("version") == 4:
+        from research_api.report_document_v4 import validate_report_document_v4
+
+        return validate_report_document_v4(document)
+    if document.get("version") == 3:
+        from research_api.report_document_v3 import validate_report_document_v3
+
+        return validate_report_document_v3(document)
+    if document.get("version") == 2:
+        from research_api.report_document_v2 import validate_report_document_v2
+
+        return validate_report_document_v2(document)
+    return _validate_report_document_v1(document)
+
+
+def report_diagnostics(document: dict[str, Any]) -> dict[str, Any]:
+    """Offline benchmark counters, keeping provenance distinct from assessment.
+
+    These are recorded model outcomes, not human gold labels or measured quality.
+    Historical V1 documents have no assessed coverage; report null, never zero.
+    """
+    doc = validate_report_document(document)
+    return {
+        "documentVersion": doc["version"],
+        "assessmentVersion": doc["assessmentVersion"],
+        "verifiedFindings": len(doc["findings"]),
+        "provenanceOnly": {
+            "requirementsLinked": sum(bool(row["claimIds"]) for row in doc["requirements"]),
+            "questionsLinked": sum(bool(row["claimIds"]) for row in doc["questionCoverage"]),
+        },
+        "assessed": {
+            "dimensionsTotal": len(doc["dimensions"]),
+            "dimensionsVerifiedCovered": sum(
+                row["status"] == "verified_covered" for row in doc["dimensions"]
+            ),
+            "requirementsEstablished": sum(
+                row["outcome"] == "established" for row in doc["requirementOutcomes"]
+            ),
+            "requirementsUnassessed": sum(
+                row["outcome"] == "not_assessed" for row in doc["requirementOutcomes"]
+            ),
+        }
+        if doc["version"] >= 2
+        else None,
+        "narrative": {
+            "status": doc["narrative"]["status"],
+            "reason": doc["narrative"]["reason"],
+            "blocks": len(doc["narrative"]["blocks"]),
+            "narrativeClaims": len(doc["narrative"]["narrativeClaimIds"]),
+            "proposedSentences": doc["narrative"]["proposedSentenceCount"],
+            "publishedSentences": doc["narrative"]["publishedSentenceCount"],
+        }
+        if doc["version"] >= 4
+        else None,
+        "independenceAssessed": False,
+        "humanQualityAssessed": False,
+    }
+
+
+def _validate_report_document_v1(document: dict[str, Any]) -> dict[str, Any]:
     """Validate generated shape plus internal references; return JSON-safe aliases.
 
     External citation/source existence remains the caller's responsibility. JSON

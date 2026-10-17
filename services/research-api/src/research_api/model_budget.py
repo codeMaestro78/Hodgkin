@@ -305,11 +305,9 @@ async def model_response(
             failure = {
                 "version": "model-failure-v1",
                 "exceptionType": type(error).__name__[:120],
-                "statusCode": (
-                    status_code
-                    if type(status_code) is int and 100 <= status_code <= 599
-                    else None
-                ),
+                "statusCode": status_code
+                if type(status_code) is int and 100 <= status_code <= 599
+                else None,
                 "outcome": state,
                 "retryable": retryable_model_provider(error),
             }

@@ -1,5 +1,5 @@
 {
-  "$id": "https://schemas.research.local/1.5/WorkerResultSchema.json",
+  "$id": "https://schemas.research.local/1.6/WorkerResultSchema.json",
   "title": "WorkerResultSchema",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
@@ -11,7 +11,8 @@
         "1.2",
         "1.3",
         "1.4",
-        "1.5"
+        "1.5",
+        "1.6"
       ]
     },
     "subQuestionId": {
@@ -50,7 +51,8 @@
               "1.2",
               "1.3",
               "1.4",
-              "1.5"
+              "1.5",
+              "1.6"
             ]
           },
           "id": {

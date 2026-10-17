@@ -51,7 +51,12 @@ async def test_real_worker_bounds_sources_and_concurrency(
             if entity is ResearchRun:
                 # Collection cleanup reads cancellation intent under the real
                 # lifecycle lock; this fixture models an active, uncancelled run.
-                return SimpleNamespace(concurrency_limit=3, cancellation_requested_at=None)
+                return SimpleNamespace(
+                    concurrency_limit=3,
+                    cancellation_requested_at=None,
+                    mode=None,
+                    active_plan_id=None,
+                )
             if entity is SubQuestion:
                 collection_started = True
                 key = str(statement.compile().params["id_1"])

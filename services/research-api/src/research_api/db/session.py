@@ -1,3 +1,4 @@
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from time import monotonic
@@ -27,6 +28,24 @@ def command_category(statement: str | None) -> str:
     return verb if verb in {"SELECT", "INSERT", "UPDATE", "DELETE", "WITH", "SET"} else "OTHER"
 
 
+def slow_query_family(statement: str | None) -> str:
+    """Static, non-sensitive labels for the lock paths that need diagnosis."""
+    sql = statement or ""
+    if command_category(sql) != "SELECT":
+        return "other"
+    for table, label in (
+        ("runtime_jobs", "runtime_job"),
+        ("budgets", "budget"),
+        ("research_runs", "run"),
+    ):
+        if re.search(rf"\bFROM\s+{table}\b", sql, re.IGNORECASE):
+            if re.search(r"\bFOR\s+UPDATE\b", sql, re.IGNORECASE):
+                return f"{label}_exclusive"
+            if table == "runtime_jobs" and re.search(r"\bFOR\s+SHARE\b", sql, re.IGNORECASE):
+                return "runtime_job_shared"
+    return "other"
+
+
 @event.listens_for(engine.sync_engine, "before_cursor_execute")
 def statement_start(
     _conn: Any,
@@ -54,6 +73,7 @@ def statement_finish(
             "db.statement.slow",
             started=started,
             commandCategory=command_category(_statement),
+            queryFamily=slow_query_family(_statement),
             executemany=_executemany,
         )
 

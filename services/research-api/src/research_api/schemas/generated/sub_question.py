@@ -15,6 +15,7 @@ class SchemaVersion(StrEnum):
     field_1_3 = "1.3"
     field_1_4 = "1.4"
     field_1_5 = "1.5"
+    field_1_6 = "1.6"
 
 
 class SuccessCriterion(RootModel[constr(max_length=400)]):
@@ -22,6 +23,7 @@ class SuccessCriterion(RootModel[constr(max_length=400)]):
 
 
 class PreferredProvider(StrEnum):
+    openalex = "openalex"
     serper = "serper"
     tavily = "tavily"
     parallel = "parallel"
@@ -30,6 +32,7 @@ class PreferredProvider(StrEnum):
 
 
 class SourceClass(StrEnum):
+    academic = "academic"
     official = "official"
     primary = "primary"
     paper = "paper"

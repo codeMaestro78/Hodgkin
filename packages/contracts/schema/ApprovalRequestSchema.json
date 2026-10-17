@@ -1,5 +1,5 @@
 {
-  "$id": "https://schemas.research.local/1.5/ApprovalRequestSchema.json",
+  "$id": "https://schemas.research.local/1.6/ApprovalRequestSchema.json",
   "title": "ApprovalRequestSchema",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",

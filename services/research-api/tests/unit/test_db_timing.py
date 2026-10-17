@@ -23,6 +23,20 @@ def test_command_category_never_contains_sql(sql, expected):
     assert db.command_category(sql) == expected
 
 
+@pytest.mark.parametrize(
+    "sql, expected",
+    [
+        ("SELECT * FROM runtime_jobs WHERE owner_id=:secret FOR UPDATE", "runtime_job_exclusive"),
+        ("SELECT run_id FROM runtime_jobs FOR SHARE", "runtime_job_shared"),
+        ("SELECT * FROM budgets FOR UPDATE", "budget_exclusive"),
+        ("SELECT * FROM research_runs FOR UPDATE", "run_exclusive"),
+        ("SELECT * FROM private_table WHERE token=:secret", "other"),
+    ],
+)
+def test_slow_query_family_is_static_and_redacted(sql, expected):
+    assert db.slow_query_family(sql) == expected
+
+
 def test_slow_statement_logs_category_without_sql_or_parameters(caplog):
     with caplog.at_level(logging.WARNING, logger="research_api.dependencies"):
         db.statement_finish(
@@ -35,6 +49,7 @@ def test_slow_statement_logs_category_without_sql_or_parameters(caplog):
         )
     record = json.loads(caplog.records[-1].message)
     assert record["commandCategory"] == "SELECT"
+    assert record["queryFamily"] == "other"
     assert "secret" not in caplog.text and "token" not in caplog.text
 
 

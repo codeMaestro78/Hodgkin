@@ -19,6 +19,7 @@ from research_api.auth import Caller, authenticated_caller
 from research_api.config import get_settings
 from research_api.db.models import Report, ReportExport, ReportShare, ResearchRun, Source
 from research_api.db.session import tenant_session
+from research_api.report_integrity import report_integrity_payload
 
 router = APIRouter(tags=["report sharing and exports"])
 REPORTS_PATH = "/research/reports"
@@ -119,7 +120,7 @@ async def _owner_report(
 
 def _canonical_report_hash(report: Report) -> str:
     payload = json.dumps(
-        {"markdown": report.markdown, "document": report.document},
+        report_integrity_payload(report),
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
