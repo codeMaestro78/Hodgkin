@@ -48,9 +48,9 @@ _RATES.update(
             "openai-standard-text-2026-10-16",
             TextRate(Decimal("0.10"), Decimal("0.01"), Decimal("0.50")),
         ),
-        ("openrouter", "meta/muse-spark-1.3"): (
-            "openrouter-standard-text-2026-10-16",
-            TextRate(Decimal("1.25"), Decimal("0.15"), Decimal("4.25")),
+        ("openrouter", "deepseek/deepseek-v4.1-flash"): (
+            "openrouter-deepseek-v4.1-flash-2026-10-17",
+            TextRate(Decimal("0.08"), Decimal("0.007"), Decimal("0.55")),
         ),
     }
 )

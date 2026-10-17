@@ -165,7 +165,7 @@ def test_model_dependency_event_logs_retry_decision_without_sensitive_content(ca
             operation="model",
             outcome="released",
             reason="RateLimitError",
-            model="meta/muse-spark-1.3",
+            model="deepseek/deepseek-v4.1-flash",
             role="writer",
             attempt=1,
             max_attempts=3,
@@ -174,7 +174,7 @@ def test_model_dependency_event_logs_retry_decision_without_sensitive_content(ca
 
     event = json.loads(caplog.records[-1].message)
     assert event["provider"] == "openrouter"
-    assert event["model"] == "meta/muse-spark-1.3"
+    assert event["model"] == "deepseek/deepseek-v4.1-flash"
     assert event["role"] == "writer"
     assert event["retryScheduled"] is True
     assert "prompt" not in event and "response" not in event

@@ -6,7 +6,7 @@ from research_api.config import Settings
 from research_api.graph import builder
 from research_api.model_budget import request_fingerprint
 from research_api.model_routing import MODEL_ROLES, ModelRoute, normalize_routing
-from research_api.pricing import model_pricing_version, model_rate
+from research_api.pricing import TextRate, model_pricing_version, model_rate
 
 
 def test_legacy_model_configuration_remains_the_default_for_every_role():
@@ -24,11 +24,13 @@ def test_role_overrides_can_route_to_openrouter_without_changing_workers():
         OPENROUTER_API_KEY="openrouter-fixture",
         LLM_MODEL_NAME="gpt-4o-mini",
         LLM_WRITER_PROVIDER="openrouter",
-        LLM_WRITER_MODEL_NAME="meta/muse-spark-1.3",
+        LLM_WRITER_MODEL_NAME="deepseek/deepseek-v4.1-flash",
     )
 
     assert settings.model_route("planner") == ModelRoute("openai", "gpt-4o-mini")
-    assert settings.model_route("writer") == ModelRoute("openrouter", "meta/muse-spark-1.3")
+    assert settings.model_route("writer") == ModelRoute(
+        "openrouter", "deepseek/deepseek-v4.1-flash"
+    )
     assert settings.model_route("claim_review") == ModelRoute("openai", "gpt-4o-mini")
 
 
@@ -65,9 +67,11 @@ def test_provider_identity_does_not_change_legacy_openai_replay_keys():
 def test_supported_provider_model_rates_are_explicitly_versioned():
     assert model_rate("gpt-6-luna", "openai").input == Decimal("0.10")
     assert model_rate("gpt-5.4-mini", "openai").output == Decimal("4.50")
-    assert model_rate("meta/muse-spark-1.3", "openrouter").cached_input == Decimal("0.15")
-    assert model_pricing_version("meta/muse-spark-1.3", "openrouter") == (
-        "openrouter-standard-text-2026-10-16"
+    assert model_rate("deepseek/deepseek-v4.1-flash", "openrouter") == TextRate(
+        Decimal("0.08"), Decimal("0.007"), Decimal("0.55")
+    )
+    assert model_pricing_version("deepseek/deepseek-v4.1-flash", "openrouter") == (
+        "openrouter-deepseek-v4.1-flash-2026-10-17"
     )
     assert model_rate("unknown-model", "openrouter") is None
 
@@ -85,7 +89,7 @@ async def test_model_dispatch_uses_the_pinned_provider_and_model(monkeypatch):
     client = Client()
     routes = {
         "planner": ModelRoute("openai", "gpt-4o-mini"),
-        "writer": ModelRoute("openrouter", "meta/muse-spark-1.3"),
+        "writer": ModelRoute("openrouter", "deepseek/deepseek-v4.1-flash"),
         "claim_review": ModelRoute("openai", "gpt-4o-mini"),
     }
     runtime = builder.ModelRuntime(routes=routes, clients={"openrouter": client})
@@ -108,5 +112,5 @@ async def test_model_dispatch_uses_the_pinned_provider_and_model(monkeypatch):
     assert result == "response"
     assert seen["client"] is client
     assert seen["provider"] == "openrouter"
-    assert seen["model"] == "meta/muse-spark-1.3"
+    assert seen["model"] == "deepseek/deepseek-v4.1-flash"
     assert client.timeout_options == [{"timeout": settings.MODEL_WRITER_TIMEOUT_SECONDS}]

@@ -123,7 +123,7 @@ async def test_model_routes_stay_pinned_when_runtime_configuration_changes():
     tenant, run_id = await seed()
     original = {
         "planner": {"provider": "openai", "model": "gpt-4o-mini"},
-        "writer": {"provider": "openrouter", "model": "meta/muse-spark-1.3"},
+        "writer": {"provider": "openrouter", "model": "deepseek/deepseek-v4.1-flash"},
         "claim_review": {"provider": "openai", "model": "gpt-5.4-mini"},
     }
     async with tenant_session(str(tenant)) as session:
