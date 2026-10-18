@@ -369,7 +369,10 @@
       "properties": {
         "schemaVersion": {
           "type": "string",
-          "const": "1.1"
+          "enum": [
+            "1.1",
+            "1.2"
+          ]
         },
         "providers": {
           "maxItems": 8,
@@ -441,6 +444,18 @@
                   }
                 ]
               },
+              "duplicateUrl": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "unavailable": {
                 "anyOf": [
                   {
@@ -490,6 +505,24 @@
               "citedInVerifiedFinding"
             ],
             "additionalProperties": false
+          }
+        },
+        "exactDuplicateSources": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "sourceClasses": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32
+          },
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
           }
         },
         "extractionCalls": {
