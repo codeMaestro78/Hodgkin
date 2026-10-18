@@ -20,7 +20,7 @@ from contextvars import ContextVar
 from datetime import UTC, datetime
 from decimal import Decimal
 from time import monotonic
-from typing import Any
+from typing import Any, cast
 
 from openai import AsyncOpenAI
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -457,6 +457,16 @@ async def model_response(
             role=role,
             max_attempts=attempt_limit,
             retry_scheduled=False,
+            input_tokens=(
+                cast(int, accounting.get("inputTokens"))
+                if type(accounting.get("inputTokens")) is int
+                else None
+            ),
+            output_tokens=(
+                cast(int, accounting.get("outputTokens"))
+                if type(accounting.get("outputTokens")) is int
+                else None
+            ),
         )
         if overspent:
             # Commit real usage first. Failing now prevents any subsequent paid dispatch.
