@@ -48,6 +48,7 @@ class Settings(BaseSettings):
     APP_ENV: Literal["development", "test", "staging", "production"] = "development"
     RESEARCH_LOG_LEVEL: Literal["INFO", "DEBUG"] = "INFO"
     DATABASE_SLOW_STATEMENT_MS: int = Field(default=1000, ge=100, le=60000)
+    DATABASE_QUERY_TIMING_ENABLED: bool = False
     DATABASE_URL: str = "postgresql+psycopg://research_app:research_app@localhost:55432/research"
     DATABASE_ADMIN_URL: str | None = None
     DATABASE_POOL_SIZE: int = 5
