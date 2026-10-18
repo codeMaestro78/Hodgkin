@@ -664,6 +664,84 @@ html .report-scroll[data-answer-ready] .report-orchestration {
   animation: answer-rise 420ms var(--ans-out) both;
   animation-delay: calc(var(--i, 0) * 60ms);
 }
+
+.verified-preview {
+  max-width: 760px;
+  margin: 0 auto 20px;
+  padding: clamp(18px, 3vw, 28px);
+  border: 1px solid var(--steel);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--ink);
+  text-align: left;
+}
+.verified-preview-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--steel);
+}
+.verified-preview-heading h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+.verified-preview-heading p,
+.verified-preview .verified-preview-note {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.verified-preview-heading > span {
+  flex: none;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.verified-preview ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.verified-preview li {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--steel);
+}
+.verified-preview li > p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.65;
+}
+.verified-preview-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 8px;
+}
+.verified-preview-sources button {
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--copper);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.verified-preview-sources button:hover {
+  text-decoration: underline;
+}
+.verified-preview-sources button:focus-visible {
+  outline: 2px solid var(--copper);
+  outline-offset: 3px;
+}
 .report-followup .answer-followups button {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -770,6 +848,34 @@ html .report-scroll[data-answer-ready] .report-orchestration {
 }
 .retrieval-accounting .desk-help {
   color: var(--ans-muted);
+}
+.retrieval-funnel {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 4px 0;
+}
+.retrieval-funnel > div {
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid var(--ans-line);
+  border-radius: 12px;
+  background: var(--ans-sand);
+}
+.retrieval-funnel dt {
+  color: var(--ans-muted);
+  font-size: 11px;
+}
+.retrieval-funnel dd {
+  margin: 4px 0 0;
+  font-size: 16px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 620px) {
+  .retrieval-funnel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 .method-stats {
   display: grid;
