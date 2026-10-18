@@ -11,6 +11,12 @@ from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from research_api.billing.ledger import (
+    BillingLedgerError,
+    BillingModeUnavailable,
+    BillingUnitsExhausted,
+)
+from research_api.billing.lifecycle import settle_terminal_run
 from research_api.config import Settings
 from research_api.db.models import (
     DispatchRegistry,
@@ -210,14 +216,31 @@ async def schedule_due(session: AsyncSession, tenant: uuid.UUID, settings: Setti
             **schedule.budget,
             "max_estimated_cost_usd": Decimal(schedule.budget["max_estimated_cost_usd"]),
         }
-        run, created = await RunRepository(session, tenant).create_once(
-            user_id=schedule.user_id,
-            question=schedule.question,
-            budget=RunBudgetDefaults(**data),
-            idempotency_key=f"schedule:{schedule.id}:{schedule.next_run_at.isoformat()}",
-            approval_required=schedule.approval_required,
-        )
+        try:
+            async with session.begin_nested():
+                run, created = await RunRepository(session, tenant).create_once(
+                    user_id=schedule.user_id,
+                    question=schedule.question,
+                    budget=RunBudgetDefaults(**data),
+                    idempotency_key=f"schedule:{schedule.id}:{schedule.next_run_at.isoformat()}",
+                    approval_required=schedule.approval_required,
+                    mode=schedule.mode,
+                    mode_policy_version=schedule.mode_policy_version,
+                )
+        except (BillingUnitsExhausted, BillingModeUnavailable) as exc:
+            schedule.last_quota_blocked_at = datetime.now(UTC)
+            schedule.last_quota_blocked_reason = (
+                "insufficient_units"
+                if isinstance(exc, BillingUnitsExhausted)
+                else "mode_unavailable"
+            )
+            schedule.next_run_at = datetime.now(UTC) + timedelta(minutes=schedule.interval_minutes)
+            continue
+        except BillingLedgerError:
+            raise
         if created:
+            schedule.last_quota_blocked_at = None
+            schedule.last_quota_blocked_reason = None
             session.add(
                 RuntimeJob(
                     run_id=run.id,
@@ -317,6 +340,8 @@ async def claim(tenant: uuid.UUID, owner: uuid.UUID, settings: Settings) -> JobF
         if run is None or run.status in {"completed", "failed", "cancelled"}:
             job.state = run.status if run else "failed"
             job.owner_id, job.lease_expires_at = None, None
+            if run is not None:
+                await settle_terminal_run(session, run)
             await session.flush()
             await refresh_due(session, registry)
             return None
@@ -324,6 +349,7 @@ async def claim(tenant: uuid.UUID, owner: uuid.UUID, settings: Settings) -> JobF
             job.state, run.status = "cancelled", "cancelled"
             job.owner_id, job.lease_expires_at = None, None
             run.cancelled_at = run.cancellation_requested_at
+            await settle_terminal_run(session, run)
             await EventOutbox(session, tenant).append(
                 run_id=run.id,
                 event_type="run.cancelled",
@@ -377,6 +403,7 @@ async def claim(tenant: uuid.UUID, owner: uuid.UUID, settings: Settings) -> JobF
             run.error_code = (
                 "graph_version_incompatible" if not graph_compatible else "recovery_limit"
             )
+            await settle_terminal_run(session, run)
             await EventOutbox(session, tenant).append(
                 run_id=run.id,
                 event_type="run.failed",
