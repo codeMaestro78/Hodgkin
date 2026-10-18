@@ -15,7 +15,9 @@ depends_on = None
 def upgrade() -> None:
     op.execute("SET LOCAL search_path TO public")
     op.execute("""
-        ALTER TABLE public.reports DROP CONSTRAINT IF EXISTS ck_report_retrieval_accounting_snapshot;
+        ALTER TABLE public.reports
+        DROP CONSTRAINT IF EXISTS
+            ck_report_retrieval_accounting_snapshot;
         ALTER TABLE public.reports ADD CONSTRAINT ck_report_retrieval_accounting_snapshot CHECK (
             retrieval_accounting IS NULL OR (
                 jsonb_typeof(retrieval_accounting) = 'object'
