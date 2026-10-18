@@ -13,7 +13,11 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from research_api.artifacts.normalization import canonicalize_url, normalize_text
+from research_api.artifacts.normalization import (
+    canonicalize_url,
+    normalize_text,
+    search_result_identity_url,
+)
 from research_api.artifacts.store import ArtifactStore
 from research_api.db.models import (
     Budget,
@@ -306,6 +310,7 @@ class TavilyEvidenceIngestor:
         original_urls: dict[str, list[str]] = {}
         source_details: dict[str, dict[str, str]] = {}
         publication_dates = {}
+        selected_url_by_identity: dict[str, str] = {}
         for result in search_response.results:
             try:
                 canonical_url = canonicalize_url(result.url)
@@ -314,8 +319,19 @@ class TavilyEvidenceIngestor:
                     provider="tavily", operation="source", outcome="rejected", reason="invalid_url"
                 )
                 continue
+            try:
+                identity_url = search_result_identity_url(result.url)
+            except (ValueError, UnicodeError):
+                continue
+            selected_url = selected_url_by_identity.get(identity_url)
+            if selected_url is not None:
+                urls = original_urls.setdefault(selected_url, [])
+                if result.url not in urls:
+                    urls.append(result.url)
+                continue
             if canonical_url not in titles and len(titles) >= max_results:
                 continue
+            selected_url_by_identity[identity_url] = canonical_url
             titles[canonical_url] = result.title
             result_extra = getattr(result, "model_extra", None) or {}
             if result_extra.get("provider") == "openalex":
@@ -472,7 +488,7 @@ class TavilyEvidenceIngestor:
             )
             prepared.clear()
             operation_event(
-                "research.source.metadata", started=started, sourceCount=len(source_ids)
+                "research.source.persistence", started=started, sourceCount=len(source_ids)
             )
 
         async def flush_artifacts() -> None:
