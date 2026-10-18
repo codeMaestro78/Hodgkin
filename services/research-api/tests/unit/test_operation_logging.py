@@ -8,7 +8,13 @@ import pytest
 
 from research_api import auth
 from research_api.config import Settings
-from research_api.telemetry import error_facts, operation_event, request_id
+from research_api.telemetry import (
+    dependency_event,
+    error_facts,
+    milestone_event,
+    operation_event,
+    request_id,
+)
 
 
 def test_group_leaves_include_sqlstate_without_exception_contents(caplog):
@@ -117,6 +123,39 @@ def test_debug_logging_retains_transaction_details(caplog):
     with caplog.at_level(logging.DEBUG, logger="research_api.dependencies"):
         operation_event("db.transaction", started=monotonic(), setupMs=42)
     assert json.loads(caplog.records[-1].message)["setupMs"] == 42
+
+
+def test_model_token_telemetry_contains_only_validated_usage_counts(caplog):
+    with caplog.at_level(logging.INFO, logger="research_api.dependencies"):
+        dependency_event(
+            provider="openai",
+            operation="model",
+            outcome="consumed",
+            input_tokens=120,
+            output_tokens=24,
+        )
+    record = json.loads(caplog.records[-1].message)
+    assert record["inputTokens"] == 120
+    assert record["outputTokens"] == 24
+    assert "prompt" not in caplog.text and "response" not in caplog.text
+    with pytest.raises(ValueError):
+        dependency_event(
+            provider="openai", operation="model", outcome="consumed", input_tokens=True
+        )
+
+
+def test_research_milestone_is_timestamped_and_contains_only_allowlisted_facts(caplog):
+    with caplog.at_level(logging.INFO, logger="research_api.dependencies"):
+        milestone_event("research.first_verified_finding", verified_finding_count=2)
+    record = json.loads(caplog.records[-1].message)
+    assert record["event"] == "research.milestone"
+    assert record["milestone"] == "research.first_verified_finding"
+    assert record["verifiedFindingCount"] == 2
+    assert "durationMs" not in record
+    with pytest.raises(ValueError):
+        milestone_event("research.first_verified_finding", verified_finding_count=True)
+    with pytest.raises(ValueError):
+        milestone_event("unknown", verified_finding_count=2)
 
 
 @pytest.mark.parametrize("status,outcome", [(200, "succeeded"), (401, "rejected"), (503, "failed")])
