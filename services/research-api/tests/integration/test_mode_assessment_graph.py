@@ -16,7 +16,6 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy import select
-from test_reliability_runtime import seed
 
 from research_api import jobs
 from research_api.config import Settings
@@ -43,6 +42,7 @@ from research_api.repositories.budgets import BudgetExceededError
 from research_api.repositories.runs import RunRepository
 from research_api.runtime_context import LeaseLostError
 from research_api.schemas.generated.agent_event import AgentEvent
+from tests.integration.test_reliability_runtime import seed
 
 pytestmark = pytest.mark.integration
 QUOTE = "The service preserves workflow state in durable storage."
