@@ -1,23 +1,23 @@
 # Pricing, Entitlements, and Billing — Implementation Specification
 
-**Status:** implementation-ready proposal; product and finance decisions remain open
-**As of:** 2026-10-16
+**Status:** lower-price v2 local catalog approved by the product owner on 2026-10-19; cost validation, paid launch, finance/legal review, Stripe setup, migrations, and enforcement rollout remain gated
+**As of:** 2026-10-19
 **Scope:** Free, Scholar, and Investigator plans; server-enforced usage; future paid subscriptions
 **Non-goal:** this document does not authorize production billing, database changes, or a Supabase migration.
 
 ## 1. Executive decision
 
-The pricing page currently presents three plans, prices, and substantial feature/usage claims. The application does not yet have an authoritative subscription and monthly-entitlement system. Treat the displayed plans as a product proposal, not as active purchasable entitlements.
+The pricing page presents the lower-price proposal and tier/mode split for local implementation. Core subscription and entitlement paths now exist behind configuration, but paid plans are not launch-ready: allowances remain provisional, live billing is gated, and test-mode purchase/reconciliation operations still require end-to-end validation.
 
 Recommended first release:
 
-| Plan | Proposed price | Proposed monthly allowance | Intended audience |
+| Plan | Proposed launch price (not purchasable yet) | Provisional monthly allowance | Intended audience |
 | --- | ---: | ---: | --- |
 | Free | $0 | 5 research units | Try evidence-backed, focused research |
-| Scholar | $14/month or $132/year ($11/month equivalent) | 40 research units | Individual researchers doing regular work |
-| Investigator | $36/month or $348/year ($29/month equivalent) | 120 research units | High-volume individual researchers |
+| Scholar | $5.99/month or $59.99/year ($5.00/month equivalent) | 20 research units | Individual researchers doing regular work |
+| Investigator | $12.99/month or $129.99/year ($10.83/month equivalent) | 40 research units | Researchers needing Deep mode and higher capacity |
 
-These amounts and allowances are **hypotheses**, not approved commercial terms. Validate actual per-mode provider spend, payment fees, storage, support, failed-run cost, and willingness to pay before enabling checkout. Keep citation quality, exact-span verification, source attribution, and honest “answer not established” behavior identical across tiers. A higher tier buys capacity and workflow convenience, never weaker evidence standards or guaranteed findings.
+The lower prices and tier split are approved for local implementation by the user on 2026-10-19. The 5/20/40 monthly allowances and 1/2/4 mode weights are **provisional**, not launch-approved economics. The catalog version is bumped so historical v1 periods keep resolving against their original terms. Before checkout or enforcement, validate actual per-mode provider spend, payment fees, storage, support, failed-run cost, tail risk, and willingness to pay; revise allowances if the margin gate fails. Keep citation quality, exact-span verification, source attribution, and honest “answer not established” behavior identical across tiers. A higher tier buys capacity and workflow convenience, never weaker evidence standards or guaranteed findings.
 
 Meter work in **research units** rather than claiming that all runs cost the same:
 
@@ -39,27 +39,34 @@ This specification distinguishes:
 
 ### 2.1 Observed in this checkout
 
-- `apps/web/app/pricing/pricing-plans.tsx` advertises Free, Scholar, and Investigator. It currently encodes $0, $14/month or $11/month billed annually ($132/year), and $36/month or $29/month billed annually ($348/year). Its CTAs point to signup with a plan query parameter; there is no checkout flow in that component.
-- `apps/web/app/pricing/page.tsx` advertises 10 / 60 / 200 “research runs each month,” Deep mode and 20-source copy, citations, library/history/PDF export, comparison, sharing, batches, and scheduled runs. These are not all enforced or fully present. Specifically, the export API currently exposes Markdown and BibTeX, not PDF. Existing interval schedules are not timezone-aware.
+- `apps/web/app/pricing/pricing-plans.tsx` shows the proposed $0 / $5.99 / $12.99 monthly prices and $0 / $59.99 / $129.99 annual reference prices. Paid CTAs depend on server checkout availability; API Checkout/Portal routes exist behind configuration, while annual checkout is disabled.
+- `apps/web/app/pricing/page.tsx` previously advertised 10 / 60 / 200 research runs, PDF export, and equal cost at every depth. The implementation removes those claims, marks unit allowances provisional, and describes Markdown/BibTeX rather than PDF. Existing interval schedules are not timezone-aware.
 - `docs/onboarding.md` says onboarding preferences live in Supabase Auth user metadata and are not authorization, quota, or billing state. Preserve that boundary.
 - `services/research-api/src/research_api/repositories/runs.py` provides per-run defaults, including `max_search_calls=12`, a 120-second wall-clock budget, and a $5 estimated-cost ceiling. `services/research-api/src/research_api/api.py` accepts per-run budget overrides. These are **not** plan allowances or actual provider invoices; `pricing.py` describes cost figures as estimates.
+- Explicit `focused`, `balanced`, and `deep` modes and versioned operational ceilings are implemented in `mode_policy.py`; current mode policy stores provider-operation/source/time/token safety budgets, not monthly unit prices or plan entitlements. `ResearchRun.mode` and `mode_policy_version` are persisted, and retry/follow-up logic preserves mode semantics. Unit pricing must be a separate server-owned catalog rather than inferred from operation/source limits.
+- Batch and schedule requests now accept an optional explicit research mode. New batch records and child runs snapshot mode plus `mode_policy_version`; scheduled occurrences inherit the schedule snapshot. Legacy records remain mode-null and are not backfilled. The active billing period snapshots the catalog version used for each occurrence; this is separate from the operational mode-policy snapshot.
+- The existing `UsageLedger` is unique per tenant/run and records run-level provider/model usage and reservations. `ProviderCallReservation` is also run-scoped. Neither is a monthly entitlement period or customer research-unit ledger; do not retrofit monthly account-balance semantics into those tables.
+- Billing implementation has a local v2 server catalog (`research-units-v2-2026-10-19`) with proposed prices, provisional Free/Scholar/Investigator grants (5/20/40 units), provisional mode prices (1/2/4), and the settlement matrix in §3.3. The historical v1 catalog remains registered so persisted v1 periods continue to resolve. `BILLING_ENFORCEMENT_ENABLED` remains off by default; no paid plans are activated.
+- Migrations `0021`–`0028` are local and have not been applied to any shared, development, staging, or hosted database. Reservations connect to run creation/replay, retries, follow-ups, all-or-nothing batches and scheduled occurrences; terminal settlement is transactional with terminal state and retried during durable recovery. Mode-null new work is rejected only when enforcement is enabled. Operator adjustments require a server-configured actor-token mapping and append actor/reason/idempotency audit details. The opt-in disposable PostgreSQL lifecycle test covers migrations, RLS/grants, concurrent admission, settlement replay, Stripe-period resets, suspension/recovery/cancellation, and the state-transition function; broader crash/failure-injection and shadow reconciliation gates remain.
+- Stripe Checkout/Portal API and same-origin BFF routes, server-only Price ID validation, customer/subscription projections, and a raw-body signature-verified webhook inbox with bounded payload size and event-ID deduplication are implemented locally behind flags. Signed subscription events can provision paid periods; success redirects alone cannot. Test-mode Stripe configuration, an end-to-end test-mode purchase/webhook journey, reconciliation operations, and live paid-plan activation remain unverified. Do not present the local integration as launch-ready billing.
+- `WorkspaceShell` renders shared sidebar content in desktop and mobile navigation; `.sidebar-bottom` contains the profile/sign-out row. The authenticated entitlement budget card is implemented; detailed usage history, browser-level accessibility, and failure-state/network validation remain open.
 - Existing code has run creation, projects/library, report comparison, sharing/export, batches, schedules, tenant-scoped persistence, and a restricted runtime database role. Reuse these capabilities; do not invent duplicate product subsystems.
 - `services/research-api/src/research_api/jobs.py` schedules by interval minutes. Do not promise timezone-aware schedules in pricing until supported and tested.
-- The current Alembic head should be checked from the target checkout before implementation. A future billing migration number must be chosen from the actual graph, not assumed from this document.
+- The billing migration chain is `0021`–`0028` in this checkout and has been exercised from an empty database on a disposable PostgreSQL instance. Before applying it elsewhere, inspect that target's current revision and confirm the intended database; no shared or hosted target has been migrated.
 
 ### 2.2 Required pricing-page corrections before billing launch
 
-The page must not state a monthly run quota, PDF export, Deep access, sharing, comparison, or scheduling as an active included feature until the server enforces the entitlement and the feature is usable end to end. Replace run counts with clearly explained research units only after the quota design is approved and enforced. Keep pricing content sourced from one catalog/configuration rather than duplicating numbers across cards, comparison tables, API code, and tests.
+The page may show the agreed commercial proposal only with a clear preview/unavailable notice. It must not imply that proposed unit amounts or plan gates are active entitlements until the server enforces them and the authenticated UI reads the authoritative catalog. Do not claim PDF export. Keep pricing content sourced from one catalog/configuration rather than duplicating numbers across cards, comparison tables, API code, and tests; the current page/catalog duplication is a known follow-up before checkout.
 
 ## 3. Product and commercial policy
 
-### 3.1 Proposed tier behavior
+### 3.1 Proposed v2 tier behavior (commercial launch still gated)
 
 | Capability | Free | Scholar | Investigator |
 | --- | --- | --- | --- |
 | Citation and evidence verification | Same quality gate | Same quality gate | Same quality gate |
-| Research modes | Focused | Focused, Balanced, Deep | Focused, Balanced, Deep |
-| Monthly unit allowance | 5 | 40 | 120 |
+| Research modes | Focused | Focused, Balanced | Focused, Balanced, Deep |
+| Provisional monthly unit allowance | 5 | 20 | 40 |
 | Historical reports/evidence | Retained and readable | Retained and readable | Retained and readable |
 | Personal library | Basic save/search | Organize and compare | Organize and compare |
 | Report comparison | No, unless existing product decision changes | Yes, bounded | Yes, bounded |
@@ -79,9 +86,140 @@ This is the **recommended entitlement table**, not a claim that every row is alr
 6. Per-run operation, source, wall-clock, and estimated-cost limits remain independent hard safety bounds. A plan allowance cannot raise those bounds. Client budget overrides may only tighten a server limit, never exceed the plan/server ceiling.
 7. No unlimited research, unbounded batch fan-out, rollover, paid overage, or purchased top-ups in v1.
 
+### 3.2.1 Mode-weighted units: product contract and economics
+
+The allowance is a **monthly capacity grant**, denominated in research units. It is
+not money, provider tokens, a source count, or an estimate of a provider invoice.
+The user-facing promise is deliberately stable: a mode has a known unit price
+before submission, and the same server-owned price is reserved atomically when a
+run is accepted.
+
+| Mode | Provisional unit price | User-facing meaning |
+| --- | ---: | --- |
+| Focused | 1 unit | A bounded, evidence-checked decision brief |
+| Balanced | 2 units | Broader dimension coverage and structured analysis |
+| Deep | 4 units | The largest currently supported investigation ceiling and report structure |
+
+The mode weights are provisional catalog values, but they are **not measured cost
+ratios**. Before paid launch, use settled provider-cost distributions by mode,
+including failed and uncertain runs, to check gross-margin exposure and
+tail risk. A mode's maximum provider budget is a safety ceiling, not expected
+cost. If mode weights change, version the catalog and charge only new admissions
+under the new version; never reprice an existing reservation or historical run.
+
+For v1, do not change a unit price based on provider/model choice,
+discovered-source count, actual token usage, retries, or repair rounds. That would
+make the price hard to predict and couple the customer balance to noisy provider
+measurements. Keep per-run provider-operation, source, wall-clock, token, and
+estimated-cost ceilings as separate safety controls. A future variable-cost or
+top-up product requires a distinct product decision, disclosed pricing, and its
+own ledger semantics; it must not emerge implicitly from this unit system.
+
+**Balance formula:**
+
+```text
+available_units = period_allowance_units
+                 - consumed_units
+                 - active_reserved_units
+```
+
+For example, with 40 units granted, 8 consumed, and 4 reserved by in-flight work,
+the UI says **28 available**, with **4 reserved** shown separately in details.
+A run is admitted only if the server-authoritative available balance covers its
+full mode price. There is no partial admission. The browser may show the selected
+mode's price before submit, but only the API can approve the reservation.
+
+Rules for deriving a reservation:
+
+1. Resolve the authenticated subject, effective mode, and current versioned
+   server catalog. Ignore client-supplied plan, unit price, allowance, and
+   catalog version.
+2. Persist `required_units` and `catalog_version` with the accepted reservation
+   so policy changes cannot alter already accepted work.
+3. Reserve atomically with idempotency acceptance and durable run/job intent.
+   Use a unique account/period/idempotency key and a pre-existing period row
+   (created safely with a unique constraint) as the serialization point for
+   concurrent submissions. A read-then-write balance check is unsafe.
+4. Same-key replay returns the original run and reservation. A fresh follow-up
+   or intentionally new run reserves again. A retry of an existing run, a
+   repair round, and model/provider retries do not reserve extra units.
+5. Batch admission reserves the sum of child-mode costs before any child
+   dispatch. Scheduled work reserves when its occurrence is admitted, not when
+   the schedule is created. If the full amount is unavailable, reject or mark
+   quota-blocked according to one explicit policy; never start a subset silently.
+6. Settle exactly once under §3.3. Keep uncertain reservations unavailable
+   until durable recovery resolves them. Corrections are append-only adjustments,
+   never edits to historical ledger entries.
+
+**Mode availability is separate from mode price.** A plan may have enough units
+but still not include a mode; deny it before reservation. This prevents a large
+balance from implying Deep access. The current pricing UI and this proposal
+disagree about Free access (the page advertises Focused and Balanced, while the
+proposal table says Focused only). Product must resolve that mismatch before the
+server catalog or UI promises either policy.
+
+### 3.2.2 Budget-card contract and display states
+
+The workspace card sits immediately above the profile row on desktop and in the
+same position inside the mobile navigation drawer. It is a read-only view of the
+authenticated entitlement projection, not a second accounting mechanism. The
+current `WorkspaceShell` renders shared sidebar content in both contexts; use
+one reusable card in that shared body so the two balances cannot drift.
+
+Recommended compact presentation:
+
+```text
+RESEARCH BUDGET                         Details →
+Scholar · resets Nov 1
+28 units available
+[accessible usage meter]
+4 units reserved · Deep uses 4
+```
+
+Prioritize available units and reset date. The selected run mode and cost belong
+in the composer/submit review; show them in the card only when a mode is selected,
+and label the value as an example. Do not use `$` or call units “credits” unless
+the product deliberately introduces monetary-value credits. Never show per-run
+operation/source ceilings as monthly usage.
+
+States and behavior:
+
+- **Loading:** quiet skeleton with fixed height; do not flash a guessed
+  Free-plan balance.
+- **Available:** show available units, period end/reset date and plan. Screen
+  readers receive text such as “12 of 40 units used; 4 reserved; 24 available”;
+  color is never the only signal.
+- **Reserved work:** availability already subtracts active reservations. Explain
+  them in Details. The admission response is the immediate source for a
+  post-submit update; never decrement before the server accepts a run.
+- **Low balance:** neutral guidance, e.g. “4 units available — enough for one
+  Focused run.” Calculate from the authoritative balance and current catalog;
+  never suggest a mode that this plan does not include.
+- **Exhausted:** state the reset date and offer plan options only if a working
+  upgrade path is configured. Existing reports/history remain accessible.
+- **Pending activation:** show “Plan activation pending”; do not grant paid
+  modes or units before the verified server projection changes.
+- **Unavailable/stale:** never substitute local-storage or indefinitely cached
+  numbers. Say “Budget temporarily unavailable,” provide retry, and let server
+  admission return the authoritative allow/deny.
+- **Period boundary:** store UTC instants; render the reset date in the user's
+  timezone with an explicit date. The exact UTC `periodEnd` remains authoritative.
+
+Use one accessible Details link/button to open usage history; do not make the
+whole card an interactive target containing nested controls. Support keyboard
+focus, touch targets, reduced motion, narrow drawers, long plan names, large
+text, and screen-reader meter semantics. On a normal balance, avoid a persistent
+upgrade CTA competing with the research composer.
+
+The client may retain a short-lived entitlement snapshot for presentation, but
+never use it to admit work. After admission/settlement, use the server-returned
+balance or invalidate/refetch. Do not poll continuously; refresh on app entry,
+explicit request, known local reservation/settlement events, and bounded focus
+or reconnect recovery.
+
 ### 3.3 Billing-cycle and settlement policy
 
-**Recommended v1 policy:** UTC calendar-month allowance windows for all plans; paid annual billing still grants its plan allowance monthly; unused units expire at the end of the month; no rollover or overage. Activation grants the current month’s full allowance. This is simple to explain but can grant two allowances near a month boundary; measure and explicitly accept that exposure before launch. If unacceptable, choose subscription-anniversary windows before implementing the ledger.
+**Local v1 period policy:** Free allowance periods use UTC calendar months. A paid monthly plan's allowance period follows the verified Stripe subscription-item period `[current_period_start, current_period_end)` (UTC instants); the Stripe renewal boundary is also the quota reset boundary. Activation grants the catalog allowance for that verified paid period; unused units expire at its end, with no rollover or overage. The entitlement API returns the stored period end as the authoritative reset date. This avoids granting a second full paid allowance at a calendar boundary unrelated to the subscription renewal. Annual billing and annual prices are not enabled; before offering annual billing, define and test a separate monthly grant cadence. The ledger records period and catalog version so future policy changes do not reprice prior admissions.
 
 Settlement must be deterministic and idempotent:
 
@@ -92,14 +230,14 @@ Settlement must be deterministic and idempotent:
 - **Unknown outcome / worker crash / uncertain provider execution:** keep units reserved until durable recovery determines the terminal outcome; do not release on timeout alone.
 - **Administrative correction/refund:** append an audited adjustment entry with actor, reason code, and idempotency key; never edit history silently.
 
-If product or legal review changes these policies, update UI copy, ledger states, and tests together before launch.
+The user explicitly approved this settlement matrix for local v1 implementation on 2026-10-19. Finance/legal review, jurisdictional consumer terms, refunds, and production launch approval remain separate gates; policy changes must update UI copy, ledger states, and tests together before launch.
 
 ### 3.4 Subscription lifecycle
 
 - Checkout success redirects to a pending/processing page. It does not grant access.
 - A verified Stripe webhook and canonical subscription/payment state activate the paid entitlement.
-- Cancellation at period end retains the tier until `access_until`; immediate cancellation/revocation follows the recorded effective date.
-- Recommended failed-renewal policy: retain the currently paid tier for a clearly disclosed 3-day grace period, then downgrade to Free if payment remains unresolved. **Open for product/legal approval.** A paid state must always include an explicit expiry; never infer indefinite access from a stale `active` boolean.
+- Cancellation-at-period-end retains the paid tier and current allowance through the verified Stripe period end; the later canceled/deleted event ends the paid period. An immediate cancellation event ends paid access when processed. Customer-facing terms must disclose this behavior before live billing.
+- **Local v1 payment-failure policy:** suspend the paid period as soon as a verified subscription event reports a non-active status; do not provide an implicit grace period. The user can use the current Free allowance window. If Stripe later reports the same paid period active again, reactivate its existing ledger snapshot without resetting consumed or reserved units. Customer-facing terms must disclose suspension and recovery behavior. A paid state must always include an explicit expiry; never infer indefinite access from a stale `active` boolean.
 - Existing reports, saved sources, and exports remain readable after downgrade/cancellation. Only new usage and currently gated actions change. Never delete user work as a consequence of nonpayment.
 - Refund, dispute, fraud, tax, currency, consumer cancellation rights, and invoice requirements need legal/finance review for launch countries.
 
@@ -168,7 +306,7 @@ Proposed logical tables (names may follow existing model conventions):
 - plan key and catalog version snapshot
 - allowance units, reserved units, consumed units, version
 - database checks: nonnegative counters; reserved+consumed never exceeds allowance
-- one row per UTC calendar month. Include Free users; do not make “no subscription row” mean unlimited.
+- one row per applicable allowance window: UTC calendar month for Free, verified Stripe item period for a paid monthly plan. Include Free users; do not make “no subscription row” mean unlimited.
 
 ### `research_unit_ledger`
 
@@ -197,11 +335,18 @@ If a quota-decision row is updated, use a short transaction: insert missing peri
 ```text
 plan_key, subscription_state, access_until,
 period_start, period_end, allowance_units,
-reserved_units, consumed_units, remaining_units,
-catalog_version, feature_flags
+reserved_units, consumed_units, available_units,
+catalog_version, feature_flags, mode_unit_costs
 ```
 
 Resolution order: verified authenticated subject → application user/tenant → current entitlement period → active paid subscription whose status and access expiry satisfy the policy, otherwise Free. No client-selected `plan_key` overrides this result. Cache only if cache invalidation/versioning is reliable; initial implementation should prefer the authoritative database read on run admission.
+
+`available_units` is `allowance_units - reserved_units - consumed_units`. A
+negative persisted balance is an invariant violation that should alert, not be
+hidden by clamping. Return exact period timestamps, catalog version, mode prices
+and allowed modes so the UI can explain the next run. This endpoint is a read
+projection: admission must repeat the check transactionally and cannot trust a
+GET result, cache, or browser snapshot.
 
 ### 6.2 Atomic run admission
 
@@ -216,7 +361,7 @@ Within one short transaction:
 7. Persist run/job intent and outbox dispatch atomically or via the durable-intent pattern described above.
 8. Commit, then dispatch/wake worker.
 
-Return a typed quota error (`403` feature not included; `429` allowance exhausted with reset date; `409` conflicting idempotency reuse). Include safe `remainingUnits`, `requiredUnits`, and `periodResetsAt`; never return internal ledger/provider costs.
+Return a typed quota error (`403` feature not included; `429` allowance exhausted with reset date; `409` conflicting idempotency reuse). Include safe `availableUnits`, `requiredUnits`, and `periodResetsAt`; never return internal ledger/provider costs.
 
 ### 6.3 Terminal settlement
 
@@ -229,6 +374,12 @@ Use generated contract schemas consistent with this repository; don’t hand-edi
 ### Public authenticated endpoints
 
 - `GET /billing/entitlement` — current plan/status, feature flags, period, allowance/remaining units, next reset or access expiry. Exclude email, Stripe IDs, payment method, and internal costs.
+- The entitlement response should include `allowanceUnits`, `consumedUnits`,
+  `reservedUnits`, `availableUnits`, `periodStart`, `periodEnd`,
+  `catalogVersion`, `modeUnitCosts`, `allowedModes`, and safe `updatedAt`. Use
+  integer units and ISO-8601 timestamps. Never expose provider dollars/tokens or
+  Stripe customer identifiers. `availableUnits` is informational; admission
+  remains transactional.
 - `POST /billing/checkout` — body `{plan: "scholar"|"investigator", interval: "month"|"year", idempotencyKey}`; returns hosted checkout URL and an operation ID.
 - `POST /billing/portal` — returns a Stripe Customer Portal URL only for the authenticated user’s mapped customer.
 - Run creation, follow-up, batch, and scheduled execution admission must call the same entitlement/quota domain service. Do not create a second quota path.
@@ -264,6 +415,29 @@ Add authenticated same-origin routes under `apps/web/app/api/billing/...` follow
 - For a batch, show total required units and reject before any child starts if insufficient.
 - For schedules, show that each occurrence uses quota and explain what happens when allowance is exhausted.
 
+### Sidebar budget card and usage detail
+
+- Place the reusable card immediately above `.sidebar-bottom` in the shared
+  `WorkspaceShell` sidebar content so desktop and mobile drawer display the same
+  server-projected balance.
+- The card's primary value is **available units now**, with plan and reset date;
+  secondary detail is reserved work. Do not show `allowance - consumed` as
+  available while reservations exist.
+- Details shows period grant, consumed, active reservations by run/mode,
+  available, recent unit-ledger entries, and reset timestamp. Link entries to
+  reports/runs only where the authenticated user is authorized. Uncertain
+  settlements remain explicitly pending rather than disappearing.
+- Composer selection shows the exact versioned mode price and projected
+  post-admission balance. Replace the projection with the server admission
+  response. If another tab/run used the balance first, preserve the draft and
+  show the server's denial plus refreshed amount; never auto-resubmit.
+- A presentation snapshot may include `updatedAt`, but lookup failures render an
+  unavailable state, not a fabricated or indefinitely stale amount. It is never
+  a quota decision.
+- Empty, low, reserved, exhausted, activation-pending, cancel-at-period-end,
+  past-due/grace, and API-unavailable states each need intentional copy. Existing
+  reports and library remain readable across quota/subscription states.
+
 ### Account billing
 
 - Current plan, subscription state, next renewal/access expiry, monthly allowance used/remaining, and billing interval.
@@ -274,51 +448,210 @@ Add authenticated same-origin routes under `apps/web/app/api/billing/...` follow
 
 ## 9. Implementation sequence for an AI coding agent
 
-Do not begin by wiring a payment button. Follow these gates in order.
+Do not begin by wiring a payment button or drawing a balance in the sidebar.
+The order remains economics/policy → server catalog and read projection →
+shadow accounting → durable quota ledger/enforcement → Stripe lifecycle → budget
+UI → controlled rollout. This checkout has an active local v2 catalog,
+approved local settlement and period policies, admission/lifecycle wiring,
+audited operator adjustments, Stripe subscription projections,
+signed/deduplicated webhook ingress, and an authenticated budget card.
+Migrations remain unapplied outside disposable test databases; enforcement and
+paid launch remain off by default.
 
 ### Phase 0 — Product economics and claim audit
 
-1. Confirm actual plan prices, unit allowance, mode weights, features, billing-cycle rules, failed-run policy, grace period, cancellation, refund, tax, currency, annual renewal, and legal copy with product/finance.
-2. Analyze persisted actual provider usage by mode, including failed/uncertain calls and repeated runs. Do not treat `max_estimated_cost_usd` as an invoice.
-3. Replace unsupported pricing-page claims or visibly mark the page as planned until server enforcement exists.
+1. **Approved for local implementation:** use v2 proposed prices and tier/mode split, plus the versioned settlement and period policies in §3.3. The pricing page labels paid plans as a preview; allowances and mode weights remain provisional until cost validation.
+2. Actual paid-plan price IDs, payment collection, refunds, tax, annual renewal terms, jurisdictional disclosures, and legal copy still require finance/legal and Stripe configuration before live billing. The local implementation deliberately has no payment grace period.
+3. Decide compatibility for requests with `mode=null` and already-created schedules with no mode: do not guess from source/operation budgets or silently backfill historical runs. Pick an explicit transition (for example, require explicit modes for newly metered work while preserving legacy behavior during a dated grace period).
+4. Decide batch pricing semantics. Recommended v1: one explicit batch-wide mode, all child runs use that mode, and total reservation is `question_count × mode_unit_cost`; later per-question mode selection requires a UI/API version that shows the exact sum before submit.
+5. **Approved local v1 schedule rule:** persist the selected mode and operational policy on the schedule; each occurrence reserves at execution time from the user's active billing-period/catalog snapshot. Thus an already-created schedule does not itself grandfather a commercial catalog; a new period may carry a new version. If the active plan does not permit the mode or units are insufficient, mark the occurrence quota-blocked and surface it; never silently downgrade mode or launch a partial batch.
+6. Analyze observed provider-cost distributions by mode, including failures, uncertain dispatch, retries and repair. Do not treat `max_estimated_cost_usd` as an invoice or assume mode operational ceilings equal expected spend.
+7. Decide whether “unit” is the customer-facing term (recommended for non-monetary monthly capacity). Do not market these as dollars or stored-value credits.
+8. Remove unsupported live claims or mark them as planned until enforcement and the capability are usable end to end.
 
-**Exit gate:** signed-off catalog and policy; expected worst-case gross margin is acceptable; legal/finance review complete for launch geography.
+**Exit gate:** local catalog and settlement contract are versioned and approved; before paid launch, measured cost tails and finance/legal review for the launch geography must also pass.
+
+**Implementation started (2026-10-18):** a read-only receipt analyzer is available at
+`services/research-api/scripts/analyze_billing_economics.py`. It groups existing
+`live_mode_evaluation.py` JSONL receipts by explicit mode, includes failed and
+cancelled runs, reports missing cost observations separately from zero, and
+compares estimated run-ledger/model costs with the provisional local 1/2/4 scenario.
+It keeps only aggregate mode/outcome/cost data in its output; prompts, case IDs,
+run IDs, tenants, and provider details are not emitted. This is an offline
+economics aid, **not** the Phase 2 persistent shadow ledger, a live feature flag,
+an entitlement API, or quota enforcement. No production or database behavior is
+changed by running it.
+
+Run it against receipts produced outside the repository by the already-gated
+evaluation runner:
+
+```bash
+uv run python scripts/analyze_billing_economics.py /secure/path/receipts.jsonl \
+  --output /secure/path/billing-economics.json
+```
+
+The generated report labels costs as estimates and does not claim that 1/2/4
+weights match provider-cost ratios.
+Use it only with representative matched-mode receipts; an empty or small sample
+does not satisfy the economics exit gate.
+
+**Phase 2 shadow-observation slice (2026-10-18):** migration `0021` adds a
+tenant-scoped, append-only `billing_shadow_observations` record for each newly
+created run when `BILLING_SHADOW_ACCOUNTING_ENABLED=true`. Run creation is
+centralized through `RunRepository.create_once`, so normal submissions, batch
+children, retries/follow-ups, and scheduled occurrences share this hook.
+Idempotent replays create no second record. Explicit modes snapshot the
+approved-catalog 1/2/4 value, mode-policy version, and catalog version; legacy
+`mode=null` runs are recorded as unpriced rather than guessed from their
+operational budget. The flag defaults
+off, and the record never reserves units, changes run admission, or exposes a
+balance. The write uses a savepoint and is best-effort: a database storage error
+is logged with sanitized operation/status facts and does not reject an otherwise
+valid run. This also means shadow observations may be missing during storage
+outages and must not be treated as an authoritative quota ledger. The migration
+has **not** been applied to the shared local database or Supabase. This is an
+observation record, not the period-grant/settlement ledger;
+cost reconciliation, plan allowances, rejected-attempt observations and
+quota-enforcement work remain open.
+
+An opt-in disposable PostgreSQL check is provided as
+`tests/integration/test_billing_shadow_persistence.py`; it is gated by
+`RUN_BILLING_SHADOW_DB_TESTS=1`, creates a uniquely named local database, and
+removes only that database after the RLS/grant checks. Do not run it against a
+shared or hosted database.
+
+**Phase 1 read-model slice (2026-10-19):** the API has an active, versioned,
+server-owned local v2 catalog and authenticated `GET /billing/entitlement`
+(also forwarded through `/api/billing/entitlement`). The catalog is approved
+for local implementation; a caller receives `not_configured` until a period
+grant exists. Enforcement can create a Free calendar-month grant on first
+admission; paid grants require a verified Stripe subscription projection and
+matching catalog Price. The endpoint does not trust client-supplied plan values.
+
+**Phase 2 / Phase 3 ledger primitive slice (2026-10-19):** local revision
+`0022` adds personal billing accounts, catalog-versioned period snapshots, and
+an append-only unit-delta ledger, all owner-scoped by tenant and user. The API
+read model fails closed on unknown/draft catalogs, mismatched allowances,
+overlapping periods, or inconsistent/overdrawn balances. The ledger module
+provides transaction-participating grant, reservation, and terminal settlement
+operations. It serializes by `(tenant_id,user_id)` with a transaction-scoped
+PostgreSQL advisory lock; this avoids granting `UPDATE` merely to use
+`SELECT FOR UPDATE`, while the database unique indexes remain a second line of
+defense. Migration `0023` adds only `INSERT` to the existing `SELECT` grants;
+RLS remains owner-scoped and neither table `UPDATE` nor `DELETE` is granted.
+Migration `0024` adds immutable adjustment actor/reason fields and a database
+constraint requiring both for adjustment entries; it grants no additional SQL
+privilege. The internal `adjust_units` primitive requires an actor, bounded
+reason, and idempotency key, serializes on the billing account, checks balance
+bounds, and rejects conflicting replays. The internal adjustment endpoint now
+requires a unique configured operator token and derives the actor ID from that
+configuration; no caller-supplied actor identity is trusted. Revisions
+`0021`–`0028` exist locally and have not been applied to any shared,
+local-development, staging, or hosted database.
+Disposable PostgreSQL integration coverage now exercises
+grant replay/overlap, concurrent last-unit admission, reservation and
+settlement idempotency/conflicts, audited adjustment replay/conflict/bounds,
+and the restricted grants. API readiness requires `0022` for entitlement reads,
+`0026` when quota enforcement is enabled, and `0028` when Stripe processing is
+enabled. Revision `0027` adds owner-scoped subscription and
+checkout projections; `0028` adds a constrained billing-period lifecycle
+function without granting table `UPDATE`. Reservations are wired to run creation/replay,
+retries/follow-ups, batches, and scheduled occurrences. Terminal settlement is
+wired to terminal state transitions and recovery; uncertain provider calls keep
+their units reserved. The entitlement endpoint and shared sidebar budget card
+are implemented locally. The lifecycle test passed on an isolated disposable
+PostgreSQL service, and a fresh full Alembic upgrade reached `0028`; neither
+shared nor hosted databases were touched. Enforcement remains disabled.
+
+The lifecycle audit confirmed that normal runs, retries, and follow-ups preserve
+explicit mode snapshots. Migration `0025` and the request contracts now add
+optional mode plus operational policy-version snapshots to batch and schedule
+records; all batch children use the batch mode, and each scheduled occurrence
+uses the schedule mode. Missing mode remains legacy and is never inferred from
+provider-operation or source budgets. New mode-null submissions are rejected
+when enforcement is enabled, while replay of an existing mode-null run remains
+unmetered and does not receive a retroactive reservation. Each accepted unit
+reservation points to its immutable period/catalog snapshot; future scheduled
+occurrences use the current eligible period at admission. Paid period grants
+are projected from verified Stripe events locally, but Stripe remains disabled
+by default. Historical work and balances are not backfilled.
 
 ### Phase 1 — Catalog and entitlement read model
 
-1. Add a typed, versioned server plan catalog; keep UI fed from a safe public projection.
-2. Add entitlement response contracts and authenticated read endpoint.
-3. Implement account/period resolution with Free fallback and no checkout.
-4. Add contract and endpoint tests; confirm onboarding metadata cannot change the plan.
+1. **Implemented locally:** typed, versioned server catalog for plan allowances, allowed modes, mode unit prices, and list prices. Stripe Price IDs remain deployment configuration; `mode_policy.py` remains the per-run safety policy.
+2. Define the billed subject boundary explicitly. Today verified Supabase users map to personal `user_id`/`tenant_id`; if organization/multi-seat billing is in scope, introduce an explicit billable account/membership model rather than assuming tenant equals payer.
+3. **Implemented locally in `0025`:** batch and schedule contracts snapshot operational mode policy. Existing null-mode records remain legacy and are not backfilled. New null-mode work is rejected only when billing enforcement is switched on.
+4. **Implemented locally:** the public safe entitlement response contract and authenticated `GET /billing/entitlement` expose only the current-period projection; without an approved grant the endpoint returns `not_configured`.
+5. **Implemented locally:** FastAPI billing router uses existing authenticated-caller behavior, and the same-origin Next.js BFF forwards the entitlement response.
+6. Add typed tests for missing/invalid subscription state, mode access, UTC period boundaries, catalog version and no-trust of onboarding metadata/client-supplied plan values.
 
-**Exit gate:** pricing catalog and entitlement endpoint agree; invalid/stale subscription state fails safely to the approved policy.
+**Exit gate:** API, contracts and catalog agree; client values cannot grant a plan or mode. Paid grant provisioning remains a separate Phase 4 requirement.
 
-### Phase 2 — Durable usage ledger and run admission
+### Phase 2 — Durable records and shadow accounting (non-blocking)
 
-1. Inspect Alembic graph and target; design additive migration, constraints, RLS, and explicit restricted-role grants.
-2. Implement period initialization and atomic reserve/consume/release operations.
-3. Integrate the single quota gate with normal runs, fresh retries, follow-ups, batches, and scheduled occurrences.
-4. Make run/job/outbox intent recoverable if process crashes between admission and dispatch.
-5. Add migration upgrade/rollback procedure; avoid destructive downgrade of ledger data.
+1. Inspect the current Alembic graph and target revision before applying anything. Migrations `0021`–`0028` are local-only and remain unapplied to shared/local-development/staging/hosted databases. The opt-in isolated billing test creates a uniquely named temporary database and exercises migrations `0021`–`0028`, RLS, privileges, and lifecycle behavior. `0022` enables and forces owner-scoped RLS and grants `SELECT`; `0023` adds `INSERT` only; `0024` adds adjustment audit fields; `0025` adds nullable batch/schedule mode snapshots; `0026` adds webhook inbox and schedule quota diagnostics; `0027` adds owner-scoped Stripe customer, subscription, and checkout state; `0028` adds the owner-checked state-transition function and plan-scoped grant idempotency. No migration grants billing-ledger table `UPDATE` or `DELETE`.
+2. Period-grant, immutable unit-ledger, and idempotent reservation/settlement records plus internal transaction-participating primitives now exist. Their disposable PostgreSQL test proves same-grant replay, overlapping-grant rejection, one-winner concurrent admission at the last unit, reservation/settlement replay and conflict handling, and restricted privileges. Keep subscription projection, entitlement period, reservation, and append-only ledger entry responsibilities distinct. Do not reuse per-run `UsageLedger` or provider-call reservation rows as monthly quota state.
+3. **Implemented, with a bounded gap:** shadow observations attach approved mode-unit values and policy/catalog versions to newly created runs without rejecting them or storing prompt text. Rejected admission attempts are not yet observed; shadow records remain observational, not authoritative usage.
+4. Reconcile shadow decisions against accepted runs, actual provider usage, failures, retries and mode mix. Measure expected spend per unit and identify every code path that bypasses the primary run endpoint.
+5. Add migration upgrade/restore rehearsal on a disposable PostgreSQL target and document additive-schema rollback (disable application behavior; retain ledger records).
 
-**Exit gate:** concurrency tests prove the allowance cannot be overspent; replay and duplicate requests do not double charge; all admission paths are covered.
+**Exit gate:** shadow totals reconcile to run/admission records; no missing mode or entry path is unexplained; realistic cost tails fit the signed-off economics; migrations, RLS and restricted-role grants pass isolated integration/security tests. Shadow mode does not block runs.
 
-### Phase 3 — Stripe test mode
+### Phase 3 — Atomic quota enforcement and lifecycle
 
-1. Create/test Stripe products/prices outside code; bind exact Price IDs via server configuration.
-2. Add hosted Checkout and Customer Portal endpoints.
-3. Add signature-verified webhook inbox, idempotent projection, event retry and reconciliation.
-4. Exercise checkout success, delayed payment, duplicate/out-of-order webhooks, failed renewal, cancellation, portal updates, refunds/disputes per policy.
+**Implemented locally behind `BILLING_ENFORCEMENT_ENABLED` (default false); validation gate remains open:**
 
-**Exit gate:** no entitlement is granted from a redirect alone; events can replay safely; operational drift is detectable.
+1. Re-run admission and settlement against a migrated disposable PostgreSQL database, including every call path and injected crash/recovery boundaries. Keep the enforcement flag off until this passes.
+2. **Implemented locally:** per-account transaction-scoped advisory lock and database uniqueness guards serialize balance reads/writes; the disposable test proves only one of two concurrent last-unit reservations succeeds.
+3. **Implemented locally:** the central run repository enforces normal run, retry/follow-up and batch-child reservations; schedule occurrences reserve when created by the scheduler. Idempotent replay reserves once; batches are all-or-nothing in their enclosing transaction. Mode-null requests fail closed only with enforcement enabled. A reservation's catalog is recoverable through its immutable billing-period foreign key and the reserved delta; schedules persist the operational mode, while their future occurrence uses the catalog on the active billing period at admission time.
+4. **Implemented locally:** reservation shares the transaction that persists run, budget and durable job intent; no database lock crosses a provider/model/Stripe call.
+5. **Implemented locally:** idempotent terminal settlement and recovery use §3.3; unresolved provider reservations retain quota. The disposable test exercises reservation/settlement replay and policy transitions; crash/failure-injection coverage across every runtime entrypoint remains open.
+6. **Implemented locally:** safe quota errors report required/available units and period end without provider-cost or Stripe details. Reports/history remain independently readable.
+7. **Pending:** run a representative shadow-versus-enforced reconciliation after disposable lifecycle coverage is complete; do not enable the flag in production before that gate.
 
-### Phase 4 — UI and plan rollout
+**Exit gate:** concurrency, duplicate, crash/replay, cancellation, uncertain-provider, every-entrypoint, tenant-isolation and migration tests pass on disposable databases; no known bypass path; shadow and enforcement decisions reconcile. No paid subscription is required yet; Free test grants can validate enforcement.
 
-1. Update pricing, composer, account billing, quota errors, and downgrade continuity.
-2. Run accessibility, mobile, keyboard, reduced-motion, and empty/error/pending-state checks.
-3. Enable for internal users in Stripe test mode, then a small opt-in cohort in live mode only after explicit launch approval.
+### Phase 4 — Stripe test-mode subscription lifecycle
 
-**Exit gate:** server entitlements match visible copy; user sees clear unit cost before every new run; no existing work disappears on downgrade.
+**Implemented locally, disabled by default; disposable PostgreSQL validation passed.** Revision `0027` adds owner-scoped customer/subscription/checkout projections, preserves the minimal signed-event inbox, widens the event status column for reconciliation states, and uses forced RLS. Revision `0028` keeps direct billing-period `UPDATE` privilege revoked while providing a narrow, owner-checked state transition and a composite idempotency key that permits a Free and paid snapshot to share a start instant. The API has authenticated monthly Checkout and Customer Portal routes, same-origin BFF routes, server-only Price IDs, a single-open-checkout/idempotency record, exact Stripe Price verification before Checkout, and subscription projection from signed events. Redirects do not grant access; only supported, active monthly subscriptions whose Price amount/currency match the local catalog can grant the period allowance. Annual purchases and in-portal plan switching are deliberately not enabled. The isolated lifecycle test and a separate full Alembic upgrade through `0028` passed; no shared database was migrated.
+
+**Period-policy decision resolved locally:** Free resets on UTC calendar-month boundaries; paid monthly allowances follow Stripe's verified item-level `current_period_start/end`, so paid quota reset, renewal, expiry, and the entitlement UI's reset timestamp use the same period. Stripe documents the billing-cycle anchor as the UTC reference point for future cycles and exposes it on the subscription object ([Subscription object](https://docs.stripe.com/api/subscriptions/object), [Create a subscription](https://docs.stripe.com/api/subscriptions/create)). Payment-failure behavior is explicit locally: any verified non-active status suspends paid units immediately with no grace; a verified recovery reactivates the same period without replenishing usage. Migration `0028` adds a narrowly scoped state-transition function; it does not grant the application `UPDATE` on billing periods. Reconciliation, database validation, live key configuration, and launch terms remain gates. Live Stripe Checkout additionally requires the separate `BILLING_LIVE_LAUNCH_APPROVED` gate, default false.
+
+Still required before even a limited test-mode cohort:
+
+1. **Passed locally:** the opt-in lifecycle test used a uniquely named database on an isolated disposable PostgreSQL service and validated RLS, function permissions, restricted table privileges, concurrent admission, lifecycle replay, Stripe period reset, immediate suspension/recovery, cancellation and Free-period restoration. Separately, the full Alembic chain upgraded a fresh disposable database through `0028`. No shared or hosted database has been migrated.
+2. Add operator visibility and a recovery procedure for `reconciliation_required` events. Stripe receives a retry response for unresolved relevant events; this is intentionally fail-closed, but a human-readable, access-controlled reconciliation queue and alert are still needed.
+3. In Stripe **test mode**, create one product per paid plan and one monthly recurring USD Price per product. Configure server Price IDs, then verify Dashboard amounts exactly match this catalog: Scholar `$5.99 USD/month`; Investigator `$12.99 USD/month`. The API rechecks those values at checkout and on subscription events. Do not configure annual Prices yet.
+4. Configure the Customer Portal for payment-method updates and cancellation only. Do not enable plan/Price swaps until proration, immediate-vs-period-end changes, and the cross-period allowance policy are specified and tested.
+5. Register `POST https://<api-host>/billing/webhooks/stripe` in test mode for `checkout.session.completed`, `checkout.session.expired`, and `customer.subscription.created`, `.updated`, `.deleted`, `.paused`, and `.resumed`. Set the endpoint API version to the same pinned value as `STRIPE_API_VERSION`; signed events with another version are quarantined and not applied. Store the signing secret only in the API secret manager. Verify signature failure, duplicate delivery, delayed activation, immediate past-due suspension, cancellation, recovery/retry, and that a success redirect alone does not grant units. The local no-grace policy is immediate suspension on any verified non-active status; publish that policy in customer-facing terms before live billing.
+6. Run test-mode Checkout → webhook activation → authenticated entitlement read → paid-mode reservation → cancellation/downgrade, with no real payment. Validate webhook-age and reconciliation alerts, then exercise the application rollback flags while preserving database history.
+7. Do not switch to live keys until cost sustainability, tax/refund/legal terms, recovery, migration, and rollout gates in §§13–14 are signed off. Live billing requires a separate explicit operational authorization.
+
+Environment variables are `BILLING_STRIPE_ENABLED`, `BILLING_ENFORCEMENT_ENABLED`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_API_VERSION`, `STRIPE_PRICE_SCHOLAR_MONTHLY`, `STRIPE_PRICE_INVESTIGATOR_MONTHLY`, `STRIPE_PORTAL_CONFIGURATION_ID`, `STRIPE_LIVEMODE`, `BILLING_LIVE_LAUNCH_APPROVED`, and `BILLING_APP_BASE_URL`. Keep all flags false by default. Readiness fails closed if Stripe is enabled without enforcement, schema, secrets, pinned API version, Price IDs, portal configuration, valid HTTPS return URL, or matching test/live key mode. Live Checkout additionally requires `BILLING_LIVE_LAUNCH_APPROVED=true`; do not set it before the separate live launch approval. Never put Stripe secret values in the web app, repository, issue, or chat.
+
+**Exit gate:** period and no-grace policies match code, tests, and customer-facing terms; disposable migration and RLS tests pass; no unresolved collection/import failures; test-mode user journey and webhook retries are verified; reconciliation has an operator path; test-mode cancellation/downgrade leaves existing reports and sources readable. Passing this gate does not itself authorize production migrations or live charging.
+
+### Phase 5 — Pricing, composer, budget card and usage detail
+
+**Partially implemented locally:** the pricing page checks checkout availability and supports monthly Checkout when server flags are enabled; yearly billing stays disabled. The shared desktop/mobile sidebar displays the authenticated entitlement balance and can open the Customer Portal. API/BFF and contract unit tests pass in the isolated local suite. A detailed per-period ledger/history view and browser-level accessibility/network validation remain open.
+
+1. Remaining: remove any still-unverified tier-feature promises and make plan display derive from the authoritative catalog where practical. Keep provisional unit amounts clearly labeled until economics passes.
+2. Remaining: show selected mode cost and available balance/reset date in the composer; for batches, show the exact summed cost. If concurrent use changes the balance, preserve the draft and display the server denial.
+3. **Implemented locally:** a shared sidebar card reads authenticated entitlement state in desktop and mobile layouts and links to the portal only when relevant. Verify the browser states, keyboard/screen-reader behavior, and narrow mobile layout before release.
+4. Remaining: add a usage-details view showing period allowance, consumed units, active reservations grouped by run/mode, available balance, reset time and recent append-only ledger entries. Apply object-level authorization to every linked run/report.
+5. Keep read failures visibly unavailable rather than showing stale local-storage data. Refresh after admission/settlement using server responses or targeted invalidation; do not add a polling loop or frontend quota logic.
+6. Test the card in both rendered sidebar contexts, at narrow/mobile widths, keyboard/screen-reader paths, large text and reduced motion. Preserve reports/library access when quota is exhausted or subscription changes.
+
+**Exit gate:** all displayed prices, features, mode weights and balances match the server catalog/entitlement endpoint; no fabricated balance state; admission remains server-authoritative; desktop/mobile/accessibility and failure-state tests pass.
+
+### Phase 6 — Controlled rollout and operations
+
+1. Keep billing and enforcement behind server-side flags with a named owner and expiry. Enable first for internal/test accounts, then a bounded opt-in cohort after test-mode and migration gates pass.
+2. Monitor quota decisions, reservation/settlement drift, uncertain reservations, webhook age/retries, reconciliation corrections, per-mode actual cost and quota-related support events. Alert on missing reservations, negative balances, stale subscription projection and stuck unknown reservations.
+3. Verify rollback by disabling checkout/enforcement while retaining immutable unit ledgers and existing research data. Do not reverse ledger migrations destructively or remove reports on downgrade.
+4. Obtain explicit production/Supabase migration and live-billing authorization separately; confirm backup/restore and target revision before hosted schema changes.
+
+**Exit gate:** operational dashboard and runbooks exist; recovery/reconciliation is rehearsed; rollback preserves data and paid access behavior is approved for the rollout jurisdiction.
 
 ## 10. File-level implementation map
 
@@ -326,15 +659,15 @@ Paths are starting points; inspect the checked-out architecture before editing a
 
 | Area | Likely files / additions | Required responsibility |
 | --- | --- | --- |
-| Catalog + types | `services/research-api/src/research_api/billing/catalog.py` (new), config | versioned plan/price/feature/unit mapping; no user-controlled prices |
-| Entitlement domain | `.../billing/entitlements.py`, `.../billing/usage.py` (new) | resolve plan; atomic reserve and terminal settlement; idempotent rules |
-| Persistence | `db/models.py`, repository under `repositories/`, next Alembic revision | billing tables, scoped constraints, RLS, grants, indexes |
-| Run admission | `api.py`, `runtime_api.py`, `jobs.py`, run/follow-up paths | one quota gate for every path, before dispatch; server-owned caps |
-| Stripe boundary | `.../billing/stripe_api.py`, `.../billing/webhooks.py` (new) | checkout/portal, raw-body signature check, durable inbox, idempotency |
-| Contracts | API contract source, generated schemas, `packages/contracts` | typed entitlement/checkout/quota response and error contracts |
+| Catalog + types | `services/research-api/src/research_api/billing/catalog.py` (new), `mode_policy.py` remains separate | versioned plan/mode-access/unit/price mapping; no user-controlled prices or changes to historical run ceilings |
+| Entitlement domain | `.../billing/entitlements.py`, `.../billing/ledger.py`, `.../billing/lifecycle.py` | resolve billable subject/period; atomic reserve and terminal settlement; idempotent rules; do not overload per-run `UsageLedger` |
+| Persistence | `db/models.py`, `.../billing/ledger.py`, migrations `0021`–`0028` | billing tables, scoped constraints, RLS, grants, indexes, and owner-checked lifecycle transitions |
+| Run admission | `api.py`, `runtime_api.py`, `jobs.py`, `repositories/runs.py` | one quota gate for create/retry/follow-up/batch/schedule occurrence before dispatch; server-owned caps and durable intent |
+| Stripe boundary | `.../billing/api.py`, `.../billing/stripe.py`, `.../billing/subscriptions.py` | Checkout/Portal, raw-body signature check, durable inbox, subscription projection, idempotency |
+| Contracts | `packages/contracts/src/billing.ts`, `packages/contracts/src/runtime.ts`, `packages/contracts/schema/BillingEntitlementSchema.json`, batch/schedule schemas, generated FastAPI schemas | typed entitlement/checkout/quota contracts; explicit batch/schedule mode fields; generated artifacts stay in sync |
 | Web BFF | `apps/web/app/api/billing/**/route.ts` (new), `apps/web/lib/research-proxy.ts` patterns | auth forwarding, schema validation, safe redirects |
 | Pricing UI | `apps/web/app/pricing/page.tsx`, `pricing-plans.tsx` | catalog-backed honest prices/features/allowances |
-| Workspace/account UI | research composer components, account/settings routes | unit disclosure, quota states, manage billing, cancellation continuity |
+| Workspace/account UI | `apps/web/app/components/workspace-shell.tsx`, `apps/web/app/(research)/research/page.tsx`, `apps/web/app/pricing/page.tsx`, `pricing-plans.tsx`, new account/usage route | shared desktop/mobile card, mode-price disclosure, quota states, manage billing, cancellation continuity |
 | Documentation | `docs/onboarding.md`, billing/product docs | metadata boundary, policies, rollout/support instructions |
 
 ## 11. Required validation matrix
@@ -343,6 +676,9 @@ Paths are starting points; inspect the checked-out architecture before editing a
 
 - Free, active paid, canceled-at-period-end, expired, past-due/grace, incomplete, absent subscription, and webhook-lag states.
 - Every research mode maps to exactly one versioned unit cost; unsupported modes fail closed.
+- Catalog version changes cannot reprice reserved work; idempotent replay returns the original price and catalog version.
+- A mixed-mode batch reserves its exact summed unit cost atomically; concurrent requests for the final units cannot overspend.
+- Available always equals allowance minus consumed and reserved; uncertain reservations remain unavailable and visible in Details.
 - Client-submitted plan, amount, unit cost, `maxEstimatedCostUsd`, search limits, and extra budget fields cannot raise entitlement or safety limits.
 - Settlement policy matrix; “answer not established” consumes normally; platform failure releases; uncertain outcome retains reservation.
 - Period boundary, annual plan monthly allowance, zero remaining, exact remaining, and one unit over.
@@ -369,6 +705,8 @@ Paths are starting points; inspect the checked-out architecture before editing a
 
 - Displayed monthly/annual prices, units, modes, and features match server catalog.
 - Pending activation, payment failure, cancellation, exhausted quota, reset date, and API outage states are clear and recoverable.
+- Sidebar balance matches the authenticated entitlement endpoint in desktop and mobile drawer; loading/unavailable states never show a fabricated balance.
+- Accessibility announces used/reserved/available counts; the visual meter is not the only representation.
 - Existing reports, source links, library, and permitted exports remain readable after downgrade.
 - Keyboard/screen reader, mobile table overflow, focus states, reduced motion, and safe external checkout navigation.
 
@@ -390,11 +728,11 @@ Alert on webhook processing lag, repeated signature failures, negative/over-allo
 
 ## 14. Open decisions required before implementation/launch
 
-1. Approve prices and currency/region strategy: Free $0, Scholar $14/month or $132/year, Investigator $36/month or $348/year are provisional.
-2. Approve research-unit weights and allowances: 1/2/4 and 5/40/120 are provisional pending measured unit economics.
+1. Local product-owner decision: target prices are Free $0, Scholar $5.99/month or $59.99/year, and Investigator $12.99/month or $129.99/year. Currency/region strategy and finance/legal approval remain open.
+2. Unit economics remain open: provisional mode weights are 1/2/4 and provisional allowances are 5/20/40. Do not expose or enforce these as paid entitlements until matched actual cost receipts establish sustainable margin, including failed/uncertain work and fees.
 3. Confirm which currently built features are actually available per plan; remove claims that are not implemented (notably PDF and timezone-aware schedules).
-4. Approve UTC calendar periods vs subscription anniversaries, no rollover, and annual-plan monthly grants.
-5. Approve settlement behavior for user cancellation after provider dispatch and the recommended 3-day payment grace policy.
+4. **Resolved for local monthly-plan implementation:** Free UTC calendar periods; paid monthly allowance periods follow the Stripe renewal period; no rollover. Annual billing remains disabled until its monthly quota-grant cadence is designed and tested.
+5. **Resolved for local implementation:** cancellation after provider dispatch consumes the reservation; verified non-active subscription status suspends the paid period immediately with no grace. Finance/legal must still approve how these terms are disclosed and any required customer protections before launch.
 6. Confirm subscription quantity policy: one personal subscription vs future organizations/seat billing.
 7. Confirm launch countries, taxes, refunds, receipts/invoicing, academic discounts, accessibility/legal review, and support obligations.
 8. Approve Stripe as processor and the production secret/webhook rotation/incident owner.
@@ -402,7 +740,7 @@ Alert on webhook processing lag, repeated signature failures, negative/over-allo
 
 ## 15. Market context (not price validation)
 
-Public competitor pricing pages checked on 2026-10-16 show different packaging rather than directly comparable run quotas: Elicit lists Plus at $11/user/month billed annually; Consensus lists Pro at $20/month or $144/year ($12/month equivalent), and Deep at $65/month or $540/year; AnswerThis lists Pro at $35/month per seat. Competitor features and prices change and are not a substitute for willingness-to-pay tests or our own measured cost model. Keep this section dated and re-check before launch. [Elicit pricing](https://elicit.com/pricing?redirected=true), [Consensus plans](https://help.consensus.app/en/articles/10087865-subscription-plans), [AnswerThis pricing](https://answerthis.io/our-pricing).
+AnswerThis's public pricing page currently presents a $35/month Pro headline and separately includes a comparison table listing a $14/month Pro tier, with different plan names and feature packaging. Because the page is internally inconsistent, these are reference points only; they do not validate our price or unit economics. Recheck before launch and compare equivalent capabilities, not just price. [AnswerThis pricing](https://answerthis.io/our-pricing).
 
 ## 16. References
 
@@ -424,6 +762,9 @@ Public competitor pricing pages checked on 2026-10-16 show different packaging r
 ### Primary documentation
 
 - [Stripe Checkout Sessions](https://docs.stripe.com/api/checkout/sessions)
+- [Stripe entitlements](https://docs.stripe.com/billing/entitlements) — feature access can follow purchased products; the application still owns transactional research-unit admission.
+- [Stripe usage-based billing](https://docs.stripe.com/billing/subscriptions/usage-based) — usage meter aggregates may be asynchronous, so do not use them for synchronous quota admission.
+- [Stripe billing credits](https://docs.stripe.com/billing/subscriptions/usage-based/billing-credits) — relevant only if monetary prepaid credits/top-ups are later chosen; those differ from non-monetary research units.
 - [Stripe subscription webhook guide](https://docs.stripe.com/billing/subscriptions/webhooks)
 - [Stripe webhook signature verification](https://docs.stripe.com/webhooks/signature)
 - [Supabase Row Level Security](https://supabase.com/docs/guides/database/postgres/row-level-security)
