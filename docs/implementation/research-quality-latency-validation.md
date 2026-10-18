@@ -63,6 +63,52 @@ returned HTTP 200 in 512 ms cold and 176 ms warm. A health request is not an
 authenticated user validation, and `SELECT 1` is not a full tenant snapshot.
 Hosted end-to-end latency remains unmeasured by these local-persistence runs.
 
+## Matched provider-pool check — 2026-10-18
+
+One additional authorized, paired Focused check used the same question, report
+requirements, Tavily route, `gpt-6-luna` role routing, six-operation ceiling, and
+180-second active budget. Only discovery-adapter HTTP-client lifecycle changed:
+worker-owned clients (baseline) versus lifespan-shared provider pools (candidate).
+Persistence was intended to be disposable local Postgres/Redis/LocalStack; no
+hosted research rows were created.
+
+| Measure | Worker-owned | Shared pools | Candidate minus baseline |
+| --- | ---: | ---: | ---: |
+| Total processing | 49.05 s | 42.38 s | −6.67 s (−13.6%) |
+| First source | 14.06 s | 9.63 s | −4.43 s |
+| First verified finding milestone | 48.97 s | 42.29 s | −6.68 s |
+| Extracted sources | 5 | 6 | +1 |
+| Sources cited by verified findings | 3 | 3 | 0 |
+| Verified findings | 6 | 6 | 0 |
+| Requirement/question links | 2/3; 2/3 | 2/3; 2/3 | unchanged |
+| Exact-span + semantic-support citations | 6/6 | 6/6 | unchanged |
+| Provider operations | 6 | 6 | unchanged |
+| Estimated ledger cost | $0.050126 | $0.049794 | −$0.000332 |
+
+Both reports remained **partial**: report links are not completeness assessment,
+and no human quality, dimension relevance, source independence, or representative
+answer-quality evaluation was performed. The finding milestone was recorded near
+completion in both runs; it does not demonstrate useful progressive delivery.
+Writer remote calls alone took 27.52 s and 25.62 s, respectively; synthesis
+boundaries took 34.10 s and 30.52 s. The research-worker graph node was 4.07 s
+and 5.56 s. These are nested, variable call timings, not additive components.
+
+This is one pair, not a p95, controlled causal estimate, or production result.
+The measured total difference cannot be assigned to connection reuse from a
+single pair, especially with multi-second model-response variance. It does show
+that discovery is not the dominant end-to-end stage for this workload; writer
+latency remains the largest measured component. Do not change writer model,
+verification, or output length from this sample alone.
+
+The first attempt to start this pair failed before provider dispatch because the
+disposable database had not been migrated. That exposed that Alembic can prefer
+the ignored `.env.migrations` admin URL over `DATABASE_URL`. At that moment the
+configured target was already at revision `0020` (the checkout head), and the
+`upgrade head` invocation emitted no migration-step lines. A guard now makes
+`APP_ENV=test` ignore the private migration URL unless an explicit admin URL is
+provided; the successful pair used an isolated Compose project and a loopback
+admin URL. No migration scripts ran against the configured hosted database.
+
 ## Reproduction and next gates
 
 The opt-in `scripts/benchmark_focused.py` supports `--question` for one explicit
