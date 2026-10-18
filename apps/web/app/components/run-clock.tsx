@@ -24,14 +24,21 @@ export function activeElapsedMs({
   return Math.max(0, end - startedAt - paused);
 }
 
+export function formatRunDuration(milliseconds: number): string {
+  const totalSeconds = Math.floor(Math.max(0, milliseconds) / 1000);
+  return `${Math.floor(totalSeconds / 60)}m ${totalSeconds % 60}s`;
+}
+
 export function RunClock({
   startedAt,
   endedAt,
+  processingMs,
   pausedMs,
   pausedSince,
 }: {
   startedAt: string;
   endedAt?: string | undefined;
+  processingMs?: number | null | undefined;
   pausedMs?: number | undefined;
   pausedSince?: string | null | undefined;
 }) {
@@ -39,30 +46,34 @@ export function RunClock({
   const paused = Boolean(pausedSince) && !endedAt;
   useEffect(() => {
     setNow(Date.now());
-    // A paused clock cannot change, so it doesn't need to tick.
-    if (endedAt || pausedSince) return;
+    // Keep the elapsed and approval-wait counters current while awaiting review.
+    if (endedAt) return;
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [startedAt, endedAt, pausedSince]);
   const end = endedAt ? Date.parse(endedAt) : now;
-  const seconds =
-    end === null
+  const elapsedMs = end === null ? null : Math.max(0, end - Date.parse(startedAt));
+  const approvalWaitMs =
+    elapsedMs === null
       ? null
-      : Math.floor(
-          activeElapsedMs({
-            startedAt: Date.parse(startedAt),
-            end,
-            pausedMs,
-            pausedSince: pausedSince ? Date.parse(pausedSince) : null,
-          }) / 1000,
-        );
+      : Math.max(0, pausedMs ?? 0) +
+        (pausedSince
+          ? Math.max(
+              0,
+              (end ?? Date.parse(startedAt)) -
+                Math.max(Date.parse(pausedSince), Date.parse(startedAt)),
+            )
+          : 0);
+  const activeMs = Number.isFinite(processingMs) ? Math.max(0, processingMs as number) : null;
   return (
     <span className="run-clock" data-paused={paused || undefined}>
-      {seconds === null || !Number.isFinite(seconds) ? (
+      {elapsedMs === null || !Number.isFinite(elapsedMs) ? (
         "Elapsed time loading"
       ) : (
         <>
-          {`${Math.floor(seconds / 60)}m ${seconds % 60}s ${endedAt ? "total" : "elapsed"}`}
+          {`Worker processing ${activeMs === null ? "not recorded" : formatRunDuration(activeMs)}`}
+          {` · approval wait ${approvalWaitMs === null ? "—" : formatRunDuration(approvalWaitMs)}`}
+          {` · elapsed ${elapsedMs === null ? "—" : formatRunDuration(elapsedMs)}`}
           {paused && (
             <span className="run-clock-paused"> · paused for approval</span>
           )}
