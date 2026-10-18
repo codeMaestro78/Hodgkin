@@ -15,7 +15,6 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy import select
-from test_reliability_runtime import seed
 
 from research_api import api, jobs
 from research_api.config import Settings
@@ -34,6 +33,7 @@ from research_api.graph import builder
 from research_api.lifecycle import lock_run
 from research_api.mode_policy import MODE_POLICY_VERSION, resolve_mode_budget
 from research_api.repositories.runs import RunRepository
+from tests.integration.test_reliability_runtime import seed
 
 pytestmark = pytest.mark.integration
 QUESTION = "Explain workflow state preservation"
