@@ -57,8 +57,10 @@ def query_family(statement: str | None) -> str:
             "UPDATE": "UPDATE",
             "DELETE": "FROM",
         }.get(command)
-        matcher = rf"\b{operation}\s+\"?{table}\"?\b" if operation else (
-            rf"\b(?:FROM|JOIN)\s+\"?{table}\"?\b"
+        matcher = (
+            rf"\b{operation}\s+\"?{table}\"?\b"
+            if operation
+            else (rf"\b(?:FROM|JOIN)\s+\"?{table}\"?\b")
         )
         if re.search(matcher, sql, re.IGNORECASE):
             if re.search(r"\bFOR\s+UPDATE\b", sql, re.IGNORECASE):
@@ -166,6 +168,19 @@ async def tenant_session(tenant_id: str) -> AsyncIterator[AsyncSession]:
         raise
     else:
         operation_event("db.transaction", started=started, setupMs=setup_ms, acquireMs=acquire_ms)
+
+
+@asynccontextmanager
+async def system_session() -> AsyncIterator[AsyncSession]:
+    """Open a narrowly scoped transaction for system-owned, non-tenant records.
+
+    Use only for tables whose ownership is intentionally global (such as the
+    Stripe event inbox); request payloads must never choose a tenant here.
+    """
+    async with session_factory() as session:
+        async with session.begin():
+            await session.connection()
+            yield session
 
 
 async def _tenant_transaction(session: AsyncSession, tenant_id: str) -> None:
