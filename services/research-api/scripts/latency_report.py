@@ -31,6 +31,7 @@ OPERATIONS = {
     "db.transaction",
     "db.connection.acquire",
     "db.statement.slow",
+    "db.statement.timing",
     "db.statement",
     "db.snapshot.collections",
     "dispatcher.claim",
@@ -41,6 +42,11 @@ OPERATIONS = {
     "dispatcher.heartbeat",
     "research.graph",
     "research.collect",
+    "research.collect.provider",
+    "research.semantic_review",
+    "research.extract.admission",
+    "research.source.artifacts",
+    "research.source.persistence",
     "synthesis.audit",
     "synthesis.findings",
     "model",
@@ -51,7 +57,31 @@ OPERATIONS = {
     "accounting",
     "response_artifact",
 } | {f"node.{node}" for node in NODES}
+MILESTONES = {"research.first_verified_finding"}
 PROVIDERS = {"openai", "openrouter", "tavily", "internal", "serper", "parallel"}
+SQL_COMMANDS = {"SELECT", "INSERT", "UPDATE", "DELETE", "WITH", "SET", "OTHER"}
+_QUERY_FAMILY_BASE = {
+    "runtime_job",
+    "run",
+    "sub_question_attempt",
+    "sub_question",
+    "node_execution",
+    "provider_call",
+    "run_event",
+    "evidence_claim",
+    "citation",
+    "source",
+    "report",
+    "assessment",
+    "research_plan",
+    "plan_approval",
+    "budget",
+    "usage_ledger",
+    "other",
+}
+QUERY_FAMILIES = _QUERY_FAMILY_BASE | {
+    f"{family}_{lock}" for family in _QUERY_FAMILY_BASE for lock in ("exclusive", "shared")
+}
 SUCCESS = {"succeeded", "consumed"}
 ERROR = {"failed", "released", "uncertain", "not_dispatched", "cancelled", "rejected"}
 OTHER = {"estimated", "insufficient_evidence", "skipped", "cached", "paused"}
@@ -113,6 +143,7 @@ def analyze(
     selected_run = str(uuid.UUID(run_id)) if run_id is not None else None
     groups: dict[tuple[str, ...], dict[str, Any]] = {}
     counts: Counter[str] = Counter()
+    milestones: Counter[str] = Counter()
 
     def observe(key: tuple[str, ...], record: dict[str, Any], field: str) -> None:
         group = groups.setdefault(
@@ -125,6 +156,8 @@ def analyze(
                 "success": [],
                 "errors": [],
                 "other": [],
+                "attempt_numbers": Counter(),
+                "retries_scheduled": 0,
             },
         )
         outcome = record.get("outcome")
@@ -137,6 +170,12 @@ def analyze(
         group["records"] += 1
         group["record_counts"][bucket] += 1
         group["outcomes"][outcome] += 1
+        if key[:2] == ("dependencies", "attempt"):
+            attempt = record.get("attempt")
+            if type(attempt) is int and 1 <= attempt <= 10:
+                group["attempt_numbers"][str(attempt)] += 1
+            if record.get("retryScheduled") is True:
+                group["retries_scheduled"] += 1
         value = duration(record.get(field))
         if value is None:
             group["excluded_durations"] += 1
@@ -165,12 +204,28 @@ def analyze(
             counts["ignored"] += 1
             continue
         event = record.get("event")
+        if event == "research.milestone":
+            milestone = record.get("milestone")
+            if milestone in MILESTONES:
+                milestones[milestone] += 1
+                counts["milestones"] += 1
+            else:
+                counts["ignored"] += 1
+            continue
         if event not in ("operation.outcome", "dependency.outcome"):
             counts["ignored"] += 1
             continue
         run = run_label(record.get("runId"))
         if selected_run is not None and run != selected_run:
             counts["filtered"] += 1
+            continue
+        if (
+            event == "operation.outcome"
+            and record.get("operation") == "research.first_verified_finding"
+        ):
+            # Older builds encoded this timestamp marker as a zero-duration operation.
+            milestones["research.first_verified_finding"] += 1
+            counts["milestones"] += 1
             continue
         if event == "dependency.outcome" and record.get("outcome") == "started":
             counts["lifecycle"] += 1
@@ -184,7 +239,15 @@ def analyze(
             category = "attempt" if operation in {"model", "search", "extract"} else "diagnostic"
             observe(("dependencies", category, provider, operation), record, "durationMs")
         else:
-            observe(("operations", operation), record, "durationMs")
+            labels = [operation]
+            if operation.startswith("db.statement"):
+                labels.extend(
+                    (
+                        safe_label(record.get("commandCategory"), SQL_COMMANDS),
+                        safe_label(record.get("queryFamily"), QUERY_FAMILIES),
+                    )
+                )
+            observe(("operations", *labels), record, "durationMs")
             if operation.startswith("node."):
                 observe(("run_nodes", run, operation[5:]), record, "durationMs")
             if operation == "http.request":
@@ -198,9 +261,11 @@ def analyze(
         "dependencies": [],
         "run_nodes": [],
         "response_headers": [],
+        "milestones": [
+            {"milestone": name, "count": count} for name, count in sorted(milestones.items())
+        ],
         "missing_signals": {
             "queue_wait": "No enqueue-to-claim duration in the supported logs.",
-            "first_evidence": "No run-start-to-first-evidence duration in the supported logs.",
         },
         "interpretation": (
             "Do not sum nested operations, dependency attempts, or the run_nodes projection. "
@@ -213,7 +278,11 @@ def analyze(
     for key, group in sorted(groups.items()):
         section, *labels = key
         names = {
-            "operations": ("operation",),
+            "operations": (
+                ("operation", "command_category", "query_family")
+                if len(labels) == 3
+                else ("operation",)
+            ),
             "dependencies": ("category", "provider", "operation"),
             "run_nodes": ("run_id", "node"),
             "response_headers": (),
@@ -229,6 +298,8 @@ def analyze(
                 **(
                     {
                         "excluded_remote_durations": group.get("excluded_remote_durations", 0),
+                        "attempt_numbers": dict(group["attempt_numbers"]),
+                        "retries_scheduled": group["retries_scheduled"],
                         **{
                             f"remote_{bucket}": summarize(group.get(f"remote_{bucket}", []))
                             for bucket in ("success", "errors", "other")
