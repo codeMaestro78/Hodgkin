@@ -80,6 +80,27 @@ class Settings(BaseSettings):
     OPENALEX_API_KEY: SecretStr | None = None
     # New explicit-mode runs keep bounded repair off unless this is explicitly enabled.
     BOUNDED_GAP_REPAIR_ENABLED: bool = False
+    # Records mode-unit observations only; never reserves or rejects runs.
+    BILLING_SHADOW_ACCOUNTING_ENABLED: bool = False
+    # Fail-closed monthly unit admission; remains opt-in until migrations and rollout gates pass.
+    BILLING_ENFORCEMENT_ENABLED: bool = False
+    # JSON object mapping immutable operator UUIDs to unique bearer secrets.
+    BILLING_OPERATOR_TOKENS: SecretStr | None = None
+    # Paid subscription writes remain disabled until economics and hosted rollout gates pass.
+    BILLING_STRIPE_ENABLED: bool = False
+    STRIPE_SECRET_KEY: SecretStr | None = None
+    STRIPE_WEBHOOK_SECRET: SecretStr | None = None
+    STRIPE_API_VERSION: str | None = Field(default=None, min_length=1, max_length=64)
+    STRIPE_PRICE_SCHOLAR_MONTHLY: str | None = Field(default=None, min_length=1, max_length=255)
+    STRIPE_PRICE_INVESTIGATOR_MONTHLY: str | None = Field(
+        default=None, min_length=1, max_length=255
+    )
+    STRIPE_PORTAL_CONFIGURATION_ID: str | None = Field(default=None, min_length=1, max_length=255)
+    STRIPE_LIVEMODE: bool = False
+    # Separate operator gate: live Stripe requests are impossible until economics,
+    # terms, and hosted rollout have been explicitly approved.
+    BILLING_LIVE_LAUNCH_APPROVED: bool = False
+    BILLING_APP_BASE_URL: str | None = None
     DISCOVERY_RETRY_AFTER_MAX_SECONDS: float = Field(default=5, ge=0, le=30)
     OBJECT_STORAGE_ENDPOINT: str = "http://localhost:54566"
     OBJECT_STORAGE_BUCKET: str = "research-artifacts"
@@ -100,10 +121,18 @@ class Settings(BaseSettings):
         "SERPER_API_KEY",
         "OPENALEX_API_KEY",
         "INTERNAL_SERVICE_AUTH",
+        "BILLING_OPERATOR_TOKENS",
+        "STRIPE_SECRET_KEY",
+        "STRIPE_WEBHOOK_SECRET",
+        "STRIPE_API_VERSION",
+        "STRIPE_PRICE_SCHOLAR_MONTHLY",
+        "STRIPE_PRICE_INVESTIGATOR_MONTHLY",
+        "STRIPE_PORTAL_CONFIGURATION_ID",
+        "BILLING_APP_BASE_URL",
         mode="before",
     )
     @classmethod
-    def empty_optional_secrets_are_unset(cls, value: object) -> object:
+    def empty_optional_settings_are_unset(cls, value: object) -> object:
         if isinstance(value, SecretStr):
             return value if value.get_secret_value().strip() else None
         if isinstance(value, str) and not value.strip():
