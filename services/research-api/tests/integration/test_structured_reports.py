@@ -20,7 +20,6 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from test_reliability_runtime import seed
 
 from research_api import api
 from research_api.config import Settings
@@ -29,6 +28,7 @@ from research_api.db.session import tenant_session
 from research_api.events.outbox import EventOutbox
 from research_api.graph import builder
 from research_api.report_document import validate_report_document
+from tests.integration.test_reliability_runtime import seed
 
 pytestmark = pytest.mark.integration
 
