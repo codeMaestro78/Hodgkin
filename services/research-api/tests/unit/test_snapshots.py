@@ -1,4 +1,6 @@
 import asyncio
+import json
+import logging
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -82,9 +84,10 @@ def fake_session(failure=None):
     return session, driver, cursors, trace, tenant, run, rows
 
 
-async def test_pipeline_queues_all_selects_before_fetching_and_keeps_native_values():
+async def test_pipeline_queues_all_selects_before_fetching_and_keeps_native_values(caplog):
     session, driver, cursors, trace, tenant, run, rows = fake_session()
-    result = await snapshots.load_collections(session, tenant, run)
+    with caplog.at_level(logging.DEBUG, logger="research_api.dependencies"):
+        result = await snapshots.load_collections(session, tenant, run)
     executions = [item for item in trace if item[0] == "execute"]
     assert len(executions) == 8
     assert all(item[3] == (tenant, run) for item in executions)
@@ -101,6 +104,17 @@ async def test_pipeline_queues_all_selects_before_fetching_and_keeps_native_valu
     driver.commit.assert_not_called()
     driver.rollback.assert_not_called()
     driver.close.assert_not_called()
+    event = next(
+        json.loads(record.message)
+        for record in caplog.records
+        if '"operation": "db.snapshot.collections"' in record.message
+    )
+    assert event["queryCount"] == 8
+    assert event["rowCount"] == 1
+    assert event["pipelineMs"] >= 0
+    assert event["fetchMs"] >= 0
+    assert event["hydrationMs"] >= 0
+    assert "SELECT" not in event
 
 
 @pytest.mark.parametrize(
