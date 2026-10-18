@@ -53,9 +53,7 @@ def test_query_family_covers_write_statements_without_exposing_values(sql, expec
 
 
 def test_detailed_statement_timing_is_opt_in_and_redacted(monkeypatch, caplog):
-    detailed_settings = db.settings.model_copy(
-        update={"DATABASE_QUERY_TIMING_ENABLED": True}
-    )
+    detailed_settings = db.settings.model_copy(update={"DATABASE_QUERY_TIMING_ENABLED": True})
     monkeypatch.setattr(db, "settings", detailed_settings)
     with caplog.at_level(logging.DEBUG, logger="research_api.dependencies"):
         db.statement_finish(
