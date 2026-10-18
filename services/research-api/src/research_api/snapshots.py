@@ -80,11 +80,16 @@ async def load_collections(
                 await stack.enter_async_context(driver.cursor(row_factory=dict_row))
                 for _ in _QUERIES
             ]
+            pipeline_started = monotonic()
             async with driver.pipeline():
                 for cursor, query in zip(cursors, _QUERIES, strict=True):
                     await cursor.execute(query, (tenant_id, run_id))
+            pipeline_ms = round((monotonic() - pipeline_started) * 1000, 2)
             # Fetch only after pipeline exit synchronizes every queued SELECT.
+            fetch_started = monotonic()
             rows = [await cursor.fetchall() for cursor in cursors]
+            fetch_ms = round((monotonic() - fetch_started) * 1000, 2)
+            hydration_started = monotonic()
             result = SnapshotCollections(
                 sources=[Source(**row) for row in rows[0]],
                 questions=[SubQuestion(**row) for row in rows[1]],
@@ -95,8 +100,17 @@ async def load_collections(
                 calls=[ProviderCall(**row) for row in rows[6]],
                 events=[RunEvent(**row) for row in rows[7]],
             )
+            hydration_ms = round((monotonic() - hydration_started) * 1000, 2)
     except BaseException as exc:
         operation_event("db.snapshot.collections", started=started, outcome="failed", error=exc)
         raise
-    operation_event("db.snapshot.collections", started=started)
+    operation_event(
+        "db.snapshot.collections",
+        started=started,
+        queryCount=len(_QUERIES),
+        pipelineMs=pipeline_ms,
+        fetchMs=fetch_ms,
+        hydrationMs=hydration_ms,
+        rowCount=sum(map(len, rows)),
+    )
     return result
