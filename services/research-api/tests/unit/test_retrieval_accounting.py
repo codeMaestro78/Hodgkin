@@ -56,7 +56,9 @@ def test_retrieval_accounting_keeps_unmeasured_relevance_and_independence_explic
     )
 
     assert result == {
-        "schemaVersion": "1.1",
+        "schemaVersion": "1.2",
+        "exactDuplicateSources": 0,
+        "sourceClasses": {},
         "providers": [
             {
                 "provider": "openalex",
@@ -65,9 +67,10 @@ def test_retrieval_accounting_keeps_unmeasured_relevance_and_independence_explic
                 "shortlisted": 2,
                 "excluded": 4,
                 "duplicateWork": 1,
+                "duplicateUrl": None,
                 "unavailable": 1,
                 "policyVersions": ["academic-lexical-topk-v1"],
-                "countsComplete": True,
+                "countsComplete": False,
                 "extractedSources": 1,
                 "citedInVerifiedFinding": 1,
             },
@@ -78,6 +81,7 @@ def test_retrieval_accounting_keeps_unmeasured_relevance_and_independence_explic
                 "shortlisted": None,
                 "excluded": None,
                 "duplicateWork": None,
+                "duplicateUrl": None,
                 "unavailable": None,
                 "policyVersions": [],
                 "countsComplete": False,
@@ -145,6 +149,7 @@ def test_retrieval_accounting_does_not_count_failed_discovery_or_unverified_cita
             "shortlisted": None,
             "excluded": None,
             "duplicateWork": None,
+            "duplicateUrl": None,
             "unavailable": None,
             "policyVersions": [],
             "countsComplete": False,
@@ -225,6 +230,7 @@ def test_provider_source_counts_follow_persisted_sources_and_verified_citations(
             "shortlisted": None,
             "excluded": None,
             "duplicateWork": None,
+            "duplicateUrl": None,
             "unavailable": None,
             "policyVersions": [],
             "countsComplete": False,
@@ -238,6 +244,7 @@ def test_provider_source_counts_follow_persisted_sources_and_verified_citations(
             "shortlisted": None,
             "excluded": None,
             "duplicateWork": None,
+            "duplicateUrl": None,
             "unavailable": None,
             "policyVersions": [],
             "countsComplete": False,
@@ -279,6 +286,7 @@ def test_search_provider_usage_persists_only_bounded_aggregate_candidate_counts(
             "shortlisted": 1,
             "excluded": 3,
             "duplicateWork": 1,
+            "duplicateUrl": 0,
             "unavailable": 1,
             "policy": "academic-lexical-topk-v1",
         },
@@ -293,11 +301,56 @@ def test_search_provider_usage_does_not_invent_screening_counts_for_tavily():
     assert usage["retrieval"] == {
         "discovered": 1,
         "shortlisted": 1,
-        "excluded": None,
+        "excluded": 0,
         "duplicateWork": None,
+        "duplicateUrl": 0,
         "unavailable": None,
         "policy": None,
     }
+
+
+def test_tavily_usage_counts_www_aliases_without_claiming_duplicate_works():
+    usage = search_provider_usage(
+        provider="tavily",
+        response={
+            "results": [
+                {"url": "https://www.example.test/paper?utm_source=x"},
+                {"url": "https://example.test/paper"},
+                {"url": "https://example.test/other"},
+            ],
+        },
+    )
+
+    assert usage["retrieval"] == {
+        "discovered": 3,
+        "shortlisted": 2,
+        "excluded": 1,
+        "duplicateWork": None,
+        "duplicateUrl": 1,
+        "unavailable": None,
+        "policy": None,
+    }
+
+
+def test_retrieval_accounting_counts_exact_content_duplicates_and_source_classes():
+    result = build_retrieval_accounting(
+        calls=[],
+        sources=[
+            {"id": "one", "provider": "tavily", "contentHash": "same", "sourceClass": "web"},
+            {"id": "two", "provider": "tavily", "contentHash": "same", "sourceClass": "web"},
+            {
+                "id": "three",
+                "provider": "openalex",
+                "contentHash": "other",
+                "sourceClass": "academic",
+            },
+        ],
+        claim_checks=[],
+    )
+
+    assert result["schemaVersion"] == "1.2"
+    assert result["exactDuplicateSources"] == 1
+    assert result["sourceClasses"] == {"academic": 1, "web": 2}
 
 
 def test_retrieval_accounting_is_valid_in_the_public_run_insights_contract():
@@ -318,3 +371,16 @@ def test_retrieval_accounting_is_valid_in_the_public_run_insights_contract():
 
     assert result.retrieval_accounting is not None
     assert result.retrieval_accounting.dimension_relevance == "not_assessed"
+
+
+def test_retrieval_accounting_v11_snapshots_remain_readable():
+    accounting = build_retrieval_accounting(calls=[], sources=[], claim_checks=[])
+    accounting["schemaVersion"] = "1.1"
+    accounting.pop("exactDuplicateSources")
+    accounting.pop("sourceClasses")
+
+    parsed = RetrievalAccounting.model_validate(accounting)
+
+    assert parsed.schema_version == "1.1"
+    assert parsed.exact_duplicate_sources is None
+    assert parsed.source_classes is None
