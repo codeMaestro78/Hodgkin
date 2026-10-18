@@ -192,8 +192,9 @@ async def test_tavily_ingestion_persists_source_provider_ledger_and_raw_response
         "retrieval": {
             "discovered": 1,
             "shortlisted": 1,
-            "excluded": None,
+            "excluded": 0,
             "duplicateWork": None,
+            "duplicateUrl": 0,
             "unavailable": None,
             "policy": None,
         },
