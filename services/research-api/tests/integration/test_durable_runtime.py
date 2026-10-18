@@ -275,10 +275,19 @@ async def test_batch_atomic_capacity_and_idempotency(monkeypatch):
             )
             == 1
         )
-    smaller = BatchRequest(questions=["First research"], idempotencyKey=payload.idempotency_key)
+    smaller = BatchRequest(
+        questions=["First research"],
+        idempotencyKey=payload.idempotency_key,
+        mode="focused",
+    )
     first = await runtime_api.create_batch(smaller)
     assert await runtime_api.create_batch(smaller) == first
     assert len(first["runIds"]) == 1
+    async with tenant_session(str(tenant)) as session:
+        batch = await session.get(ResearchBatch, uuid.UUID(first["batchId"]))
+        child = await session.get(ResearchRun, uuid.UUID(first["runIds"][0]))
+        assert batch.mode == child.mode == "focused"
+        assert batch.mode_policy_version == child.mode_policy_version
     with pytest.raises(HTTPException) as conflict:
         await runtime_api.create_batch(
             BatchRequest(
@@ -292,7 +301,10 @@ async def test_batch_atomic_capacity_and_idempotency(monkeypatch):
 async def test_schedule_two_ticks_create_one_occurrence_and_disable(monkeypatch):
     tenant, _, _, settings = await seed(monkeypatch)
     request = ScheduleRequest(
-        question="Track reliable research", intervalMinutes=60, idempotencyKey=str(uuid.uuid4())
+        question="Track reliable research",
+        intervalMinutes=60,
+        idempotencyKey=str(uuid.uuid4()),
+        mode="deep",
     )
     first = await runtime_api.create_schedule(request)
     assert await runtime_api.create_schedule(request) == first
@@ -317,6 +329,14 @@ async def test_schedule_two_ticks_create_one_occurrence_and_disable(monkeypatch)
         )
         schedule = await session.get(ResearchSchedule, schedule_id)
         assert schedule.next_run_at > datetime.now(UTC)
+        occurrence = await session.scalar(
+            select(ResearchRun).where(
+                ResearchRun.tenant_id == tenant,
+                ResearchRun.idempotency_key.like(f"schedule:{schedule_id}:%"),
+            )
+        )
+        assert schedule.mode == occurrence.mode == "deep"
+        assert schedule.mode_policy_version == occurrence.mode_policy_version
     await runtime_api.disable_schedule(schedule_id)
     async with tenant_session(str(tenant)) as session:
         assert not (await session.get(ResearchSchedule, schedule_id)).enabled
