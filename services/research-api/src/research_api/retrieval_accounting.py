@@ -4,8 +4,17 @@ from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from research_api.artifacts.normalization import search_result_identity_url
+
 _PUBLIC_PROVIDERS = frozenset({"openalex", "serper", "tavily", "parallel", "browser"})
-_COUNT_FIELDS = ("discovered", "shortlisted", "excluded", "duplicateWork", "unavailable")
+_COUNT_FIELDS = (
+    "discovered",
+    "shortlisted",
+    "excluded",
+    "duplicateWork",
+    "duplicateUrl",
+    "unavailable",
+)
 _EXTRACTION_OUTCOMES = ("succeeded", "failed", "uncertain", "pending")
 _SEMANTIC_OUTCOMES = ("supports", "partially_supports", "contradicts", "unrelated")
 
@@ -35,6 +44,9 @@ def search_provider_usage(*, provider: str, response: Mapping[str, object]) -> d
     raw_candidates = response.get("discovery_candidates")
     candidates = raw_candidates if isinstance(raw_candidates, list) else None
 
+    duplicate_urls_count, invalid_urls = _result_url_counts(results)
+    duplicate_urls: int | None = duplicate_urls_count
+
     if provider == "openalex":
         discovered = _count(usage.get("candidate_records_returned"))
         shortlisted = _count(usage.get("selected_for_extraction"))
@@ -59,6 +71,16 @@ def search_provider_usage(*, provider: str, response: Mapping[str, object]) -> d
             if candidates is not None
             else None
         )
+        duplicate_urls = (
+            sum(
+                1
+                for item in candidates
+                if isinstance(item, Mapping)
+                and item.get("exclusion_reason") == "duplicate_extract_url"
+            )
+            if candidates is not None
+            else None
+        )
     elif candidates is not None:
         discovered = len(candidates)
         shortlisted = len(results)
@@ -66,11 +88,18 @@ def search_provider_usage(*, provider: str, response: Mapping[str, object]) -> d
         duplicate_work = None
         unavailable = None
     else:
-        # Providers that return only their bounded shortlist do not expose the
-        # size or exclusions of their upstream candidate pool.
-        discovered = len(results)
-        shortlisted = len(results)
-        excluded = None
+        # Count only the bounded result page we received, never the provider's
+        # unobserved upstream index. Invalid URLs and exact www aliases are
+        # excluded from extraction; this is URL deduplication, not work identity.
+        discovered = len(results) if isinstance(raw_results, list) else None
+        shortlisted = (
+            max(0, len(results) - duplicate_urls_count - invalid_urls)
+            if discovered is not None
+            else None
+        )
+        excluded = (
+            discovered - shortlisted if discovered is not None and shortlisted is not None else None
+        )
         duplicate_work = None
         unavailable = None
 
@@ -80,10 +109,32 @@ def search_provider_usage(*, provider: str, response: Mapping[str, object]) -> d
         "shortlisted": shortlisted,
         "excluded": excluded,
         "duplicateWork": duplicate_work,
+        "duplicateUrl": duplicate_urls,
         "unavailable": unavailable,
         "policy": policy if isinstance(policy, str) and len(policy) <= 100 else None,
     }
     return usage
+
+
+def _result_url_counts(results: list[object]) -> tuple[int, int]:
+    seen: set[str] = set()
+    duplicates = 0
+    invalid = 0
+    for result in results:
+        url = result.get("url") if isinstance(result, Mapping) else None
+        if not isinstance(url, str):
+            invalid += 1
+            continue
+        try:
+            identity = search_result_identity_url(url)
+        except (ValueError, UnicodeError):
+            invalid += 1
+            continue
+        if identity in seen:
+            duplicates += 1
+        else:
+            seen.add(identity)
+    return duplicates, invalid
 
 
 def build_retrieval_accounting(
@@ -116,10 +167,22 @@ def build_retrieval_accounting(
             grouped[str(provider)].append(call)
 
     source_provider: dict[str, str] = {}
+    content_hashes: set[str] = set()
+    exact_duplicate_sources = 0
+    source_classes: dict[str, int] = defaultdict(int)
     for source in sources:
         source_id, provider = source.get("id"), source.get("provider")
         if isinstance(source_id, str) and provider in _PUBLIC_PROVIDERS:
             source_provider[source_id] = str(provider)
+        content_hash = source.get("contentHash")
+        if isinstance(content_hash, str) and content_hash:
+            if content_hash in content_hashes:
+                exact_duplicate_sources += 1
+            else:
+                content_hashes.add(content_hash)
+        source_class = source.get("sourceClass")
+        if isinstance(source_class, str) and source_class and len(source_class) <= 32:
+            source_classes[source_class] += 1
     extracted_by_provider: dict[str, set[str]] = defaultdict(set)
     for source_id, provider in source_provider.items():
         extracted_by_provider[provider].add(source_id)
@@ -194,8 +257,10 @@ def build_retrieval_accounting(
         )
 
     return {
-        "schemaVersion": "1.1",
+        "schemaVersion": "1.2",
         "providers": providers,
+        "exactDuplicateSources": exact_duplicate_sources,
+        "sourceClasses": dict(sorted(source_classes.items())),
         "extractionCalls": sum(extraction_outcomes.values()),
         "extractionOutcomes": extraction_outcomes,
         "extractedSources": len(
