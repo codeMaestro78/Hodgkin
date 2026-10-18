@@ -8,6 +8,7 @@ from typing import Any
 
 from sqlalchemy import func, select
 
+from research_api.billing.lifecycle import settle_terminal_run
 from research_api.db.models import NodeExecution
 from research_api.db.session import tenant_session
 from research_api.events.outbox import EventOutbox
@@ -92,6 +93,7 @@ async def finish_node(
                 and run.cancellation_requested_at is None
             ):
                 run.status = "completed"
+                await settle_terminal_run(session, run)
                 await EventOutbox(session, tenant_id).append(
                     run_id=run_id,
                     event_type="run.completed",
