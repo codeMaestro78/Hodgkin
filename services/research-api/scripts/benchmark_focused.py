@@ -126,9 +126,7 @@ async def benchmark(
     # Opt-in complete SQL timings are emitted at DEBUG. Keep the benchmark's
     # capture level aligned with the explicit setting rather than silently
     # dropping the query-family observations it was asked to collect.
-    logger.setLevel(
-        logging.DEBUG if settings.DATABASE_QUERY_TIMING_ENABLED else logging.INFO
-    )
+    logger.setLevel(logging.DEBUG if settings.DATABASE_QUERY_TIMING_ENABLED else logging.INFO)
     logger.handlers, logger.propagate = [capture], False
     try:
         async with (
@@ -185,11 +183,7 @@ async def benchmark(
                     source_rows = list(
                         await session.scalars(select(Source).where(Source.run_id == run.id))
                     )
-                    records = [
-                        json.loads(line)
-                        for line in capture.lines
-                        if line.startswith("{")
-                    ]
+                    records = [json.loads(line) for line in capture.lines if line.startswith("{")]
                     assessment_id = (
                         report.document.get("assessmentId")
                         if report and isinstance(report.document, dict)
@@ -340,8 +334,7 @@ async def benchmark(
                                     isinstance(verification.get("exactSpan"), dict)
                                     and verification["exactSpan"].get("verified") is True
                                     and isinstance(verification.get("semanticSupport"), dict)
-                                    and verification["semanticSupport"].get("verdict")
-                                    == "supports"
+                                    and verification["semanticSupport"].get("verdict") == "supports"
                                     for verification in citation_verifications
                                 ),
                                 "exactSpanVerified": len(exact_citations),
