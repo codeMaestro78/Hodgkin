@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import select
-from test_reliability_runtime import seed
 
 from research_api.config import Settings
 from research_api.db.models import Report, ResearchRun
@@ -12,6 +11,7 @@ from research_api.db.session import tenant_session
 from research_api.graph import builder
 from research_api.mode_policy import MODE_POLICY_VERSION, resolve_mode_budget
 from research_api.repositories.runs import RunRepository
+from tests.integration.test_reliability_runtime import seed
 
 pytestmark = pytest.mark.integration
 
