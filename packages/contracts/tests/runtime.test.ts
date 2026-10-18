@@ -42,6 +42,31 @@ it("enforces batch and schedule bounds", () => {
   ).toBe(false);
 });
 
+it("accepts explicit research modes on new batches and schedules", () => {
+  expect(
+    BatchRequestSchema.parse({
+      questions: ["Compare queues"],
+      idempotencyKey: "fixture-unique-key",
+      mode: "deep",
+    }).mode,
+  ).toBe("deep");
+  expect(
+    ScheduleRequestSchema.parse({
+      question: "Compare queues",
+      intervalMinutes: 60,
+      idempotencyKey: "fixture-unique-key",
+      mode: "balanced",
+    }).mode,
+  ).toBe("balanced");
+  expect(
+    BatchRequestSchema.safeParse({
+      questions: ["Compare queues"],
+      idempotencyKey: "fixture-unique-key",
+      mode: "unmetered",
+    }).success,
+  ).toBe(false);
+});
+
 it("requires a real plan reference and refuses unexpected approval fields", () => {
   expect(
     ApprovalRequestSchema.safeParse({ planId: "forged", decision: "approve" })
