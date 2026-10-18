@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { UuidSchema } from "./common";
 import { BudgetSchema } from "./budget";
+import { ResearchModeSchema } from "./mode";
 
 export const ApprovalRequestSchema = z
   .object({
@@ -15,6 +16,7 @@ export const BatchRequestSchema = z
     idempotencyKey: z.string().min(16).max(200),
     requireApproval: z.boolean().default(true),
     budgetOverrides: BudgetSchema.partial().optional(),
+    mode: ResearchModeSchema.optional(),
   })
   .strict();
 
@@ -25,5 +27,6 @@ export const ScheduleRequestSchema = z
     idempotencyKey: z.string().min(16).max(200),
     requireApproval: z.boolean().default(true),
     budgetOverrides: BudgetSchema.partial().optional(),
+    mode: ResearchModeSchema.optional(),
   })
   .strict();
