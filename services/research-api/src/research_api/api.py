@@ -34,6 +34,7 @@ from research_api.events.outbox import EventOutbox
 from research_api.events.wakeups import event_wakeups
 from research_api.execution import prior_dependencies, task_projection
 from research_api.jobs import enqueue, lock_registry, refresh_due
+from research_api.lifecycle import TERMINAL_RUN_STATUSES
 from research_api.mode_planning import planning_admission
 from research_api.mode_policy import resolve_mode_budget
 from research_api.reliability import claim_status, source_assessments
@@ -54,6 +55,7 @@ from research_api.schemas.generated.followup_request import FollowupRequest
 from research_api.schemas.generated.public_claim_check import PublicClaimCheck
 from research_api.schemas.generated.run_insights import RunInsights
 from research_api.snapshots import load_collections
+from research_api.verified_preview import verified_preview
 
 router = APIRouter(prefix="/research", tags=["research"])
 AfterSequenceQuery = Annotated[int, Query(ge=0, alias="after")]
@@ -363,7 +365,7 @@ async def get_research_run(
         )
         header = (
             await session.execute(
-                select(ResearchRun, Budget, UsageLedger, source_total)
+                select(ResearchRun, Budget, UsageLedger, source_total, RuntimeJob.active_ms)
                 .select_from(ResearchRun)
                 .outerjoin(
                     Budget, (Budget.tenant_id == caller.tenant_id) & (Budget.run_id == run_id)
@@ -371,6 +373,10 @@ async def get_research_run(
                 .outerjoin(
                     UsageLedger,
                     (UsageLedger.tenant_id == caller.tenant_id) & (UsageLedger.run_id == run_id),
+                )
+                .outerjoin(
+                    RuntimeJob,
+                    (RuntimeJob.tenant_id == caller.tenant_id) & (RuntimeJob.run_id == run_id),
                 )
                 .where(
                     ResearchRun.tenant_id == caller.tenant_id,
@@ -383,7 +389,7 @@ async def get_research_run(
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="research run not found"
             )
-        run, budget, usage, source_count = header
+        run, budget, usage, source_count, processing_ms = header
         report = await session.scalar(
             select(Report)
             .where(
@@ -553,6 +559,13 @@ async def get_research_run(
                 if gap.details.get("reportId") == str(report.id)
                 or (report.version == 1 and gap.details.get("reportId") is None)
             ]
+        now = datetime.now(UTC)
+        elapsed_end = run.updated_at if run.status in TERMINAL_RUN_STATUSES else now
+        elapsed_ms = max(0, int((elapsed_end - run.created_at).total_seconds() * 1000))
+        approval_wait_ms = int(approval.get("waitedMs", 0)) if approval else 0
+        if approval and approval.get("waitStartedAt") and run.status not in TERMINAL_RUN_STATUSES:
+            wait_started_at = datetime.fromisoformat(approval["waitStartedAt"])
+            approval_wait_ms += max(0, int((now - wait_started_at).total_seconds() * 1000))
         tasks = [
             task_projection(
                 node,
@@ -698,7 +711,13 @@ async def get_research_run(
                         for call in calls
                     ],
                     sources=[
-                        {"id": str(source.id), "provider": source.provider} for source in sources
+                        {
+                            "id": str(source.id),
+                            "provider": source.provider,
+                            "contentHash": source.content_hash,
+                            "sourceClass": source.source_class,
+                        }
+                        for source in sources
                     ],
                     claim_checks=claim_checks,
                 ),
@@ -718,6 +737,11 @@ async def get_research_run(
             else "legacy-inferred",
             "reportRequirements": run.report_requirements or [],
             "approval": approval,
+            "timing": {
+                "processingMs": max(0, int(processing_ms)) if processing_ms is not None else None,
+                "approvalWaitMs": approval_wait_ms,
+                "elapsedMs": elapsed_ms,
+            },
             "planVersion": run.plan_version,
             "sourceCount": source_count or 0,
             "claimChecks": claim_checks,
@@ -781,6 +805,7 @@ async def get_research_run(
                     "type": event.event_type,
                     "label": event.payload.get("label") or event.payload.get("message"),
                     "occurredAt": event.occurred_at.isoformat(),
+                    **(verified_preview(event.event_type, event.payload) or {}),
                 }
                 for event in collections.events
             ],
@@ -1154,6 +1179,7 @@ async def stream_research_run_events(
                         "type": event.event_type,
                         "label": event.payload.get("label") or event.payload.get("message"),
                         "occurredAt": event.occurred_at.isoformat(),
+                        **(verified_preview(event.event_type, event.payload) or {}),
                         "errorCode": event.payload.get("errorCode")
                         if event.event_type == "run.failed"
                         else None,
