@@ -19,14 +19,14 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from test_report_comparison_api import _report_hash
-from test_report_comparison_api import comparisons as comparisons
 
 from research_api import api
 from research_api.db.models import Report, ReportExport, ReportShare, ResearchRun, Source
 from research_api.graph import builder
 from research_api.mode_composer import compose_report
 from research_api.report_document import validate_report_document
+from tests.integration.test_report_comparison_api import _report_hash
+from tests.integration.test_report_comparison_api import comparisons as comparisons
 
 pytestmark = pytest.mark.integration
 
