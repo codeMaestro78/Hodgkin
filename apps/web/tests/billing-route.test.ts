@@ -1,0 +1,67 @@
+import { beforeEach, expect, it, vi } from "vitest";
+import { NextRequest } from "next/server";
+
+const proxy = vi.hoisted(() => vi.fn());
+vi.mock("../lib/research-proxy", () => ({ forwardResearch: proxy }));
+import { GET } from "../app/api/billing/entitlement/route";
+import { POST as checkout } from "../app/api/billing/checkout/route";
+import { POST as portal } from "../app/api/billing/portal/route";
+import { GET as availability } from "../app/api/billing/checkout-availability/route";
+
+beforeEach(() => {
+  proxy.mockReset();
+  proxy.mockResolvedValue(
+    new Response('{"status":"not_configured"}', { status: 200 }),
+  );
+});
+
+it("forwards the authenticated entitlement read to the API without client billing inputs", async () => {
+  const request = new NextRequest(
+    "http://localhost/api/billing/entitlement?plan=investigator&units=999",
+  );
+  const response = await GET(request);
+
+  expect(proxy).toHaveBeenCalledWith(request, "/billing/entitlement");
+  expect(response.status).toBe(200);
+});
+
+it("forwards Checkout, Portal, and purchase availability through the authenticated BFF", async () => {
+  const checkoutRequest = new NextRequest(
+    "http://localhost/api/billing/checkout",
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "idempotency-key": "request-key-123",
+      },
+      body: JSON.stringify({ planKey: "scholar", interval: "monthly" }),
+    },
+  );
+  await checkout(checkoutRequest);
+  expect(proxy).toHaveBeenLastCalledWith(
+    checkoutRequest,
+    "/billing/checkout",
+    "POST",
+  );
+
+  const portalRequest = new NextRequest("http://localhost/api/billing/portal", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  });
+  await portal(portalRequest);
+  expect(proxy).toHaveBeenLastCalledWith(
+    portalRequest,
+    "/billing/portal",
+    "POST",
+  );
+
+  const availabilityRequest = new NextRequest(
+    "http://localhost/api/billing/checkout-availability",
+  );
+  await availability(availabilityRequest);
+  expect(proxy).toHaveBeenLastCalledWith(
+    availabilityRequest,
+    "/billing/checkout-availability",
+  );
+});
