@@ -5,11 +5,11 @@ import uuid
 
 import pytest
 from sqlalchemy import select
-from test_durable_runtime import seed
 
 from research_api.db.models import RunEvent
 from research_api.db.session import tenant_session
 from research_api.verified_preview import record_verified_preview, verified_preview
+from tests.integration.test_durable_runtime import seed
 
 pytestmark = pytest.mark.integration
 
