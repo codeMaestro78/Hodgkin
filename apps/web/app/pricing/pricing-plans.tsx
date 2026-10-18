@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Icon } from "../components/ui";
 import { Critter, type CritterKind } from "../components/crew/critter";
 
@@ -10,8 +10,9 @@ type Plan = {
   id: string;
   name: string;
   summary: string;
-  monthly: number;
-  yearly: number;
+  monthly: string;
+  yearly: string;
+  yearlyMonthly: string;
   cta: string;
   crew: CritterKind[];
   features: string[];
@@ -22,50 +23,70 @@ const PLANS: Plan[] = [
     id: "free",
     name: "Free",
     summary: "For a few good questions a month.",
-    monthly: 0,
-    yearly: 0,
+    monthly: "$0",
+    yearly: "$0",
+    yearlyMonthly: "$0",
     cta: "Start free",
     crew: ["folio"],
     features: [
-      "10 research runs a month",
-      "Focused and Balanced depth",
+      "Proposed: 5 monthly research units · Focused mode",
       "Cited answers with source passages",
-      "Library, history and PDF export",
+      "Research history and personal library",
+      "Markdown and BibTeX export",
     ],
   },
   {
     id: "scholar",
     name: "Scholar",
     summary: "For steady, weekly research.",
-    monthly: 14,
-    yearly: 11,
+    monthly: "$5.99",
+    yearly: "$59.99",
+    yearlyMonthly: "$5.00",
     cta: "Choose Scholar",
     crew: ["lens", "folio"],
     features: [
-      "60 research runs a month",
-      "Deep research, up to 20 sources",
+      "20 monthly research units",
+      "Focused and Balanced modes",
       "Compare reports side by side",
-      "Share read-only report links",
+      "Revocable read-only report sharing",
+      "Markdown and BibTeX export",
     ],
   },
   {
     id: "investigator",
     name: "Investigator",
     summary: "For questions that come back on a schedule.",
-    monthly: 36,
-    yearly: 29,
+    monthly: "$12.99",
+    yearly: "$129.99",
+    yearlyMonthly: "$10.83",
     cta: "Choose Investigator",
     crew: ["seal", "quill", "lens"],
     features: [
-      "200 research runs a month",
-      "Batches of questions in one go",
-      "Scheduled runs with approval",
+      "40 monthly research units",
+      "Focused, Balanced and Deep modes",
+      "Bounded batches and scheduled runs",
       "Everything in Scholar",
     ],
   },
 ];
 
-function PlanCard({ plan, billing }: { plan: Plan; billing: Billing }) {
+function PlanCard({
+  plan,
+  billing,
+  checkoutEnabled,
+  signedIn,
+  busy,
+  error,
+  onChoose,
+}: {
+  plan: Plan;
+  billing: Billing;
+  checkoutEnabled: boolean;
+  signedIn: boolean;
+  busy: string | null;
+  error: string;
+  onChoose: (planKey: string) => void;
+}) {
   const price = billing === "yearly" ? plan.yearly : plan.monthly;
   return (
     <article className="pr-plan" data-plan={plan.id}>
@@ -79,27 +100,59 @@ function PlanCard({ plan, billing }: { plan: Plan; billing: Billing }) {
       <p className="pr-price">
         <span className="pr-price-clip">
           <span className="pr-price-value" key={`${billing}-${price}`}>
-            ${price}
+            {price}
           </span>
         </span>
         <span className="pr-price-unit">
-          {price === 0 ? "forever" : "/ month"}
+          {plan.id === "free"
+            ? "forever"
+            : billing === "yearly"
+              ? "/ year"
+              : "/ month"}
         </span>
       </p>
       <p className="pr-price-note">
-        {price === 0
+        {plan.id === "free"
           ? "No card needed"
           : billing === "yearly"
-            ? `Billed $${price * 12} once a year`
+            ? `${plan.yearlyMonthly} / month, billed annually`
             : "Billed monthly"}
       </p>
-      <Link
-        href={`/signup?plan=${plan.id}`}
-        className={`lp-btn ${plan.id === "free" ? "lp-btn-paper" : "lp-btn-ink"}`}
-        data-magnetic
-      >
-        {plan.cta}
-      </Link>
+      {plan.id === "free" ? (
+        <Link
+          href="/signup?plan=free"
+          className="lp-btn lp-btn-paper"
+          data-magnetic
+        >
+          {plan.cta}
+        </Link>
+      ) : !checkoutEnabled ? (
+        <span className="lp-btn lp-btn-paper" aria-disabled="true">
+          Paid plans coming soon
+        </span>
+      ) : !signedIn ? (
+        <Link href="/login" className="lp-btn lp-btn-paper">
+          Sign in to choose
+        </Link>
+      ) : billing === "yearly" ? (
+        <span className="lp-btn lp-btn-paper" aria-disabled="true">
+          Annual billing coming soon
+        </span>
+      ) : (
+        <button
+          type="button"
+          className="lp-btn lp-btn-paper"
+          disabled={busy !== null}
+          onClick={() => onChoose(plan.id)}
+        >
+          {busy === plan.id ? "Opening secure checkout…" : plan.cta}
+        </button>
+      )}
+      {error && (
+        <p className="pr-checkout-error" role="alert">
+          {error}
+        </p>
+      )}
       <ul className="pr-plan-features">
         {plan.features.map((feature) => (
           <li key={feature}>
@@ -114,7 +167,75 @@ function PlanCard({ plan, billing }: { plan: Plan; billing: Billing }) {
 
 export function PricingPlans() {
   const [billing, setBilling] = useState<Billing>("monthly");
+  const [checkoutEnabled, setCheckoutEnabled] = useState(false);
+  const [signedIn, setSignedIn] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [checkoutError, setCheckoutError] = useState("");
   const [free, ...paid] = PLANS;
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch("/api/billing/checkout-availability", {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (response.status === 401) {
+          setSignedIn(false);
+          return;
+        }
+        if (!response.ok) return;
+        const result = (await response.json()) as {
+          enabled?: boolean;
+          plans?: string[];
+        };
+        setSignedIn(true);
+        setCheckoutEnabled(result.enabled === true);
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, []);
+
+  async function choosePlan(planKey: string) {
+    if (busy) return;
+    setBusy(planKey);
+    setCheckoutError("");
+    try {
+      const response = await fetch("/api/billing/checkout", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": crypto.randomUUID(),
+        },
+        body: JSON.stringify({ planKey, interval: "monthly" }),
+      });
+      const result = (await response.json()) as {
+        url?: string;
+        detail?: string;
+      };
+      if (!response.ok || !result.url) {
+        throw new Error(
+          response.status === 401
+            ? "Sign in again to continue."
+            : "Secure checkout could not be opened. Please try again.",
+        );
+      }
+      const target = new URL(result.url);
+      if (
+        target.protocol !== "https:" ||
+        target.hostname !== "checkout.stripe.com"
+      )
+        throw new Error("The checkout destination could not be verified.");
+      window.location.assign(target.toString());
+    } catch (error) {
+      setCheckoutError(
+        error instanceof Error
+          ? error.message
+          : "Secure checkout could not be opened.",
+      );
+      setBusy(null);
+    }
+  }
   return (
     <>
       <div
@@ -132,17 +253,36 @@ export function PricingPlans() {
             onClick={() => setBilling(option)}
           >
             {option === "monthly" ? "Monthly" : "Yearly"}
-            {option === "yearly" && <small>Save about 20%</small>}
+            {option === "yearly" && <small>Save about 17%</small>}
           </button>
         ))}
       </div>
       <div className="pr-plans">
         <div className="pr-plan-group pr-plan-free" data-reveal>
-          {free && <PlanCard plan={free} billing={billing} />}
+          {free && (
+            <PlanCard
+              plan={free}
+              billing={billing}
+              checkoutEnabled={false}
+              signedIn={signedIn}
+              busy={busy}
+              error=""
+              onChoose={choosePlan}
+            />
+          )}
         </div>
         <div className="pr-plan-group pr-plan-paid" data-reveal>
           {paid.map((plan) => (
-            <PlanCard key={plan.id} plan={plan} billing={billing} />
+            <PlanCard
+              key={plan.id}
+              plan={plan}
+              billing={billing}
+              checkoutEnabled={checkoutEnabled}
+              signedIn={signedIn}
+              busy={busy}
+              error={checkoutError}
+              onChoose={choosePlan}
+            />
           ))}
         </div>
       </div>
