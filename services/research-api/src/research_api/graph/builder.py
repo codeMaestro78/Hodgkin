@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from time import monotonic
-from typing import Annotated, Any, Literal, NotRequired, TypedDict
+from typing import Annotated, Any, Literal, NotRequired, TypedDict, cast
 
 from langgraph.errors import GraphInterrupt, NodeCancelledError
 from langgraph.graph import END, START, StateGraph
@@ -138,7 +138,9 @@ from research_api.repositories.budgets import BudgetExceededError
 from research_api.repositories.source_relationships import SourceRelationshipRepository
 from research_api.research_limits import operation_limit, run_source_limit, source_allocations
 from research_api.runtime_context import LeaseLostError
-from research_api.telemetry import dependency_run, operation_event
+from research_api.structured_output import parse_structured_response
+from research_api.telemetry import dependency_run, milestone_event, operation_event
+from research_api.verified_preview import record_verified_preview
 
 
 def merge_source_ids(left: list[str], right: list[str]) -> list[str]:
@@ -566,7 +568,9 @@ async def _plan_with_openai(
         },
         store=False,
     )
-    plan = PlannerOutput.model_validate_json(response.output_text)
+    plan = parse_structured_response(
+        response, PlannerOutput, operation="research.planner.structured_output"
+    )
     # The strict schema caps the global maximum but cannot express the
     # run-specific cap. Keep the highest-priority questions only, so a model
     # overproducing never converts a safe, low-budget run into a failure.
@@ -754,8 +758,11 @@ async def _synthesize_with_openai(
         if pin_request is not None:
             await pin_request(writer_request, passage_registry)
         response = await _model_response(settings, role="writer", **writer_request)
-        assertions = schema_model.model_validate(
-            restore_passage_quotes(json.loads(response.output_text), passage_registry)
+        assertions = parse_structured_response(
+            response,
+            schema_model,
+            operation="research.writer.structured_output",
+            transform=lambda value: restore_passage_quotes(value, passage_registry),
         )
         return EvidenceReportDraft(
             answer_markdown="## Findings\n" + "\n".join(claim.claim for claim in assertions.claims),
@@ -798,7 +805,9 @@ async def _synthesize_with_openai(
         },
         store=False,
     )
-    return ReportDraft.model_validate_json(response.output_text)
+    return parse_structured_response(
+        response, ReportDraft, operation="research.writer.draft_output"
+    )
 
 
 class ReportAssertion(BaseModel):
@@ -904,7 +913,9 @@ async def _report_assertions(
         },
         store=False,
     )
-    parsed = ReportAssertions.model_validate_json(response.output_text)
+    parsed = parse_structured_response(
+        response, ReportAssertions, operation="research.writer.assertions_output"
+    )
     candidate_count = len(parsed.claims)
     located = []
     for claim in parsed.claims:
@@ -1042,7 +1053,11 @@ async def _semantic_reviews_with_openai(
             )
         if existing is not None:
             response = await _model_response(settings, role="claim_review", **legacy_request)
-            return SemanticReviewOutput.model_validate_json(response.output_text).reviews
+            return parse_structured_response(
+                response,
+                SemanticReviewOutput,
+                operation="research.claim_review.structured_output",
+            ).reviews
     # Bound response size by citations, not claims. Keep complete claims in a
     # batch and retain their indices across batches; identical claim text in
     # different batches must not collide in the model receipt fingerprint.
@@ -1088,7 +1103,11 @@ async def _semantic_reviews_with_openai(
             },
             store=False,
         )
-        parsed = SemanticReviewOutput.model_validate_json(response.output_text).reviews
+        parsed = parse_structured_response(
+            response,
+            SemanticReviewOutput,
+            operation="research.claim_review.structured_output",
+        ).reviews
         # A response cannot attest to another batch's evidence. Keep duplicates
         # within this batch so the existing duplicate-review gate fails closed.
         reviews.extend(
@@ -1101,8 +1120,10 @@ async def exact_reviews(
     settings: Settings, claims: Sequence[ReportAssertion], materials: Sequence[SourceMaterial]
 ) -> list[SemanticReview]:
     """Do not spend semantic-review tokens on quotes that fail deterministic checks."""
+    review_started = monotonic()
     selected = []
     indices: list[tuple[int, list[int]]] = []
+    exact_citations = 0
     for index, claim in enumerate(claims):
         citations, citation_indices = [], []
         for offset, citation in enumerate(claim.citations):
@@ -1111,12 +1132,34 @@ async def exact_reviews(
             ):
                 citations.append(citation)
                 citation_indices.append(offset)
+                exact_citations += 1
         if citations:
             selected.append(claim.model_copy(update={"citations": citations}))
             indices.append((index, citation_indices))
     if not selected:
+        operation_event(
+            "research.semantic_review",
+            started=review_started,
+            outcome="no_exact_spans",
+            claimCount=len(claims),
+            exactCitations=0,
+            returnedReviews=0,
+        )
         return []
-    reviews = await _semantic_reviews_with_openai(settings, claims=selected)
+    try:
+        reviews = await _semantic_reviews_with_openai(settings, claims=selected)
+    except (LeaseLostError, GraphInterrupt, NodeCancelledError):
+        raise
+    except Exception as exc:
+        operation_event(
+            "research.semantic_review",
+            started=review_started,
+            outcome="failed",
+            error=exc,
+            claimCount=len(selected),
+            exactCitations=exact_citations,
+        )
+        raise
     mapped = []
     for review in reviews:
         if not (0 <= review.claim_index < len(indices)):
@@ -1131,6 +1174,14 @@ async def exact_reviews(
                     }
                 )
             )
+    operation_event(
+        "research.semantic_review",
+        started=review_started,
+        outcome="succeeded" if mapped else "unassessed",
+        claimCount=len(selected),
+        exactCitations=exact_citations,
+        returnedReviews=len(mapped),
+    )
     return mapped
 
 
@@ -1372,7 +1423,10 @@ async def _compose_narrative(
         claims=[
             SectionedAssertion(
                 claim=claim.claim,
-                section=claim.section,
+                section=cast(
+                    Literal["overview", "mechanisms", "comparison", "risks", "implications"],
+                    claim.section,
+                ),
                 citations=[
                     CitationDraft(source_number=number, quote=quote)
                     for number, quote in claim.citations
@@ -2110,6 +2164,7 @@ def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
         async def collect(sub_question_id: str, slots: int) -> None:
             task_started = monotonic()
             async with semaphore:
+                collection_started = monotonic()
                 if await _cancel_if_requested(tenant_id=tenant_id, run_id=run_id):
                     return
                 async with tenant_session(str(tenant_id)) as session:
@@ -2238,7 +2293,10 @@ def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
                     ids = []
                     task_status = "failed"
                     operation_event(
-                        "research.collect", started=task_started, outcome="failed", error=exc
+                        "research.collect.provider",
+                        started=collection_started,
+                        outcome="failed",
+                        error=exc,
                     )
                 source_ids.extend(str(item) for item in ids)
                 async with tenant_session(str(tenant_id)) as session:
@@ -2286,7 +2344,25 @@ def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
                             },
                         )
                 if task_status == "cancelled":
+                    operation_event(
+                        "research.collect",
+                        started=task_started,
+                        outcome="cancelled",
+                        semaphoreWaitMs=round((collection_started - task_started) * 1000, 2),
+                        sourceCount=len(ids),
+                        operationSlots=slots,
+                    )
                     raise asyncio.CancelledError
+                operation_event(
+                    "research.collect",
+                    started=task_started,
+                    outcome=(
+                        "failed" if task_status == "failed" else "succeeded" if ids else "empty"
+                    ),
+                    semaphoreWaitMs=round((collection_started - task_started) * 1000, 2),
+                    sourceCount=len(ids),
+                    operationSlots=slots,
+                )
 
         # Repair collection must leave the delta writer, its review and
         # publication their reserved tail; on expiry the base report survives.
@@ -2386,7 +2462,10 @@ def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
                     for key in question.payload.get("dimensionIds", [])
                     if uuid.UUID(key) in dimension_ids
                 ),
-                status=question.status,
+                status=cast(
+                    Literal["pending", "running", "complete", "failed", "skipped"],
+                    question.status,
+                ),
                 source_ids=tuple(
                     item.source.id
                     for item in materials
@@ -2436,6 +2515,31 @@ def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
                         ],
                     }
                 )
+        if verified_findings:
+            milestone_event(
+                "research.first_verified_finding",
+                verified_finding_count=len(verified_findings),
+            )
+            preview_started = monotonic()
+            try:
+                await record_verified_preview(
+                    tenant_id=tenant_id,
+                    run_id=run_id,
+                    assessment_id=row.id,
+                    findings=verified_findings,
+                )
+                operation_event("research.verified_preview", started=preview_started)
+            except (LeaseLostError, GraphInterrupt, NodeCancelledError):
+                raise
+            except Exception as exc:
+                # The preview is optional; its transport must not prevent the
+                # evidence assessment and immutable report from completing.
+                operation_event(
+                    "research.verified_preview",
+                    started=preview_started,
+                    outcome="failed",
+                    error=exc,
+                )
         criterion_output: CriterionReviewOutput | CriterionReviewWithConflictsOutput = (
             CriterionReviewWithConflictsOutput(assessments=[], comparisons=[], conflicts=[])
             if phase3_enabled
@@ -2462,10 +2566,13 @@ def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
                     usage is not None
                     and getattr(usage, "output_tokens", 0) >= request["max_output_tokens"]
                 )
-                criterion_output = (
-                    CriterionReviewWithConflictsOutput.model_validate_json(response.output_text)
-                    if phase3_enabled
-                    else CriterionReviewOutput.model_validate_json(response.output_text)
+                criterion_model = (
+                    CriterionReviewWithConflictsOutput if phase3_enabled else CriterionReviewOutput
+                )
+                criterion_output = parse_structured_response(
+                    response,
+                    criterion_model,
+                    operation="research.criterion_review.structured_output",
                 )
             except (LeaseLostError, GraphInterrupt, NodeCancelledError):
                 raise
@@ -2797,8 +2904,11 @@ def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
         try:
             async with asyncio.timeout(window):
                 response = await _model_response(settings, role="writer", **request)
-                drafted = _repair_assertions_model(capacity, requirements).model_validate(
-                    restore_passage_quotes(json.loads(response.output_text), registry)
+                drafted = parse_structured_response(
+                    response,
+                    _repair_assertions_model(capacity, requirements),
+                    operation="research.repair.writer_output",
+                    transform=lambda value: restore_passage_quotes(value, registry),
                 )
                 # Local numbering covers new sources only; shift into the union.
                 delta_claims = [
@@ -2988,8 +3098,11 @@ def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
                     for item in row.manifest["passage_registry"]
                 }
                 response = await _model_response(settings, role="writer", **request)
-                assertions = _assessment_assertions(mode, requirements).model_validate(
-                    restore_passage_quotes(json.loads(response.output_text), registry)
+                assertions = parse_structured_response(
+                    response,
+                    _assessment_assertions(mode, requirements),
+                    operation="research.assessment.writer_output",
+                    transform=lambda value: restore_passage_quotes(value, registry),
                 )
             answer = EvidenceReportDraft(
                 answer_markdown="## Findings\n"
@@ -3539,6 +3652,11 @@ def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
             audit_reviews = await exact_reviews(settings, assertions.claims, usable_sources)
             audited = _audit_assertions(assertions, audit_reviews, usable_sources)
         publishable = [item for item in audited if item[1] == "supported"]
+        if publishable:
+            milestone_event(
+                "research.first_verified_finding",
+                verified_finding_count=len(publishable),
+            )
         rejection_counts: Counter[str] = Counter()
         claim_failures: dict[int, Counter[str]] = {}
         for claim, check, details in audited:
@@ -4021,7 +4139,13 @@ def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
                         for call in retrieval_calls
                     ],
                     sources=[
-                        {"id": str(source.id), "provider": source.provider} for source in sources
+                        {
+                            "id": str(source.id),
+                            "provider": source.provider,
+                            "contentHash": source.content_hash,
+                            "sourceClass": source.source_class,
+                        }
+                        for source in sources
                     ],
                     claim_checks=[
                         {

@@ -17,6 +17,7 @@ def test_report_snapshot_captures_publication_time_source_lifecycle():
                         "shortlisted": 2,
                         "excluded": 2,
                         "duplicateWork": 1,
+                        "duplicateUrl": 0,
                         "unavailable": 0,
                         "policy": "openalex-screening-v1",
                     }
@@ -24,8 +25,18 @@ def test_report_snapshot_captures_publication_time_source_lifecycle():
             }
         ],
         sources=[
-            {"id": "source-1", "provider": "openalex"},
-            {"id": "source-2", "provider": "openalex"},
+            {
+                "id": "source-1",
+                "provider": "openalex",
+                "contentHash": "same-content",
+                "sourceClass": "academic",
+            },
+            {
+                "id": "source-2",
+                "provider": "openalex",
+                "contentHash": "same-content",
+                "sourceClass": "academic",
+            },
         ],
         claim_checks=[
             {
@@ -62,7 +73,11 @@ def test_report_snapshot_captures_publication_time_source_lifecycle():
     assert snapshot["answerUsefulness"] == "not_assessed"
     markdown = retrieval_accounting_markdown(snapshot)
     assert "Retrieval accounting (recorded at publication)" in markdown
-    assert "4 discovered; 2 shortlisted; 2 excluded; 2 extracted" in markdown
+    assert (
+        "4 discovered; 2 shortlisted; 2 excluded; 0 duplicate URL results; 2 extracted" in markdown
+    )
+    assert "Exact-content duplicate source records: 1." in markdown
+    assert "academic 2" in markdown
     assert (
         "Answer usefulness, dimension relevance, and source independence were not assessed."
         in markdown

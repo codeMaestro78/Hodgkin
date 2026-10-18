@@ -70,6 +70,10 @@ describe("retrieval accounting panel", () => {
     expect(html).toContain("2 shortlisted");
     expect(html).toContain("4 excluded");
     expect(html).toContain("Tavily: discovery counts not recorded");
+    expect(html).toContain('aria-label="Source lifecycle summary"');
+    expect(html).toContain("Discovered records</dt><dd>Not recorded");
+    expect(html).toContain("Shortlisted records</dt><dd>Not recorded");
+    expect(html).toContain("Discovery totals count provider records, not distinct works");
     expect(html).toContain("2 extraction calls");
     expect(html).toContain("2 sources extracted");
     expect(html).toContain("1 source cited in verified findings");
@@ -79,6 +83,18 @@ describe("retrieval accounting panel", () => {
     expect(html).toContain("Answer usefulness: not assessed");
     expect(html).toContain("Dimension relevance: not assessed");
     expect(html).toContain("Source independence: not assessed");
+  });
+
+  it("shows recorded discovery totals only when every provider is complete", () => {
+    const complete = {
+      ...accounting,
+      providers: [accounting.providers[0]],
+    } as typeof accounting;
+    const html = renderToStaticMarkup(
+      createElement(RetrievalAccountingPanel, { accounting: complete }),
+    );
+    expect(html).toContain("Discovered records</dt><dd>6</dd>");
+    expect(html).toContain("Shortlisted records</dt><dd>2</dd>");
   });
 
   it("renders nothing for historical runs without the accounting projection", () => {

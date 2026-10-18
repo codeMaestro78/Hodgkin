@@ -2,7 +2,11 @@ import uuid
 
 import pytest
 
-from research_api.artifacts.normalization import canonicalize_url, normalize_text
+from research_api.artifacts.normalization import (
+    canonicalize_url,
+    normalize_text,
+    search_result_identity_url,
+)
 from research_api.artifacts.store import InMemoryArtifactStore
 
 
@@ -14,6 +18,18 @@ def test_canonicalize_url_removes_fragment_tracking_and_default_port() -> None:
 def test_canonicalize_url_rejects_non_http_protocols() -> None:
     with pytest.raises(ValueError):
         canonicalize_url("file:///etc/passwd")
+
+
+def test_search_identity_only_collapses_www_host_aliases():
+    assert search_result_identity_url("https://www.example.com/paper?utm_source=x") == (
+        search_result_identity_url("https://example.com/paper")
+    )
+    assert search_result_identity_url("https://www.example.com/paper-a") != (
+        search_result_identity_url("https://example.com/paper-b")
+    )
+    assert search_result_identity_url("https://blog.example.com/paper") != (
+        search_result_identity_url("https://example.com/paper")
+    )
 
 
 @pytest.mark.asyncio

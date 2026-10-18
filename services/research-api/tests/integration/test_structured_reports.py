@@ -292,7 +292,7 @@ async def test_graph_persists_only_verified_findings_and_conservative_requiremen
         "Answer usefulness, dimension relevance, and source independence were not assessed."
         in snapshot["report"]["markdown"]
     )
-    assert accounting["schemaVersion"] == "1.1"
+    assert accounting["schemaVersion"] == "1.2"
     assert accounting["answerUsefulness"] == "not_assessed"
     assert accounting["dimensionRelevance"] == "not_assessed"
     assert accounting["sourceIndependence"] == "not_assessed"

@@ -128,15 +128,30 @@ export function WorkspaceShell({
 
   useEffect(() => {
     const controller = new AbortController();
-    fetch("/api/auth/session", { cache: "no-store", signal: controller.signal })
-      .then(async (response) => {
+    async function checkAccount() {
+      try {
+        let response = await fetch("/api/auth/session", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        if (response.status === 401) {
+          // One 401 can be a transient blip while cookies refresh; retry once
+          // before bouncing the whole page to login.
+          await new Promise((resolve) => setTimeout(resolve, 750));
+          if (controller.signal.aborted) return;
+          response = await fetch("/api/auth/session", {
+            cache: "no-store",
+            signal: controller.signal,
+          });
+        }
         if (response.status === 401) {
           window.location.assign("/login");
           return;
         }
         if (response.ok) setAccount((await response.json()).user);
-      })
-      .catch(() => {});
+      } catch {}
+    }
+    void checkAccount();
     return () => controller.abort();
   }, []);
   async function signOut() {

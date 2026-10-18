@@ -38,6 +38,7 @@ import {
   runStage,
   runFailure,
   snapshotRefreshDelay,
+  statusForNodeStart,
   createSnapshotRefresh,
   runPhaseIndex,
   runPhases,
@@ -49,6 +50,7 @@ import "katex/dist/katex.min.css";
 import { WorkspaceShell } from "../../../components/workspace-shell";
 import { RunClock } from "../../../components/run-clock";
 import { ResearchActivity } from "../../../components/research-activity";
+import { VerifiedFindingsPreview } from "../../../components/verified-findings-preview";
 import { SaveToLibrary } from "../../../components/save-to-library";
 import { ReportActions } from "../../../components/report-actions";
 import {
@@ -118,6 +120,8 @@ type RunEvent = {
   type: string;
   label: string | null;
   occurredAt: string;
+  verifiedFindings?: { text: string; sourceIds: string[] }[];
+  verifiedClaimCount?: number;
 };
 type Run = {
   runId: string;
@@ -138,6 +142,11 @@ type Run = {
     /** Start of the plan-review wait that is still open, if any. */
     waitStartedAt?: string | null;
   } | null;
+  timing?: {
+    processingMs: number | null;
+    approvalWaitMs: number;
+    elapsedMs: number;
+  };
   planVersion: number;
   sourceCount: number;
   sourceLimit?: number;
@@ -472,7 +481,13 @@ export default function LiveRunWorkspace() {
     let stream: EventSource | undefined;
     let fetching = false;
     let pending = false;
+    let pendingUrgent = false;
     let terminalRetries = 0;
+    let lastSnapshotFinishedAt = 0;
+    let refresh: ReturnType<typeof createSnapshotRefresh>;
+    const scheduleRefresh = (delay: number) => {
+      refresh.schedule(delay);
+    };
     const controller = new AbortController();
     watermark.current = 0;
     if (loadedRunId.current !== runId) {
@@ -482,9 +497,10 @@ export default function LiveRunWorkspace() {
       loadedRunId.current = runId;
     }
     setError("");
-    const load = async () => {
+    const load = async (urgent = false) => {
       if (fetching) {
         pending = true;
+        pendingUrgent ||= urgent;
         return;
       }
       fetching = true;
@@ -540,20 +556,72 @@ export default function LiveRunWorkspace() {
           );
           stream.onmessage = (event) => {
             if (!active) return;
-            let refreshDelay = snapshotRefreshDelay();
+            let refreshDelay = snapshotRefreshDelay(
+              undefined,
+              lastSnapshotFinishedAt,
+            );
+            let terminalEvent = false;
             try {
               const payload = JSON.parse(event.data) as {
                 sequence?: number;
                 type?: string;
                 errorCode?: string | null;
                 occurredAt?: string;
+                nodeId?: string;
+                label?: string | null;
+                verifiedFindings?: { text: string; sourceIds: string[] }[];
+                verifiedClaimCount?: number;
               };
-              refreshDelay = snapshotRefreshDelay(payload.type);
+              refreshDelay = snapshotRefreshDelay(
+                payload.type,
+                lastSnapshotFinishedAt,
+              );
               if (typeof payload.sequence === "number") {
                 if (payload.sequence <= watermark.current) return;
                 watermark.current = Math.max(
                   watermark.current,
                   payload.sequence,
+                );
+              }
+              if (payload.type === "node.started" && payload.nodeId) {
+                const nodeStatus = statusForNodeStart(payload.nodeId);
+                if (nodeStatus)
+                  setRun((previous) =>
+                    previous?.runId === runId &&
+                    !terminal.includes(previous.status)
+                      ? { ...previous, status: nodeStatus }
+                      : previous,
+                  );
+              }
+              if (
+                payload.type === "assessment.findings_verified" &&
+                typeof payload.sequence === "number" &&
+                typeof payload.occurredAt === "string" &&
+                Array.isArray(payload.verifiedFindings) &&
+                payload.verifiedFindings.length > 0
+              ) {
+                const previewEvent: RunEvent = {
+                  sequence: payload.sequence,
+                  type: payload.type,
+                  label: payload.label ?? null,
+                  occurredAt: payload.occurredAt,
+                  verifiedFindings: payload.verifiedFindings,
+                  ...(typeof payload.verifiedClaimCount === "number"
+                    ? { verifiedClaimCount: payload.verifiedClaimCount }
+                    : {}),
+                };
+                setRun((previous) =>
+                  previous?.runId === runId && !previous.report
+                    ? {
+                        ...previous,
+                        events: [
+                          previewEvent,
+                          ...previous.events.filter(
+                            (item) => item.sequence !== previewEvent.sequence,
+                          ),
+                        ].slice(0, 40),
+                      }
+                    : previous,
                 );
               }
               const nextStatus =
@@ -565,6 +633,7 @@ export default function LiveRunWorkspace() {
                       ? "completed"
                       : null;
               if (nextStatus) {
+                terminalEvent = true;
                 terminalSnapshot.current = { runId, status: nextStatus };
                 setRun((previous) =>
                   previous?.runId === runId
@@ -583,12 +652,13 @@ export default function LiveRunWorkspace() {
                 );
                 stream?.close();
                 refresh.cancel();
+                void load(true);
               }
             } catch {
               /* Keep the last valid snapshot. */
             }
             // Coalesce source bursts instead of refetching the full report per event.
-            refresh.schedule(refreshDelay);
+            if (!terminalEvent) scheduleRefresh(refreshDelay);
           };
           stream.onerror = () => {
             // Native EventSource reconnects; refresh once to catch a missed terminal event.
@@ -597,7 +667,9 @@ export default function LiveRunWorkspace() {
               terminalSnapshot.current?.runId !== runId &&
               !refresh.scheduled
             )
-              refresh.schedule(1000);
+              scheduleRefresh(
+                snapshotRefreshDelay(undefined, lastSnapshotFinishedAt),
+              );
           };
         }
         if (terminal.includes(body.status)) stream?.close();
@@ -612,17 +684,25 @@ export default function LiveRunWorkspace() {
         }
       } finally {
         fetching = false;
+        lastSnapshotFinishedAt = Date.now();
         if (active) setSnapshotRefreshing(false);
         if (pending && active) {
           pending = false;
-          void load();
+          const shouldLoadImmediately = pendingUrgent;
+          pendingUrgent = false;
+          if (shouldLoadImmediately) void load(true);
+          else scheduleRefresh(
+            snapshotRefreshDelay(undefined, lastSnapshotFinishedAt),
+          );
         } else if (active && retryTerminalSnapshot && terminalRetries < 3) {
-          const delay = 1000 * 2 ** terminalRetries++;
-          refresh.schedule(delay);
+          terminalRetries++;
+          scheduleRefresh(
+            Math.min(1000 * 2 ** (terminalRetries - 1), 5000),
+          );
         }
       }
     };
-    const refresh = createSnapshotRefresh(() => void load());
+    refresh = createSnapshotRefresh(() => void load());
     void load();
     return () => {
       active = false;
@@ -892,6 +972,13 @@ export default function LiveRunWorkspace() {
     };
   }
   const selected = run?.sources.find((source) => source.id === activeSource);
+  const verifiedPreview = !run?.report
+    ? run?.events.find(
+        (event) =>
+          event.type === "assessment.findings_verified" &&
+          event.verifiedFindings?.length,
+      )
+    : undefined;
   const visibleSources = useMemo(
     () =>
       run?.sources.filter((source) =>
@@ -1270,6 +1357,7 @@ export default function LiveRunWorkspace() {
                         ? (run.updatedAt ?? run.report?.publishedAt)
                         : undefined
                     }
+                    processingMs={run.timing?.processingMs}
                     pausedMs={run.approval?.waitedMs}
                     pausedSince={run.approval?.waitStartedAt}
                   />
@@ -1805,6 +1893,22 @@ export default function LiveRunWorkspace() {
                 </article>
               ) : !stopped && run.status !== "awaiting_approval" ? (
                 <div className="report-pending">
+                  {verifiedPreview?.verifiedFindings && (
+                    <VerifiedFindingsPreview
+                      findings={verifiedPreview.verifiedFindings}
+                      total={
+                        verifiedPreview.verifiedClaimCount ??
+                        verifiedPreview.verifiedFindings.length
+                      }
+                      sources={run.sources}
+                      onOpenSource={(sourceId) => {
+                        setActiveSource(sourceId);
+                        setMobileView("evidence");
+                        setEvidenceVisible(true);
+                        changeTab("sources");
+                      }}
+                    />
+                  )}
                   <ResearchActivity status={run.status} events={run.events} />
                   {run.subQuestions.length > 0 && (
                     <ol

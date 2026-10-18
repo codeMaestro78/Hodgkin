@@ -10,6 +10,7 @@ import os
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime
 from time import monotonic
 from urllib.parse import urlsplit
 
@@ -82,7 +83,9 @@ async def benchmark(
 
     from research_api import jobs
     from research_api.checkpointing import CheckpointPool
+    from research_api.db.assessments import ResearchAssessment
     from research_api.db.models import (
+        Citation,
         Report,
         ResearchRun,
         RunEvent,
@@ -120,7 +123,12 @@ async def benchmark(
         ) as clients:
             yield clients
 
-    logger.setLevel(logging.INFO)
+    # Opt-in complete SQL timings are emitted at DEBUG. Keep the benchmark's
+    # capture level aligned with the explicit setting rather than silently
+    # dropping the query-family observations it was asked to collect.
+    logger.setLevel(
+        logging.DEBUG if settings.DATABASE_QUERY_TIMING_ENABLED else logging.INFO
+    )
     logger.handlers, logger.propagate = [capture], False
     try:
         async with (
@@ -177,6 +185,111 @@ async def benchmark(
                     source_rows = list(
                         await session.scalars(select(Source).where(Source.run_id == run.id))
                     )
+                    records = [
+                        json.loads(line)
+                        for line in capture.lines
+                        if line.startswith("{")
+                    ]
+                    assessment_id = (
+                        report.document.get("assessmentId")
+                        if report and isinstance(report.document, dict)
+                        else None
+                    )
+                    assessment = (
+                        await session.scalar(
+                            select(ResearchAssessment).where(
+                                ResearchAssessment.tenant_id == tenant,
+                                ResearchAssessment.run_id == run.id,
+                                ResearchAssessment.id == uuid.UUID(assessment_id),
+                            )
+                        )
+                        if isinstance(assessment_id, str)
+                        else None
+                    )
+                    assessment_result = (
+                        assessment.result
+                        if assessment and isinstance(assessment.result, dict)
+                        else {}
+                    )
+                    coverage_result = assessment_result.get("coverage", {})
+                    dimensions = (
+                        coverage_result.get("dimensions", [])
+                        if isinstance(coverage_result, dict)
+                        else []
+                    )
+                    criteria = [
+                        criterion
+                        for dimension in dimensions
+                        if isinstance(dimension, dict)
+                        for criterion in dimension.get("criteria", [])
+                        if isinstance(criterion, dict)
+                    ]
+                    report_findings = (
+                        report.document.get("findings", [])
+                        if report and isinstance(report.document, dict)
+                        else []
+                    )
+                    cited_source_ids: set[str] = set()
+                    cited_ids: set[uuid.UUID] = set()
+                    for finding in report_findings:
+                        if not isinstance(finding, dict):
+                            continue
+                        citation_ids = finding.get("citationIds", [])
+                        if isinstance(citation_ids, list):
+                            for citation_id in citation_ids:
+                                try:
+                                    cited_ids.add(uuid.UUID(str(citation_id)))
+                                except (ValueError, TypeError, AttributeError):
+                                    continue
+                        source_ids = finding.get("sourceIds", finding.get("source_ids", []))
+                        if isinstance(source_ids, list):
+                            cited_source_ids.update(str(source_id) for source_id in source_ids)
+                    citation_rows = (
+                        list(
+                            await session.scalars(
+                                select(Citation).where(
+                                    Citation.tenant_id == tenant,
+                                    Citation.run_id == run.id,
+                                    Citation.id.in_(cited_ids),
+                                )
+                            )
+                        )
+                        if cited_ids
+                        else []
+                    )
+                    citation_verifications = [
+                        row.verification if isinstance(row.verification, dict) else {}
+                        for row in citation_rows
+                    ]
+                    exact_citations = [
+                        verification
+                        for verification in citation_verifications
+                        if isinstance(verification.get("exactSpan"), dict)
+                        and verification["exactSpan"].get("verified") is True
+                    ]
+                    supporting_citations = [
+                        verification
+                        for verification in citation_verifications
+                        if isinstance(verification.get("semanticSupport"), dict)
+                        and verification["semanticSupport"].get("verdict") == "supports"
+                    ]
+                    first_verified_at = min(
+                        (
+                            datetime.fromisoformat(row["recordedAt"])
+                            for row in records
+                            if row.get("event") == "research.milestone"
+                            and row.get("milestone") == "research.first_verified_finding"
+                            and isinstance(row.get("recordedAt"), str)
+                        ),
+                        default=None,
+                    )
+                    first_verified_delta_ms = (
+                        (first_verified_at - final.created_at).total_seconds() * 1000
+                        if first_verified_at
+                        else None
+                    )
+                    if first_verified_delta_ms is not None and first_verified_delta_ms < 0:
+                        first_verified_delta_ms = None
                     result = {
                         "event": "benchmark.result",
                         "check": index,
@@ -195,7 +308,52 @@ async def benchmark(
                         )
                         if first
                         else None,
+                        "firstVerifiedFindingFromCreationMs": round(first_verified_delta_ms, 2)
+                        if first_verified_delta_ms is not None
+                        else None,
                         "sources": len(source_rows),
+                        "sourceUtility": {
+                            "sourcesExtracted": len(source_rows),
+                            "sourcesCitedInVerifiedFindings": len(cited_source_ids),
+                            "independenceAssessed": False,
+                        },
+                        "assessmentCoverage": {
+                            "criteriaTotal": len(criteria),
+                            "criteriaAssessed": sum(
+                                criterion.get("assessment_basis")
+                                in {"independent_review", "deterministic_rule"}
+                                for criterion in criteria
+                            ),
+                            "criteriaMet": sum(
+                                criterion.get("outcome") == "met" for criterion in criteria
+                            ),
+                            "criteriaPartial": sum(
+                                criterion.get("outcome") == "partial" for criterion in criteria
+                            ),
+                            "independentAssessment": True,
+                        }
+                        if criteria
+                        else None,
+                        "citationQuality": (
+                            {
+                                "verifiedCitations": sum(
+                                    isinstance(verification.get("exactSpan"), dict)
+                                    and verification["exactSpan"].get("verified") is True
+                                    and isinstance(verification.get("semanticSupport"), dict)
+                                    and verification["semanticSupport"].get("verdict")
+                                    == "supports"
+                                    for verification in citation_verifications
+                                ),
+                                "exactSpanVerified": len(exact_citations),
+                                "semanticSupport": len(supporting_citations),
+                                "unassessed": sum(
+                                    "semanticSupport" not in verification
+                                    for verification in citation_verifications
+                                ),
+                            }
+                            if cited_ids and len(citation_rows) == len(cited_ids)
+                            else None
+                        ),
                         "sourceDiversity": {
                             "distinctHosts": len(
                                 {
@@ -258,7 +416,6 @@ async def benchmark(
                         ).hexdigest(),
                     }
                 metrics = analyze(io.StringIO("\n".join(capture.lines)))
-                records = [json.loads(line) for line in capture.lines if line.startswith("{")]
                 result["modelCalls"] = [
                     {
                         key: row.get(key)
@@ -269,6 +426,8 @@ async def benchmark(
                             "outcome",
                             "remoteDurationMs",
                             "durationMs",
+                            "inputTokens",
+                            "outputTokens",
                         )
                     }
                     for row in records
@@ -292,6 +451,7 @@ async def benchmark(
                 result["dependencies"] = [
                     item for item in metrics["dependencies"] if item["category"] == "attempt"
                 ]
+                result["operations"] = metrics["operations"]
                 result["nodes"] = [
                     item for item in metrics["operations"] if item["operation"].startswith("node.")
                 ]
