@@ -28,22 +28,48 @@ def command_category(statement: str | None) -> str:
     return verb if verb in {"SELECT", "INSERT", "UPDATE", "DELETE", "WITH", "SET"} else "OTHER"
 
 
-def slow_query_family(statement: str | None) -> str:
-    """Static, non-sensitive labels for the lock paths that need diagnosis."""
+def query_family(statement: str | None) -> str:
+    """Static, non-sensitive table-family labels; never expose SQL or parameters."""
     sql = statement or ""
-    if command_category(sql) != "SELECT":
+    command = command_category(sql)
+    if command not in {"SELECT", "WITH", "INSERT", "UPDATE", "DELETE"}:
         return "other"
     for table, label in (
         ("runtime_jobs", "runtime_job"),
-        ("budgets", "budget"),
         ("research_runs", "run"),
+        ("sub_question_attempts", "sub_question_attempt"),
+        ("sub_questions", "sub_question"),
+        ("node_executions", "node_execution"),
+        ("provider_calls", "provider_call"),
+        ("run_events", "run_event"),
+        ("evidence_claims", "evidence_claim"),
+        ("citations", "citation"),
+        ("sources", "source"),
+        ("reports", "report"),
+        ("research_assessments", "assessment"),
+        ("research_plans", "research_plan"),
+        ("plan_approvals", "plan_approval"),
+        ("budgets", "budget"),
+        ("usage_ledger", "usage_ledger"),
     ):
-        if re.search(rf"\bFROM\s+{table}\b", sql, re.IGNORECASE):
+        operation = {
+            "INSERT": "INTO",
+            "UPDATE": "UPDATE",
+            "DELETE": "FROM",
+        }.get(command)
+        matcher = rf"\b{operation}\s+\"?{table}\"?\b" if operation else (
+            rf"\b(?:FROM|JOIN)\s+\"?{table}\"?\b"
+        )
+        if re.search(matcher, sql, re.IGNORECASE):
             if re.search(r"\bFOR\s+UPDATE\b", sql, re.IGNORECASE):
                 return f"{label}_exclusive"
-            if table == "runtime_jobs" and re.search(r"\bFOR\s+SHARE\b", sql, re.IGNORECASE):
-                return "runtime_job_shared"
+            if re.search(r"\bFOR\s+SHARE\b", sql, re.IGNORECASE):
+                return f"{label}_shared"
+            return label
     return "other"
+
+
+slow_query_family = query_family
 
 
 @event.listens_for(engine.sync_engine, "before_cursor_execute")
@@ -68,12 +94,21 @@ def statement_finish(
     _executemany: bool,
 ) -> None:
     started = context.research_started
-    if (monotonic() - started) * 1000 >= settings.DATABASE_SLOW_STATEMENT_MS:
+    duration_ms = (monotonic() - started) * 1000
+    if duration_ms >= settings.DATABASE_SLOW_STATEMENT_MS:
         operation_event(
             "db.statement.slow",
             started=started,
             commandCategory=command_category(_statement),
             queryFamily=slow_query_family(_statement),
+            executemany=_executemany,
+        )
+    elif settings.DATABASE_QUERY_TIMING_ENABLED:
+        operation_event(
+            "db.statement.timing",
+            started=started,
+            commandCategory=command_category(_statement),
+            queryFamily=query_family(_statement),
             executemany=_executemany,
         )
 
@@ -88,6 +123,7 @@ def statement_failure(context: Any) -> None:
         outcome="failed",
         error=context.sqlalchemy_exception or context.original_exception,
         commandCategory=command_category(getattr(context, "statement", None)),
+        queryFamily=query_family(getattr(context, "statement", None)),
     )
 
 
