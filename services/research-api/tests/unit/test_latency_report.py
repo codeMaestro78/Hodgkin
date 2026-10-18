@@ -40,6 +40,30 @@ def test_synthetic_delays_have_exact_nearest_rank_percentiles_and_run_nodes():
     assert report["run_nodes"][0]["run_id"] == RUN
 
 
+def test_first_verified_finding_is_a_milestone_not_a_fake_duration():
+    records = [
+        {
+            "event": "research.milestone",
+            "milestone": "research.first_verified_finding",
+            "runId": RUN,
+            "verifiedFindingCount": 2,
+            "recordedAt": "2026-10-17T12:00:00.000+00:00",
+        },
+        event(
+            0,
+            operation="research.first_verified_finding",
+            verifiedFindingCount=2,
+            recordedAt="2026-10-17T12:00:00.000+00:00",
+        ),
+    ]
+    report = analyze(*records)
+    assert report["milestones"] == [
+        {"milestone": "research.first_verified_finding", "count": 2}
+    ]
+    assert report["operations"] == []
+    assert "2026-10-17" not in json.dumps(report)
+
+
 def test_retry_attempts_diagnostics_and_enclosing_nodes_remain_separate():
     report = analyze(
         event(700),
@@ -50,6 +74,7 @@ def test_retry_attempts_diagnostics_and_enclosing_nodes_remain_separate():
             provider="openai",
             outcome="released",
             attempt=1,
+            retryScheduled=True,
         ),
         event(
             500,
@@ -73,6 +98,8 @@ def test_retry_attempts_diagnostics_and_enclosing_nodes_remain_separate():
     assert attempt["success"]["max_ms"] == 500
     assert attempt["errors"]["max_ms"] == 100
     assert attempt["records"] == 2
+    assert attempt["attempt_numbers"] == {"1": 1, "2": 1}
+    assert attempt["retries_scheduled"] == 1
     diagnostic = next(r for r in report["dependencies"] if r["operation"] == "accounting")
     assert diagnostic["category"] == "diagnostic"
     assert diagnostic["excluded_durations"] == 1
@@ -103,6 +130,45 @@ def test_model_start_is_not_counted_as_a_second_attempt():
     assert group["records"] == 1
     assert group["excluded_durations"] == 0
     assert group["success"]["count"] == 1
+
+
+def test_collection_stage_timings_keep_admission_artifacts_and_persistence_visible():
+    report = analyze(
+        event(11, operation="research.extract.admission"),
+        event(22, operation="research.source.artifacts"),
+        event(33, operation="research.source.persistence"),
+    )
+    observed = {row["operation"]: row["success"]["max_ms"] for row in report["operations"]}
+    assert observed == {
+        "research.extract.admission": 11,
+        "research.source.artifacts": 22,
+        "research.source.persistence": 33,
+    }
+
+
+def test_database_query_timings_are_grouped_by_safe_family_and_command():
+    rows = analyze(
+        event(
+            12,
+            operation="db.statement.timing",
+            commandCategory="SELECT",
+            queryFamily="run",
+        ),
+        event(
+            34,
+            operation="db.statement.timing",
+            commandCategory="UPDATE",
+            queryFamily="run_exclusive",
+        ),
+    )["operations"]
+    measurements = [
+        (row["command_category"], row["query_family"], row["success"]["max_ms"])
+        for row in rows
+    ]
+    assert measurements == [
+        ("SELECT", "run", 12),
+        ("UPDATE", "run_exclusive", 34),
+    ]
 
 
 @pytest.mark.parametrize(
@@ -161,7 +227,7 @@ def test_http_status_errors_and_headers_are_not_evidence_or_queue_wait():
     assert request["errors"]["count"] == 1
     assert request["success"]["count"] == 0
     assert report["response_headers"][0]["errors"]["p50_ms"] == 25
-    assert set(report["missing_signals"]) == {"queue_wait", "first_evidence"}
+    assert set(report["missing_signals"]) == {"queue_wait"}
 
 
 def test_empty_input_has_missing_signals_and_no_fabricated_measurements():
