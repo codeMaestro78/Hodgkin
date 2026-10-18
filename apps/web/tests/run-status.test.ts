@@ -3,6 +3,7 @@ import {
   modeDeadline,
   retryDeadline,
   runStage,
+  statusForNodeStart,
   runFailure,
   snapshotRefreshDelay,
   createSnapshotRefresh,
@@ -11,10 +12,17 @@ import {
 } from "../lib/run-status";
 
 it("coalesces source bursts without delaying terminal snapshots", () => {
-  expect(snapshotRefreshDelay("source.discovered")).toBe(1500);
+  expect(snapshotRefreshDelay("source.discovered")).toBe(5000);
   expect(snapshotRefreshDelay("run.failed")).toBe(0);
   expect(snapshotRefreshDelay("run.completed")).toBe(0);
-  expect(snapshotRefreshDelay("node.started")).toBe(0);
+  expect(snapshotRefreshDelay("node.started")).toBe(1000);
+});
+
+it("enforces a five-second minimum between full snapshots", () => {
+  expect(snapshotRefreshDelay("node.started", 10_000, 14_000)).toBe(1000);
+  expect(snapshotRefreshDelay("node.started", 10_000, 12_000)).toBe(3000);
+  expect(snapshotRefreshDelay("source.discovered", 10_000, 15_000)).toBe(5000);
+  expect(snapshotRefreshDelay("run.completed", 10_000, 10_001)).toBe(0);
 });
 
 afterEach(() => vi.useRealTimers());
@@ -73,6 +81,21 @@ it("maps every recorded status to an honest progress phase", () => {
   expect(runPhaseIndex("completed")).toBe(4);
   for (const status of ["queued", "failed", "cancelled"])
     expect(runPhaseIndex(status)).toBe(-1);
+});
+
+it.each([
+  ["intake", "planning"],
+  ["planner", "planning"],
+  ["planner_delta", "planning"],
+  ["research_worker", "researching"],
+  ["research_task", "researching"],
+  ["assess_evidence", "reflecting"],
+  ["reflector", "reflecting"],
+  ["verifier", "verifying"],
+  ["synthesizer", "writing"],
+  ["unknown", null],
+])("maps recorded node start %s to status %s", (nodeId, status) => {
+  expect(statusForNodeStart(nodeId)).toBe(status);
 });
 
 it.each([
