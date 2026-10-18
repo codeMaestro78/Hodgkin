@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field, create_model
 from sqlalchemy import func, select
 
 from research_api.artifacts.store import S3ArtifactStore
+from research_api.billing.lifecycle import settle_terminal_run
 from research_api.config import Settings
 from research_api.coverage import (
     AssessmentScope,
@@ -484,6 +485,7 @@ async def _cancel_if_requested(*, tenant_id: uuid.UUID, run_id: uuid.UUID) -> bo
         if run.status != "cancelled":
             run.status = "cancelled"
             run.cancelled_at = run.cancellation_requested_at
+            await settle_terminal_run(session, run)
             await EventOutbox(session, tenant_id).append(
                 run_id=run_id,
                 event_type="run.cancelled",
@@ -3565,6 +3567,7 @@ def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
             if existing is not None:
                 run.report_id = existing.id
                 run.status = "completed"
+                await settle_terminal_run(session, run)
                 return state
             sources = list(
                 await session.scalars(
@@ -4243,6 +4246,7 @@ def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
             # task closes first so run.completed stays the final event.
             await close_open_nodes(session, tenant_id, run_id, "completed")
             run.status = "completed"
+            await settle_terminal_run(session, run)
             await EventOutbox(session, tenant_id).append(
                 run_id=run_id,
                 event_type="run.completed",
@@ -4500,6 +4504,7 @@ async def run_graph(
                 if run.cancellation_requested_at is not None:
                     run.status = "cancelled"
                     run.cancelled_at = run.cancellation_requested_at
+                    await settle_terminal_run(session, run)
                     await close_open_nodes(session, tenant_id, run_id, "cancelled")
                     await EventOutbox(session, tenant_id).append(
                         run_id=run_id,
@@ -4508,6 +4513,7 @@ async def run_graph(
                     )
                     return
                 run.status = "failed"
+                await settle_terminal_run(session, run)
                 run.error_code = (
                     "wall_clock_limit_exceeded"
                     if isinstance(exc, TimeoutError)
