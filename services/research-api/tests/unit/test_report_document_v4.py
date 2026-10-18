@@ -7,12 +7,12 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-from test_report_document_v3 import uid
-from test_report_document_v3 import v3 as v3  # noqa: F401 -- pytest fixture import
 
 from research_api.mode_composer import compose_report
 from research_api.report_document import report_diagnostics, validate_report_document
 from research_api.report_document_v4 import enhance_report_document_v4
+from tests.unit.test_report_document_v3 import uid
+from tests.unit.test_report_document_v3 import v3 as v3  # noqa: F401 -- pytest fixture import
 
 NARRATIVE_CLAIM = uid(900)
 
