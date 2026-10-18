@@ -86,6 +86,7 @@ async def test_run_projection_queries_evidence_for_verified_tenant_and_requested
                         ),
                         SimpleNamespace(search_calls=2),
                         0,
+                        12_345,
                     )
                 ),
                 [],
@@ -107,12 +108,17 @@ async def test_run_projection_queries_evidence_for_verified_tenant_and_requested
     )
     result = await api.get_research_run(run_id)
     assert result["claimChecks"] == []
+    assert result["timing"]["processingMs"] == 12_345
+    assert result["timing"]["approvalWaitMs"] == 0
+    assert result["timing"]["elapsedMs"] >= 0
     collections.assert_awaited_once_with(session, tenant, run_id)
     statement = session.execute.call_args.args[0]
     params = list(statement.compile().params.values())
     assert params.count(tenant) == 2
     assert params.count(run_id) == 2
     assert "LEFT OUTER JOIN citations" in str(statement)
+    header_statement = session.execute.call_args_list[0].args[0]
+    assert "LEFT OUTER JOIN runtime_jobs" in str(header_statement)
 
 
 @pytest.mark.asyncio
