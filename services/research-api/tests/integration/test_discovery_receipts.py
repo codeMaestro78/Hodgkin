@@ -164,8 +164,9 @@ async def test_matched_evidence_quota_and_restart_replay(provider, monkeypatch):
                 # does not expose its upstream candidate pool.
                 "discovered": 2,
                 "shortlisted": 2,
-                "excluded": None,
+                "excluded": 0,
                 "duplicateWork": None,
+                "duplicateUrl": 0,
                 "unavailable": None,
                 "policy": None,
             },
@@ -174,6 +175,7 @@ async def test_matched_evidence_quota_and_restart_replay(provider, monkeypatch):
                 "shortlisted": 2,
                 "excluded": 1,
                 "duplicateWork": None,
+                "duplicateUrl": 0,
                 "unavailable": None,
                 "policy": "serper-order-v1",
             },
@@ -182,6 +184,7 @@ async def test_matched_evidence_quota_and_restart_replay(provider, monkeypatch):
                 "shortlisted": 2,
                 "excluded": 1,
                 "duplicateWork": 0,
+                "duplicateUrl": 0,
                 "unavailable": 0,
                 "policy": "academic-lexical-topk-v1",
             },
@@ -226,7 +229,7 @@ async def test_matched_evidence_quota_and_restart_replay(provider, monkeypatch):
     )
     projection = await api.get_research_run(run)
     accounting = projection["insights"]["retrievalAccounting"]
-    assert accounting["schemaVersion"] == "1.1"
+    assert accounting["schemaVersion"] == "1.2"
     assert accounting["extractionCalls"] == 1
     assert accounting["extractionOutcomes"]["succeeded"] == 1
     assert accounting["extractedSources"] == 2
