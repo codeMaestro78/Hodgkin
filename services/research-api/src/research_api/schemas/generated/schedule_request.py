@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
+
 from pydantic import BaseModel, ConfigDict, Field, confloat, conint, constr
 
 
@@ -24,6 +26,12 @@ class BudgetOverrides(BaseModel):
     max_estimated_cost_usd: confloat(ge=0.0) | None = Field(None, alias="maxEstimatedCostUsd")
 
 
+class Mode(StrEnum):
+    focused = "focused"
+    balanced = "balanced"
+    deep = "deep"
+
+
 class ScheduleRequest(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -34,3 +42,4 @@ class ScheduleRequest(BaseModel):
     idempotency_key: constr(min_length=16, max_length=200) = Field(..., alias="idempotencyKey")
     require_approval: bool = Field(True, alias="requireApproval")
     budget_overrides: BudgetOverrides | None = Field(None, alias="budgetOverrides")
+    mode: Mode | None = None
