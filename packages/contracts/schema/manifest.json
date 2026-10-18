@@ -4,6 +4,7 @@
     "AgentEventSchema",
     "ApprovalRequestSchema",
     "BatchRequestSchema",
+    "BillingEntitlementSchema",
     "BudgetSchema",
     "CitationSchema",
     "CitationVerificationSchema",
