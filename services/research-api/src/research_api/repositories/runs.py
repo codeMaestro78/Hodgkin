@@ -4,12 +4,13 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import Literal, cast
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from research_api.config import get_settings
+from research_api.config import Settings, get_settings
 from research_api.db.models import Budget, ResearchRun, UsageLedger
 
 
@@ -101,6 +102,11 @@ class RunRepository:
             if budget is None and budget_resolver is None:
                 defaults = resolve_mode_budget(mode, policy_version=effective_policy_version)
             validate_mode_budget(mode, defaults, policy_version=effective_policy_version)
+        settings = get_settings()
+        if settings.BILLING_ENFORCEMENT_ENABLED and mode is None and prior is None:
+            from research_api.billing.ledger import BillingModeUnavailable
+
+            raise BillingModeUnavailable("explicit research mode is required for metered work")
         statement = insert(ResearchRun).values(
             id=run_id,
             tenant_id=self._tenant_id,
@@ -114,7 +120,7 @@ class RunRepository:
             idempotency_key=idempotency_key,
             parent_report_id=parent_report_id,
             approval_required=approval_required,
-            model_routing=get_settings().model_routing_snapshot(),
+            model_routing=settings.model_routing_snapshot(),
             mode=mode,
             mode_policy_version=mode_policy_version,
         )
@@ -162,27 +168,70 @@ class RunRepository:
             if mode is not None:
                 assert run.mode_policy_version is not None
                 validate_mode_budget(mode, defaults, policy_version=run.mode_policy_version)
+            # Existing idempotent work must never acquire a new charge during
+            # rollout or replay. The run and its reservation were committed
+            # atomically on first admission; if no reservation exists, keep
+            # this historical run unmetered rather than billing it retroactively.
             return run, False
-        self._session.add_all(
-            [
-                Budget(
-                    tenant_id=self._tenant_id,
-                    run_id=run_id,
-                    max_wall_clock_ms=defaults.max_wall_clock_ms,
-                    max_search_calls=defaults.max_search_calls,
-                    max_provider_operations=defaults.max_provider_operations,
-                    max_sources=defaults.max_sources,
-                    max_browser_sessions=defaults.max_browser_sessions,
-                    max_reflection_rounds=defaults.max_reflection_rounds,
-                    max_input_tokens=defaults.max_input_tokens,
-                    max_output_tokens=defaults.max_output_tokens,
-                    max_estimated_cost_usd=defaults.max_estimated_cost_usd,
-                ),
-                UsageLedger(tenant_id=self._tenant_id, run_id=run_id),
-            ]
-        )
+        records = [
+            Budget(
+                tenant_id=self._tenant_id,
+                run_id=run_id,
+                max_wall_clock_ms=defaults.max_wall_clock_ms,
+                max_search_calls=defaults.max_search_calls,
+                max_provider_operations=defaults.max_provider_operations,
+                max_sources=defaults.max_sources,
+                max_browser_sessions=defaults.max_browser_sessions,
+                max_reflection_rounds=defaults.max_reflection_rounds,
+                max_input_tokens=defaults.max_input_tokens,
+                max_output_tokens=defaults.max_output_tokens,
+                max_estimated_cost_usd=defaults.max_estimated_cost_usd,
+            ),
+            UsageLedger(tenant_id=self._tenant_id, run_id=run_id),
+        ]
+        self._session.add_all(records)
         await self._session.flush()
+        if settings.BILLING_SHADOW_ACCOUNTING_ENABLED:
+            from research_api.billing.shadow import (
+                build_shadow_observation,
+                persist_shadow_observation,
+            )
+
+            await persist_shadow_observation(
+                self._session,
+                build_shadow_observation(
+                    tenant_id=self._tenant_id,
+                    user_id=user_id,
+                    run_id=run_id,
+                    mode=mode,
+                ),
+            )
+        await self._reserve_billing_if_enabled(run, user_id, idempotency_key, settings)
         return run, True
+
+    async def _reserve_billing_if_enabled(
+        self,
+        run: ResearchRun,
+        user_id: uuid.UUID,
+        idempotency_key: str | None,
+        settings: Settings,
+    ) -> None:
+        if not settings.BILLING_ENFORCEMENT_ENABLED:
+            return
+        if run.mode not in {"focused", "balanced", "deep"}:
+            from research_api.billing.ledger import BillingModeUnavailable
+
+            raise BillingModeUnavailable("explicit research mode is required for metered work")
+        from research_api.billing.ledger import reserve_units
+
+        await reserve_units(
+            self._session,
+            tenant_id=self._tenant_id,
+            user_id=user_id,
+            run_id=run.id,
+            mode=cast(Literal["focused", "balanced", "deep"], run.mode),
+            idempotency_key=idempotency_key or f"run:{run.id}",
+        )
 
     async def get(self, run_id: uuid.UUID) -> ResearchRun | None:
         return await self._session.scalar(
