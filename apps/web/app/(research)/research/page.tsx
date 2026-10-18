@@ -1,16 +1,19 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { WorkspaceShell } from "../../components/workspace-shell";
 import { Icon } from "../../components/ui";
 import { Critter } from "../../components/crew/critter";
+import {
+  ResearchQuestionField,
+  ResearchRequirementsField,
+} from "../../components/research-draft-fields";
 import { onboardingProfileSchema } from "../../../lib/onboarding";
 import {
   clearResearchDraft,
   createResearchRequest,
   emptyResearchDraft,
-  MAX_REQUIREMENTS_TEXT,
   readResearchDraft,
   researchDraftAccount,
   researchDraftSchema,
@@ -49,7 +52,7 @@ const examples = [
   },
 ];
 
-export default function ResearchPage() {
+function ResearchComposer() {
   const [draft, setDraft] = useState<ResearchDraft>(emptyResearchDraft);
   const { question, depth, requireApproval, requirementsText } = draft;
   const draftRef = useRef(draft);
@@ -57,27 +60,44 @@ export default function ResearchPage() {
   const accountGeneration = useRef(0);
   const checkingAccount = useRef(true);
   const [draftReady, setDraftReady] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
   const editedFields = useRef(new Set<keyof ResearchDraft>());
   const created = useRef(false);
+  const persistDraftPatch = useCallback(
+    (patch: Partial<ResearchDraft>, userEdit = true) => {
+      if (userEdit) {
+        for (const key of Object.keys(patch) as (keyof ResearchDraft)[])
+          editedFields.current.add(key);
+      }
+      draftRef.current = { ...draftRef.current, ...patch };
+      if (accountId.current && !created.current)
+        writeResearchDraft(accountId.current, draftRef.current);
+    },
+    [],
+  );
   function updateDraft(patch: Partial<ResearchDraft>, userEdit = true) {
-    if (userEdit) {
-      for (const key of Object.keys(patch) as (keyof ResearchDraft)[])
-        editedFields.current.add(key);
-    }
-    draftRef.current = { ...draftRef.current, ...patch };
+    persistDraftPatch(patch, userEdit);
     setDraft(draftRef.current);
-    if (accountId.current && !created.current)
-      writeResearchDraft(accountId.current, draftRef.current);
   }
-  const setQuestion = (question: string) => updateDraft({ question });
+  const setQuestion = useCallback(
+    (question: string) => {
+      editedQuestion.current = true;
+      persistDraftPatch({ question });
+      if (notice) setNotice("");
+    },
+    [notice, persistDraftPatch],
+  );
+  const setRequirementsText = useCallback(
+    (requirementsText: string) => persistDraftPatch({ requirementsText }),
+    [persistDraftPatch],
+  );
   const setDepth = (depth: string) => {
     if (depth === "focused" || depth === "balanced" || depth === "deep")
       updateDraft({ depth });
   };
   const setRequireApproval = (requireApproval: boolean) =>
     updateDraft({ requireApproval });
-  const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState("");
   const textarea = useRef<HTMLTextAreaElement>(null);
   const router = useRouter();
   const editedQuestion = useRef(false);
@@ -104,9 +124,11 @@ export default function ResearchPage() {
           cache: "no-store",
           signal,
         });
-        const id = response.ok
-          ? researchDraftAccount(await response.json())
-          : null;
+        // A failed probe says nothing about identity: a transient 401/503 while
+        // the session refreshes must not read as an account switch and blank
+        // the composer. Only a successful probe may confirm or change the id.
+        if (!response.ok) return;
+        const id = researchDraftAccount(await response.json());
         if (signal.aborted) return;
         const previousId = accountId.current;
         if (previousId && previousId === id) return;
@@ -196,7 +218,8 @@ export default function ResearchPage() {
       window.dispatchEvent(new Event("focus"));
       return;
     }
-    if (question.trim().length < 5) {
+    const currentDraft = draftRef.current;
+    if (currentDraft.question.trim().length < 5) {
       setNotice(
         "Add a little more detail—your question needs at least five characters.",
       );
@@ -205,7 +228,7 @@ export default function ResearchPage() {
     }
     let request: ReturnType<typeof createResearchRequest>;
     try {
-      request = createResearchRequest(draft);
+      request = createResearchRequest(currentDraft);
     } catch (error) {
       setNotice(
         error instanceof Error ? error.message : "Check report requirements.",
@@ -263,221 +286,188 @@ export default function ResearchPage() {
   }
 
   return (
-    <WorkspaceShell title="New research">
-      <div className="desk-composer-scroll">
-        <header className="desk-composer-heading">
-          <h1>Start a research brief.</h1>
-          <p>A question worth asking. Evidence you can inspect.</p>
-        </header>
-        <div className="desk-composer-layout">
-          <div className="desk-composer-main">
-            <div className="desk-perch" aria-hidden="true">
-              <Critter kind="lens" size={44} delay={400} />
-              <Critter kind="folio" size={48} />
-              <Critter kind="quill" size={40} delay={900} />
-            </div>
-            <form
-              className="desk-composer"
-              onSubmit={start}
-              aria-busy={busy}
-              onKeyDown={(event) => {
-                if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
-                  event.preventDefault();
-                  event.currentTarget.requestSubmit();
-                }
-              }}
-            >
-              <FieldGroup>
-                <Field invalid={Boolean(notice)}>
-                  <div className="desk-input-label">
-                    <FieldLabel htmlFor="question">
-                      What do you need to understand?
-                    </FieldLabel>
-                    <span>{question.length}/1000</span>
-                  </div>
-                  <textarea
-                    id="question"
-                    ref={textarea}
-                    value={question}
-                    onChange={(event) => {
-                      setQuestion(event.target.value);
-                      editedQuestion.current = true;
-                      if (notice) setNotice("");
-                    }}
-                    placeholder="Ask a question, compare alternatives, or investigate a decision…"
-                    maxLength={1000}
-                    rows={6}
-                    required
-                    disabled={busy}
-                    aria-invalid={Boolean(notice)}
-                    aria-describedby="scope-note"
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="report-requirements">
-                    Report requirements
-                  </FieldLabel>
-                  <textarea
-                    id="report-requirements"
-                    value={requirementsText}
-                    onChange={(event) =>
-                      updateDraft({ requirementsText: event.target.value })
-                    }
-                    maxLength={MAX_REQUIREMENTS_TEXT}
-                    rows={4}
-                    disabled={busy}
-                    aria-describedby="requirements-note"
-                    placeholder="Compare costs and trade-offs\nInclude implementation risks"
-                  />
-                  <p id="requirements-note" className="desk-help">
-                    Optional. One requirement per line, up to 20 requirements
-                    and 500 characters each.
-                  </p>
-                </Field>
-                <Field>
-                  <span className="desk-field-label">Research depth</span>
-                  <ToggleGroup
-                    value={depth}
-                    onChange={(value) => {
-                      editedDepth.current = true;
-                      setDepth(value);
-                    }}
-                    label="Research depth"
-                  >
-                    {researchModes.map((item) => (
-                      <ToggleGroupItem key={item.mode} value={item.mode}>
-                        <span className="depth-title">
-                          {item.name}
-                          <Icon
-                            name={item.name === "Deep" ? "layers" : "search"}
-                            size={17}
-                          />
-                        </span>
-                        <span className="depth-description">
-                          {item.description}
-                        </span>
-                        <span className="depth-limit">
-                          Up to {item.sources} sources · {item.operations}{" "}
-                          provider operations · {item.minutes}-minute active
-                          limit
-                        </span>
-                      </ToggleGroupItem>
-                    ))}
-                  </ToggleGroup>
-                  <p id="scope-note" className="desk-help">
-                    Planning, collection and verification share this active-time
-                    limit; waiting for approval does not count. Limits are
-                    ceilings, not quotas. Search and extraction both count
-                    toward the provider-operation budget.
-                  </p>
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="require-approval">
-                    <input
-                      id="require-approval"
-                      type="checkbox"
-                      checked={requireApproval}
-                      onChange={(event) =>
-                        setRequireApproval(event.target.checked)
-                      }
-                      disabled={busy}
-                      aria-describedby="approval-note"
-                    />{" "}
-                    Review the plan before research starts
-                  </FieldLabel>
-                  <p id="approval-note" className="desk-help">
-                    Approve the proposed questions to continue, or reject the
-                    plan to stop the run.
-                  </p>
-                </Field>
-              </FieldGroup>
-              {notice && <Alert>{notice}</Alert>}
-              <footer className="desk-composer-footer">
-                <span>
-                  <kbd>Ctrl / ⌘</kbd> + <kbd>Enter</kbd> to start
-                </span>
-                <Button
-                  type="submit"
-                  disabled={busy || !draftReady || question.trim().length < 5}
-                >
-                  {busy ? (
-                    <span className="motion-spinner" aria-hidden="true" />
-                  ) : (
-                    <Icon name="arrow" size={17} />
-                  )}{" "}
-                  {busy ? "Starting research…" : "Start research"}
-                </Button>
-              </footer>
-            </form>
-            <section
-              className="desk-templates"
-              aria-label="Research starting points"
-            >
-              <h2>Find a starting point</h2>
-              <div>
-                {examples.map((example) => (
-                  <button
-                    type="button"
-                    key={example.type}
-                    disabled={busy}
-                    onClick={() => {
-                      editedQuestion.current = true;
-                      setQuestion(example.question);
-                      setNotice("");
-                      textarea.current?.focus();
-                    }}
-                  >
-                    <strong>
-                      {example.type}
-                      <Icon name="arrow" size={16} />
-                    </strong>
-                    <span>{example.question}</span>
-                  </button>
-                ))}
-              </div>
-            </section>
+    <div className="desk-composer-scroll">
+      <header className="desk-composer-heading">
+        <h1>Start a research brief.</h1>
+        <p>A question worth asking. Evidence you can inspect.</p>
+      </header>
+      <div className="desk-composer-layout">
+        <div className="desk-composer-main">
+          <div className="desk-perch" aria-hidden="true">
+            <Critter kind="lens" size={44} delay={400} />
+            <Critter kind="folio" size={48} />
+            <Critter kind="quill" size={40} delay={900} />
           </div>
-          <aside className="desk-scope" aria-label="Research scope">
-            <div className="desk-scope-title">
-              <Icon name="layers" size={20} />
-              <h2>Research scope</h2>
+          <form
+            className="desk-composer"
+            onSubmit={start}
+            aria-busy={busy}
+            onKeyDown={(event) => {
+              if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+                event.preventDefault();
+                event.currentTarget.requestSubmit();
+              }
+            }}
+          >
+            <FieldGroup>
+              <ResearchQuestionField
+                value={question}
+                disabled={busy}
+                invalid={Boolean(notice)}
+                textareaRef={textarea}
+                onValueChange={setQuestion}
+              />
+              <ResearchRequirementsField
+                value={requirementsText}
+                disabled={busy}
+                onValueChange={setRequirementsText}
+              />
+              <Field>
+                <span className="desk-field-label">Research depth</span>
+                <ToggleGroup
+                  value={depth}
+                  onChange={(value) => {
+                    editedDepth.current = true;
+                    setDepth(value);
+                  }}
+                  label="Research depth"
+                >
+                  {researchModes.map((item) => (
+                    <ToggleGroupItem key={item.mode} value={item.mode}>
+                      <span className="depth-title">
+                        {item.name}
+                        <Icon
+                          name={item.name === "Deep" ? "layers" : "search"}
+                          size={17}
+                        />
+                      </span>
+                      <span className="depth-description">
+                        {item.description}
+                      </span>
+                      <span className="depth-limit">
+                        Up to {item.sources} sources · {item.operations}{" "}
+                        provider operations · {item.minutes}-minute active limit
+                      </span>
+                    </ToggleGroupItem>
+                  ))}
+                </ToggleGroup>
+                <p id="scope-note" className="desk-help">
+                  Planning, collection and verification share this active-time
+                  limit; waiting for approval does not count. Limits are
+                  ceilings, not quotas. Search and extraction both count toward
+                  the provider-operation budget.
+                </p>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="require-approval">
+                  <input
+                    id="require-approval"
+                    type="checkbox"
+                    checked={requireApproval}
+                    onChange={(event) =>
+                      setRequireApproval(event.target.checked)
+                    }
+                    disabled={busy}
+                    aria-describedby="approval-note"
+                  />{" "}
+                  Review the plan before research starts
+                </FieldLabel>
+                <p id="approval-note" className="desk-help">
+                  Approve the proposed questions to continue, or reject the plan
+                  to stop the run.
+                </p>
+              </Field>
+            </FieldGroup>
+            {notice && <Alert>{notice}</Alert>}
+            <footer className="desk-composer-footer">
+              <span>
+                <kbd>Ctrl / ⌘</kbd> + <kbd>Enter</kbd> to start
+              </span>
+              <Button type="submit" disabled={busy || !draftReady}>
+                {busy ? (
+                  <span className="motion-spinner" aria-hidden="true" />
+                ) : (
+                  <Icon name="arrow" size={17} />
+                )}{" "}
+                {busy ? "Starting research…" : "Start research"}
+              </Button>
+            </footer>
+          </form>
+          <section
+            className="desk-templates"
+            aria-label="Research starting points"
+          >
+            <h2>Find a starting point</h2>
+            <div>
+              {examples.map((example) => (
+                <button
+                  type="button"
+                  key={example.type}
+                  disabled={busy}
+                  onClick={() => {
+                    setQuestion(example.question);
+                    setNotice("");
+                    textarea.current?.focus();
+                  }}
+                >
+                  <strong>
+                    {example.type}
+                    <Icon name="arrow" size={16} />
+                  </strong>
+                  <span>{example.question}</span>
+                </button>
+              ))}
             </div>
-            <Badge>{scope.name}</Badge>
-            <dl>
-              <div>
-                <dt>Source ceiling</dt>
-                <dd>{scope.sources} sources</dd>
-              </div>
-              <div>
-                <dt>Provider-operation ceiling</dt>
-                <dd>{scope.operations} operations</dd>
-              </div>
-              <div>
-                <dt>Active-time ceiling</dt>
-                <dd>{scope.minutes} minutes</dd>
-              </div>
-              <div>
-                <dt>Search provider</dt>
-                <dd>Tavily</dd>
-              </div>
-            </dl>
-            <p>{scope.description}</p>
-            <section>
-              <h3>A traceable answer</h3>
-              <ol>
-                <li>Plan the questions to explore.</li>
-                <li>Collect and preserve source material.</li>
-                <li>Check quoted evidence against claims.</li>
-                <li>Write the brief with references.</li>
-              </ol>
-            </section>
-            <p className="desk-help">
-              Collected sources may be fewer than the ceiling. No run-time
-              estimate is shown until it can be measured reliably.
-            </p>
-          </aside>
+          </section>
         </div>
+        <aside className="desk-scope" aria-label="Research scope">
+          <div className="desk-scope-title">
+            <Icon name="layers" size={20} />
+            <h2>Research scope</h2>
+          </div>
+          <Badge>{scope.name}</Badge>
+          <dl>
+            <div>
+              <dt>Source ceiling</dt>
+              <dd>{scope.sources} sources</dd>
+            </div>
+            <div>
+              <dt>Provider-operation ceiling</dt>
+              <dd>{scope.operations} operations</dd>
+            </div>
+            <div>
+              <dt>Active-time ceiling</dt>
+              <dd>{scope.minutes} minutes</dd>
+            </div>
+            <div>
+              <dt>Search provider</dt>
+              <dd>Tavily</dd>
+            </div>
+          </dl>
+          <p>{scope.description}</p>
+          <section>
+            <h3>A traceable answer</h3>
+            <ol>
+              <li>Plan the questions to explore.</li>
+              <li>Collect and preserve source material.</li>
+              <li>Check quoted evidence against claims.</li>
+              <li>Write the brief with references.</li>
+            </ol>
+          </section>
+          <p className="desk-help">
+            Collected sources may be fewer than the ceiling. No run-time
+            estimate is shown until it can be measured reliably.
+          </p>
+        </aside>
       </div>
+    </div>
+  );
+}
+
+export default function ResearchPage() {
+  return (
+    <WorkspaceShell title="New research">
+      <ResearchComposer />
     </WorkspaceShell>
   );
 }
