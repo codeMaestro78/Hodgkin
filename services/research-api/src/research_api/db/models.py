@@ -21,6 +21,7 @@ from sqlalchemy import (
     UniqueConstraint,
     Uuid,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -46,12 +47,20 @@ class ResearchBatch(Base):
         ForeignKeyConstraint(
             ["tenant_id", "user_id"], ["users.tenant_id", "users.id"], name="fk_batch_owner"
         ),
+        CheckConstraint(
+            "(mode IS NULL AND mode_policy_version IS NULL) OR "
+            "(mode IN ('focused','balanced','deep') AND mode_policy_version IS NOT NULL "
+            "AND length(btrim(mode_policy_version)) > 0)",
+            name="ck_research_batches_mode_snapshot",
+        ),
     )
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("tenants.id"), nullable=False)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False)
     request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    mode_policy_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -119,6 +128,12 @@ class ResearchSchedule(Base):
         ),
         UniqueConstraint("tenant_id", "user_id", "idempotency_key"),
         CheckConstraint("interval_minutes >= 60 AND interval_minutes <= 43200"),
+        CheckConstraint(
+            "(mode IS NULL AND mode_policy_version IS NULL) OR "
+            "(mode IN ('focused','balanced','deep') AND mode_policy_version IS NOT NULL "
+            "AND length(btrim(mode_policy_version)) > 0)",
+            name="ck_research_schedules_mode_snapshot",
+        ),
         Index("ix_schedules_due", "tenant_id", "enabled", "next_run_at"),
     )
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -127,10 +142,14 @@ class ResearchSchedule(Base):
     idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False)
     question: Mapped[str] = mapped_column(Text, nullable=False)
     budget: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    mode_policy_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
     approval_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     interval_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
     next_run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_quota_blocked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_quota_blocked_reason: Mapped[str | None] = mapped_column(String(64))
 
 
 class TimestampMixin:
@@ -202,6 +221,317 @@ class ResearchRun(Base, TenantScopedMixin, TimestampMixin):
     next_event_sequence: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     parent_report_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     approval_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class BillingAccount(Base, TenantScopedMixin, TimestampMixin):
+    """Personal billable subject, explicitly distinct from a workspace tenant."""
+
+    __tablename__ = "billing_accounts"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_billing_accounts_tenant_id"),
+        UniqueConstraint("tenant_id", "user_id", name="uq_billing_accounts_owner"),
+        ForeignKeyConstraint(["tenant_id", "user_id"], ["users.tenant_id", "users.id"]),
+        CheckConstraint("account_type = 'personal'", name="ck_billing_account_type"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    account_type: Mapped[str] = mapped_column(String(16), nullable=False, default="personal")
+
+
+class BillingPeriod(Base, TenantScopedMixin):
+    """Immutable grant/catalog snapshot for one personal account period."""
+
+    __tablename__ = "billing_periods"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_billing_periods_tenant_id"),
+        UniqueConstraint(
+            "tenant_id",
+            "billing_account_id",
+            "starts_at",
+            "plan_key",
+            name="uq_billing_period_plan_start",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "billing_account_id"],
+            ["billing_accounts.tenant_id", "billing_accounts.id"],
+            name="fk_billing_period_account",
+        ),
+        CheckConstraint(
+            "plan_key IN ('free','scholar','investigator')", name="ck_billing_period_plan"
+        ),
+        CheckConstraint(
+            "state IN ('pending','active','suspended','ended')", name="ck_billing_period_state"
+        ),
+        CheckConstraint("allowance_units >= 0", name="ck_billing_period_allowance"),
+        CheckConstraint("starts_at < ends_at", name="ck_billing_period_bounds"),
+        Index(
+            "ix_billing_periods_owner_state_start",
+            "tenant_id",
+            "billing_account_id",
+            "state",
+            "starts_at",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    billing_account_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    plan_key: Mapped[str] = mapped_column(String(24), nullable=False)
+    catalog_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    allowance_units: Mapped[int] = mapped_column(Integer, nullable=False)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class BillingUnitEntry(Base, TenantScopedMixin):
+    """Append-only deltas used by atomic quota admission and settlement."""
+
+    __tablename__ = "billing_unit_entries"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "billing_account_id"],
+            ["billing_accounts.tenant_id", "billing_accounts.id"],
+            name="fk_billing_unit_entry_account",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "billing_period_id"],
+            ["billing_periods.tenant_id", "billing_periods.id"],
+            name="fk_billing_unit_entry_period",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "run_id"], ["research_runs.tenant_id", "research_runs.id"]
+        ),
+        CheckConstraint(
+            "(entry_type = 'reservation' AND consumed_delta = 0 AND reserved_delta > 0) OR "
+            "(entry_type = 'consumption' AND consumed_delta > 0 AND reserved_delta < 0) OR "
+            "(entry_type = 'release' AND consumed_delta = 0 AND reserved_delta < 0) OR "
+            "(entry_type = 'adjustment' AND consumed_delta <> 0 AND reserved_delta = 0)",
+            name="ck_billing_unit_entry_shape",
+        ),
+        CheckConstraint(
+            "(entry_type = 'adjustment' AND actor_id IS NOT NULL AND reason IS NOT NULL AND "
+            "length(btrim(reason)) BETWEEN 1 AND 500) OR "
+            "(entry_type <> 'adjustment' AND actor_id IS NULL AND reason IS NULL)",
+            name="ck_billing_adjustment_audit",
+        ),
+        Index(
+            "ix_billing_unit_entries_period_created",
+            "tenant_id",
+            "billing_account_id",
+            "billing_period_id",
+            "created_at",
+        ),
+        Index(
+            "uq_billing_unit_owner_idempotency",
+            "tenant_id",
+            "billing_account_id",
+            "idempotency_key",
+            unique=True,
+        ),
+        Index(
+            "uq_billing_reservation_run",
+            "tenant_id",
+            "run_id",
+            unique=True,
+            postgresql_where=text("entry_type = 'reservation' AND run_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_billing_settlement_run",
+            "tenant_id",
+            "run_id",
+            unique=True,
+            postgresql_where=text(
+                "entry_type IN ('consumption', 'release') AND run_id IS NOT NULL"
+            ),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    billing_account_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    billing_period_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    run_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    entry_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    consumed_delta: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    reserved_delta: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class BillingShadowObservation(Base):
+    """Immutable, non-enforcing unit-policy snapshot for one admitted run."""
+
+    __tablename__ = "billing_shadow_observations"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "run_id", name="uq_billing_shadow_tenant_run"),
+        ForeignKeyConstraint(
+            ["tenant_id", "run_id"],
+            ["research_runs.tenant_id", "research_runs.id"],
+            name="fk_billing_shadow_run",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "user_id"],
+            ["users.tenant_id", "users.id"],
+            name="fk_billing_shadow_user",
+        ),
+        CheckConstraint(
+            "(decision_status = 'provisional' "
+            "AND policy_version = 'approved-mode-weights-1-2-4-v1' "
+            "AND catalog_version IN ('research-units-v1-2026-10-19', "
+            "'research-units-v2-2026-10-19') AND "
+            "((mode = 'focused' AND proposed_units = 1) OR "
+            "(mode = 'balanced' AND proposed_units = 2) OR "
+            "(mode = 'deep' AND proposed_units = 4))) OR "
+            "(decision_status = 'unpriced_legacy_mode' AND mode IS NULL "
+            "AND proposed_units IS NULL AND policy_version IS NULL "
+            "AND catalog_version IS NULL)",
+            name="ck_billing_shadow_decision_shape",
+        ),
+        Index("ix_billing_shadow_tenant_created", "tenant_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    run_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    decision_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    proposed_units: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    policy_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    catalog_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class StripeWebhookEvent(Base):
+    """Minimal deduplication inbox; intentionally excludes raw Stripe payloads."""
+
+    __tablename__ = "stripe_webhook_events"
+    __table_args__ = (
+        CheckConstraint(
+            "processing_status IN ('received','ignored','processed','stale',"
+            "'reconciliation_required')",
+            name="ck_stripe_webhook_event_status",
+        ),
+    )
+
+    event_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(160), nullable=False)
+    event_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    object_id: Mapped[str | None] = mapped_column(String(255))
+    livemode: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    processing_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class StripeCustomerLink(Base):
+    """Server-owned mapping from a personal research account to Stripe Customer."""
+
+    __tablename__ = "stripe_customer_links"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "user_id", name="uq_stripe_customer_owner"),
+        ForeignKeyConstraint(
+            ["tenant_id", "user_id"],
+            ["users.tenant_id", "users.id"],
+            name="fk_stripe_customer_owner",
+        ),
+    )
+
+    stripe_customer_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class StripeSubscription(Base):
+    """Minimal, replay-ordered subscription projection; never stores Stripe payloads."""
+
+    __tablename__ = "stripe_subscriptions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "user_id"],
+            ["users.tenant_id", "users.id"],
+            name="fk_stripe_subscription_owner",
+        ),
+        ForeignKeyConstraint(
+            ["stripe_customer_id"],
+            ["stripe_customer_links.stripe_customer_id"],
+            name="fk_stripe_subscription_customer",
+        ),
+        CheckConstraint(
+            "plan_key IS NULL OR plan_key IN ('scholar','investigator')",
+            name="ck_stripe_subscription_plan",
+        ),
+        CheckConstraint(
+            "current_period_start IS NULL OR current_period_end IS NULL OR "
+            "current_period_start < current_period_end",
+            name="ck_stripe_subscription_period",
+        ),
+        Index("ix_stripe_subscriptions_owner", "tenant_id", "user_id"),
+    )
+
+    stripe_subscription_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    stripe_customer_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    plan_key: Mapped[str | None] = mapped_column(String(24))
+    price_id: Mapped[str | None] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    current_period_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_event_created: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_event_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class StripeCheckoutAttempt(Base):
+    """Owner-scoped idempotency and single-open-checkout guard."""
+
+    __tablename__ = "stripe_checkout_attempts"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "user_id"],
+            ["users.tenant_id", "users.id"],
+            name="fk_stripe_checkout_owner",
+        ),
+        CheckConstraint(
+            "plan_key IN ('scholar','investigator')",
+            name="ck_stripe_checkout_plan",
+        ),
+        CheckConstraint(
+            "state IN ('open','completed','expired','failed')",
+            name="ck_stripe_checkout_state",
+        ),
+        UniqueConstraint(
+            "tenant_id", "user_id", "request_key_hash", name="uq_stripe_checkout_request"
+        ),
+        Index(
+            "uq_stripe_checkout_one_open_per_owner",
+            "tenant_id",
+            "user_id",
+            unique=True,
+            postgresql_where=text("state = 'open'"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    request_key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    stripe_idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    stripe_session_id: Mapped[str | None] = mapped_column(String(255), unique=True)
+    plan_key: Mapped[str] = mapped_column(String(24), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class ResearchPlan(Base, TenantScopedMixin):
