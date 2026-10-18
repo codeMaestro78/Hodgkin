@@ -13,9 +13,17 @@ def compare(rows: list[dict[str, Any]]) -> dict[str, Any]:
     if len(rows) != 2:
         raise ValueError("exactly two benchmark result records required")
     by_provider = {row.get("discoveryProvider"): row for row in rows}
-    if set(by_provider) != {"tavily", "serper"}:
-        raise ValueError("one record per discovery route required")
-    baseline, candidate = by_provider["tavily"], by_provider["serper"]
+    by_http_client = {row.get("httpClientMode"): row for row in rows}
+    if set(by_http_client) == {"worker", "shared"}:
+        baseline, candidate = by_http_client["worker"], by_http_client["shared"]
+        if baseline.get("discoveryProvider") != candidate.get("discoveryProvider"):
+            raise ValueError("HTTP client comparison must keep discovery route fixed")
+        comparison_dimension = "http_client_pooling"
+    elif set(by_provider) == {"tavily", "serper"}:
+        baseline, candidate = by_provider["tavily"], by_provider["serper"]
+        comparison_dimension = "discovery_provider"
+    else:
+        raise ValueError("expected one matched discovery or HTTP-client pair")
     if baseline.get("mode") != "focused" or candidate.get("mode") != "focused":
         raise ValueError("matched Focused report records required")
     fingerprint = baseline.get("workloadFingerprint")
@@ -30,7 +38,12 @@ def compare(rows: list[dict[str, Any]]) -> dict[str, Any]:
         value = row.get(field)
         if value is None and nullable:
             return None
-        if type(value) not in {int, float} or not math.isfinite(value) or value < 0:
+        if (
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not math.isfinite(value)
+            or value < 0
+        ):
             raise ValueError("missing or invalid measurement")
         return float(value)
 
@@ -75,6 +88,37 @@ def compare(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 or coverage["questionsAddressed"] > coverage["questionsTotal"]
             ):
                 raise ValueError("coverage counts exceed totals")
+        source_utility = row.get("sourceUtility")
+        if (
+            not isinstance(source_utility, dict)
+            or source_utility.get("independenceAssessed") is not False
+        ):
+            raise ValueError("source utility must not imply independence")
+        for field in ("sourcesExtracted", "sourcesCitedInVerifiedFindings"):
+            if type(source_utility.get(field)) is not int or source_utility[field] < 0:
+                raise ValueError("invalid source utility measurement")
+        if source_utility["sourcesCitedInVerifiedFindings"] > source_utility["sourcesExtracted"]:
+            raise ValueError("cited source count exceeds extracted source count")
+        assessment = row.get("assessmentCoverage")
+        if assessment is not None:
+            if not isinstance(assessment, dict):
+                raise ValueError("invalid assessment coverage")
+            total, assessed = assessment.get("criteriaTotal"), assessment.get("criteriaAssessed")
+            if (
+                type(total) is not int
+                or type(assessed) is not int
+                or total < 0
+                or assessed < 0
+                or assessed > total
+                or assessment.get("independentAssessment") is not True
+            ):
+                raise ValueError("invalid criterion assessment counts")
+        citation_quality = row.get("citationQuality")
+        if not isinstance(citation_quality, dict):
+            raise ValueError("citation quality counts required")
+        for field in ("verifiedCitations", "exactSpanVerified", "semanticSupport", "unassessed"):
+            if type(citation_quality.get(field)) is not int or citation_quality[field] < 0:
+                raise ValueError("invalid citation quality counts")
         diversity = row.get("sourceDiversity")
         if not isinstance(diversity, dict) or diversity.get("independenceAssessed") is not False:
             raise ValueError("source diversity must not claim source independence")
@@ -92,7 +136,13 @@ def compare(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "errorCode": error_code,
             "totalMs": number(row, "elapsedMs"),
             "firstSourceMs": number(row, "firstSourceFromCreationMs", nullable=True),
+            "firstVerifiedFindingMs": number(
+                row, "firstVerifiedFindingFromCreationMs", nullable=True
+            ),
             "sources": number(row, "sources"),
+            "sourceUtility": source_utility,
+            "assessmentCoverage": assessment,
+            "citationQuality": citation_quality,
             "providerOperations": number(row, "providerOperations"),
             "verifiedFindings": findings,
             "qualityStatus": quality_status,
@@ -107,6 +157,7 @@ def compare(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
     base, test = metrics(baseline), metrics(candidate)
     return {
+        "comparisonDimension": comparison_dimension,
         "workloadFingerprint": fingerprint,
         "baseline": base,
         "candidate": test,
@@ -120,6 +171,7 @@ def compare(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 for key in (
                     "totalMs",
                     "firstSourceMs",
+                    "firstVerifiedFindingMs",
                     "sources",
                     "providerOperations",
                     "verifiedFindings",
@@ -129,6 +181,13 @@ def compare(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 base["coverage"], test["coverage"], "requirementsAddressed"
             ),
             "questionsAddressed": _delta(base["coverage"], test["coverage"], "questionsAddressed"),
+            "criteriaAssessed": _delta(
+                base["assessmentCoverage"], test["assessmentCoverage"], "criteriaAssessed"
+            ),
+            "sourcesCitedInVerifiedFindings": (
+                test["sourceUtility"]["sourcesCitedInVerifiedFindings"]
+                - base["sourceUtility"]["sourcesCitedInVerifiedFindings"]
+            ),
             "distinctHosts": (
                 test["sourceDiversity"]["distinctHosts"] - base["sourceDiversity"]["distinctHosts"]
             ),
