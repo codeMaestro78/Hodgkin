@@ -4,12 +4,12 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from test_model_replay_accounting import client, seed
 
 from research_api.config import Settings
 from research_api.graph import builder
 from research_api.model_budget import model_run
 from research_api.repositories.budgets import ReservationReplayError
+from tests.integration.test_model_replay_accounting import client, seed
 
 pytestmark = pytest.mark.integration
 
