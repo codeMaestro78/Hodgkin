@@ -10,7 +10,6 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 from sqlalchemy import select
-from test_extraction_admission import seed
 
 from research_api import api, jobs
 from research_api.artifacts.store import InMemoryArtifactStore
@@ -23,6 +22,7 @@ from research_api.ingestion import ProviderRecoveryNeededError, TavilyEvidenceIn
 from research_api.providers.openalex import OpenAlexAdapter
 from research_api.providers.serper import SerperAdapter
 from research_api.providers.tavily import TavilyAdapter
+from tests.integration.test_extraction_admission import seed
 
 pytestmark = pytest.mark.integration
 EVIDENCE = "Kafka stores ordered events within a partition."
