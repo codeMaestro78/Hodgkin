@@ -23,11 +23,16 @@ const COMPARISON: [
   string | boolean,
   string | boolean,
 ][] = [
-  ["Research runs each month", "10", "60", "200"],
-  ["Focused and Balanced depth", YES, YES, YES],
-  ["Deep research, up to 20 sources", NO, YES, YES],
+  ["Proposed monthly research units", "5", "20", "40"],
+  [
+    "Research modes",
+    "Focused",
+    "Focused + Balanced",
+    "Focused + Balanced + Deep",
+  ],
   ["Inline citations and source passages", YES, YES, YES],
-  ["Library, history and PDF export", YES, YES, YES],
+  ["Research history and personal library", YES, YES, YES],
+  ["Markdown and BibTeX export", YES, YES, YES],
   ["Compare reports side by side", NO, YES, YES],
   ["Read-only share links", NO, YES, YES],
   ["Batches and scheduled runs", NO, NO, YES],
@@ -40,15 +45,15 @@ const QUESTIONS: [string, string][] = [
   ],
   [
     "Do deeper runs cost more?",
-    "No. A run counts once, whatever depth you choose. Deep reads more widely and takes longer, but it is still one run.",
+    "The proposal charges 1 unit for Focused, 2 for Balanced, and 4 for Deep. Monthly allowances remain provisional pending cost validation. Paid plans are not available for purchase yet.",
   ],
   [
-    "What happens when I reach my monthly runs?",
-    "Your library, reports and sources stay available. New runs wait for the next month, or you can move to a larger plan.",
+    "Are paid plans available now?",
+    "Not yet. These are proposed prices and limits while we finish cost validation and billing. Existing reports and sources remain available regardless of future plan changes.",
   ],
   [
     "Can I switch between monthly and yearly?",
-    "Yes. Yearly billing costs about 20% less across the year, and you can change plans whenever your research habits change.",
+    "The proposed yearly prices are billed once per year and are about 17% lower than paying monthly for twelve months. Annual billing is not available yet.",
   ],
 ];
 
@@ -97,6 +102,10 @@ export default function PricingPage() {
               Start free. Move up when research becomes a habit. Every plan
               cites its sources.
             </p>
+            <p className="pr-lead lp-enter" role="status">
+              Pricing preview: paid plans are not available for purchase yet.
+              Unit allowances are provisional pending cost validation.
+            </p>
           </div>
           <div className="pr-stage lp-enter">
             <PricingPlans />
@@ -108,7 +117,7 @@ export default function PricingPage() {
           aria-labelledby="compare-title"
         >
           <header className="lp-section-head">
-            <h2 id="compare-title">Everything in Free, and then some.</h2>
+            <h2 id="compare-title">Proposed plan differences.</h2>
             <p>
               The same evidence-first reports on every plan. Paid plans read
               deeper and do more with them.
@@ -147,8 +156,9 @@ export default function PricingPage() {
               </span>
               <h3>Depth is a ceiling, not a quota.</h3>
               <p>
-                Focused reads up to 6 sources, Balanced up to 12, Deep up to 20.
-                A run reads what the question needs, within that limit.
+                Focused, Balanced and Deep have different provider and source
+                ceilings. A run reads what the question needs, within that
+                limit.
               </p>
             </div>
             <div data-reveal>
@@ -157,8 +167,9 @@ export default function PricingPage() {
               </span>
               <h3>Your research stays yours.</h3>
               <p>
-                Reports, sources and history live in your private library on
-                every plan, and export to PDF whenever you need them.
+                Reports, sources and history remain available. Markdown and
+                BibTeX export are supported; PDF export is not currently
+                offered.
               </p>
             </div>
           </div>
