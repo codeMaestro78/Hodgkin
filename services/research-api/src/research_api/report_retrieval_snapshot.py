@@ -40,6 +40,7 @@ def retrieval_accounting_markdown(snapshot: Mapping[str, Any]) -> str:
             f"- **{label}:** {display(row.get('discovered'))} discovered; "
             f"{display(row.get('shortlisted'))} shortlisted; "
             f"{display(row.get('excluded'))} excluded; "
+            f"{display(row.get('duplicateUrl'))} duplicate URL results; "
             f"{display(row.get('extractedSources'))} extracted; "
             f"{display(row.get('citedInVerifiedFinding'))} cited in verified findings."
         )
@@ -59,6 +60,18 @@ def retrieval_accounting_markdown(snapshot: Mapping[str, Any]) -> str:
         f"Citation checks: {display(snapshot.get('citationChecks'))}; "
         f"exact spans verified: {display(snapshot.get('exactSpanVerifiedCitations'))}; "
         f"published claims: {display(snapshot.get('publishedClaims'))}.",
+        "Exact-content duplicate source records: "
+        f"{display(snapshot.get('exactDuplicateSources'))}.",
+        "Source-type counts (metadata labels, not a quality assessment): "
+        + (
+            ", ".join(
+                f"{key} {display(value)}"
+                for key, value in sorted(snapshot.get("sourceClasses", {}).items())
+            )
+            if isinstance(snapshot.get("sourceClasses"), Mapping) and snapshot.get("sourceClasses")
+            else "not recorded"
+        )
+        + ".",
         "Answer usefulness, dimension relevance, and source independence were not assessed.",
     ]
     return "\n".join(lines)
