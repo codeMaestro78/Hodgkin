@@ -10,6 +10,14 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from research_api.api import router as research_router
 from research_api.auth import identity_transport
+from research_api.billing.api import router as billing_router
+from research_api.billing.stripe import (
+    StripeUnavailable,
+    app_base_url,
+    configured_portal,
+    configured_prices,
+    validate_stripe_key_mode,
+)
 from research_api.checkpointing import CheckpointPool
 from research_api.comparison_api import router as comparison_router
 from research_api.config import configuration_files, get_settings
@@ -144,6 +152,7 @@ app.include_router(runtime_router)
 app.include_router(comparison_router)
 app.include_router(library_router)
 app.include_router(sharing_exports_router)
+app.include_router(billing_router)
 
 
 @app.get("/health", tags=["health"])
@@ -155,9 +164,34 @@ async def liveness() -> dict[str, str]:
 @app.get("/health/ready", tags=["health"])
 async def readiness() -> dict[str, str]:
     settings = get_settings()
+    if settings.BILLING_STRIPE_ENABLED:
+        try:
+            if not settings.BILLING_ENFORCEMENT_ENABLED:
+                raise StripeUnavailable("quota enforcement must be active before sales")
+            if settings.STRIPE_LIVEMODE and not settings.BILLING_LIVE_LAUNCH_APPROVED:
+                raise StripeUnavailable("live billing launch has not been approved")
+            if (
+                settings.STRIPE_SECRET_KEY is None
+                or settings.STRIPE_WEBHOOK_SECRET is None
+                or not settings.STRIPE_API_VERSION
+            ):
+                raise StripeUnavailable("Stripe secrets are not configured")
+            configured_prices(settings)
+            configured_portal(settings)
+            app_base_url(settings)
+            validate_stripe_key_mode(settings)
+        except StripeUnavailable as exc:
+            raise HTTPException(503, "Stripe billing configuration is incomplete") from exc
     try:
         await validate_runtime_role(engine)
         async with engine.connect() as connection:
+            required_revision = (
+                "0028"
+                if settings.BILLING_STRIPE_ENABLED
+                else "0026"
+                if settings.BILLING_ENFORCEMENT_ENABLED
+                else "0022"
+            )
             migration_table_exists = await connection.scalar(
                 text("SELECT to_regclass('public.alembic_version') IS NOT NULL")
             )
@@ -166,12 +200,15 @@ async def readiness() -> dict[str, str]:
                 and await connection.scalar(
                     text(
                         "SELECT EXISTS (SELECT 1 FROM public.alembic_version "
-                        "WHERE version_num >= '0019')"
-                    )
+                        "WHERE version_num >= :revision)"
+                    ),
+                    {"revision": required_revision},
                 )
             )
             if not migration_ready:
-                raise HTTPException(503, "database migrations through 0019 are required")
+                raise HTTPException(
+                    503, f"database migrations through {required_revision} are required"
+                )
             ready = await connection.scalar(
                 text(
                     "SELECT to_regclass('public.runtime_jobs') "
@@ -180,10 +217,19 @@ async def readiness() -> dict[str, str]:
                     "AND to_regclass('public.library_items') IS NOT NULL "
                     "AND to_regclass('public.report_shares') IS NOT NULL "
                     "AND to_regclass('public.report_exports') IS NOT NULL "
+                    "AND to_regclass('public.billing_accounts') IS NOT NULL "
+                    "AND to_regclass('public.billing_periods') IS NOT NULL "
+                    "AND to_regclass('public.billing_unit_entries') IS NOT NULL "
+                    "AND (NOT :stripe_enabled OR ("
+                    "to_regclass('public.stripe_webhook_events') IS NOT NULL AND "
+                    "to_regclass('public.stripe_customer_links') IS NOT NULL AND "
+                    "to_regclass('public.stripe_subscriptions') IS NOT NULL AND "
+                    "to_regclass('public.stripe_checkout_attempts') IS NOT NULL)) "
                     "AND EXISTS (SELECT 1 FROM information_schema.columns "
                     "WHERE table_schema='public' AND table_name='research_runs' "
                     "AND column_name='model_routing')"
-                )
+                ),
+                {"stripe_enabled": settings.BILLING_STRIPE_ENABLED},
             )
         if not ready:
             raise HTTPException(503, "database schema required by this API is incomplete")
