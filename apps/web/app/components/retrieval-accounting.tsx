@@ -42,6 +42,8 @@ function providerSummary(row: Accounting["providers"][number]) {
   );
   if (row.duplicateWork !== null)
     parts.push(measured(row.duplicateWork, "duplicate works"));
+  if (row.duplicateUrl != null)
+    parts.push(measured(row.duplicateUrl, "duplicate URL results"));
   if (row.unavailable !== null)
     parts.push(measured(row.unavailable, "without an extractable location"));
   const status = row.countsComplete ? "" : " · some counts not recorded";
@@ -57,6 +59,27 @@ export function RetrievalAccountingPanel({
 }) {
   if (!accounting) return null;
 
+  const discoveryComplete =
+    accounting.providers.length > 0 &&
+    accounting.providers.every(
+      (provider) =>
+        provider.countsComplete &&
+        provider.discovered !== null &&
+        provider.shortlisted !== null,
+    );
+  const discoveredRecords = discoveryComplete
+    ? accounting.providers.reduce(
+        (total, provider) => total + (provider.discovered ?? 0),
+        0,
+      )
+    : null;
+  const shortlistedRecords = discoveryComplete
+    ? accounting.providers.reduce(
+        (total, provider) => total + (provider.shortlisted ?? 0),
+        0,
+      )
+    : null;
+
   return (
     <section
       className="retrieval-accounting"
@@ -68,6 +91,40 @@ export function RetrievalAccountingPanel({
           ? "Frozen with this published report version. Missing historical or provider counters are shown as not recorded."
           : "Live run-level provider activity; this is not a frozen report snapshot. Missing historical or provider counters are shown as not recorded."}
       </p>
+      <dl className="retrieval-funnel" aria-label="Source lifecycle summary">
+        <div>
+          <dt>Discovered records</dt>
+          <dd>{discoveredRecords ?? "Not recorded"}</dd>
+        </div>
+        <div>
+          <dt>Shortlisted records</dt>
+          <dd>{shortlistedRecords ?? "Not recorded"}</dd>
+        </div>
+        <div>
+          <dt>Extracted sources</dt>
+          <dd>{accounting.extractedSources}</dd>
+        </div>
+        <div>
+          <dt>Cited in findings</dt>
+          <dd>{accounting.citedInVerifiedFinding}</dd>
+        </div>
+      </dl>
+      <p className="desk-help">
+        Discovery totals count provider records, not distinct works. A missing
+        provider counter makes the total unavailable; citation is not a
+        relevance or independence assessment.
+      </p>
+      {accounting.schemaVersion === "1.2" && (
+        <p>
+          {accounting.exactDuplicateSources ?? 0} additional exact-content
+          duplicate source record
+          {accounting.exactDuplicateSources === 1 ? "" : "s"} among extracted
+          records. Source-type labels (not a quality assessment):{" "}
+          {Object.entries(accounting.sourceClasses ?? {})
+            .map(([sourceClass, count]) => `${sourceClass} ${count}`)
+            .join(", ") || "not recorded"}.
+        </p>
+      )}
       <ul>
         {accounting.providers.map((provider) => (
           <li key={provider.provider}>{providerSummary(provider)}</li>
