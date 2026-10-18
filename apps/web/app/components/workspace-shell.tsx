@@ -33,6 +33,16 @@ export type HistoryRun = {
   quickMode: boolean;
 };
 
+type BillingEntitlement = {
+  status: "not_configured" | "active";
+  planKey?: "free" | "scholar" | "investigator";
+  periodEnd?: string;
+  allowanceUnits?: number;
+  consumedUnits?: number;
+  reservedUnits?: number;
+  availableUnits?: number;
+};
+
 export function WorkspaceShell({
   children,
   activeRunId,
@@ -58,6 +68,13 @@ export function WorkspaceShell({
   } | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [accountError, setAccountError] = useState("");
+  const [entitlement, setEntitlement] = useState<BillingEntitlement | null>(
+    null,
+  );
+  const [entitlementUnavailable, setEntitlementUnavailable] = useState(false);
+  const [entitlementRevision, setEntitlementRevision] = useState(0);
+  const [portalBusy, setPortalBusy] = useState(false);
+  const [portalError, setPortalError] = useState("");
   const content = useRef<HTMLElement>(null);
   useEntrance(
     content,
@@ -128,6 +145,39 @@ export function WorkspaceShell({
 
   useEffect(() => {
     const controller = new AbortController();
+    setEntitlement(null);
+    fetch("/api/billing/entitlement", {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Budget unavailable");
+        const result = (await response.json()) as BillingEntitlement;
+        if (!controller.signal.aborted) {
+          setEntitlement(result);
+          setEntitlementUnavailable(false);
+        }
+      })
+      .catch((error) => {
+        if (error.name !== "AbortError") setEntitlementUnavailable(true);
+      });
+    return () => controller.abort();
+  }, [activeRunId, entitlementRevision]);
+
+  useEffect(
+    () =>
+      subscribeResearchHistorySnapshots((snapshot) => {
+        if (
+          snapshot.runId === activeRunId &&
+          ["completed", "failed", "cancelled"].includes(snapshot.status)
+        )
+          setEntitlementRevision((revision) => revision + 1);
+      }),
+    [activeRunId],
+  );
+
+  useEffect(() => {
+    const controller = new AbortController();
     async function checkAccount() {
       try {
         let response = await fetch("/api/auth/session", {
@@ -165,6 +215,31 @@ export function WorkspaceShell({
     } catch {
       setAccountError("Sign-out failed. Please try again.");
       setSigningOut(false);
+    }
+  }
+  async function manageSubscription() {
+    if (portalBusy) return;
+    setPortalBusy(true);
+    setPortalError("");
+    try {
+      const response = await fetch("/api/billing/portal", { method: "POST" });
+      const body = (await response.json()) as { url?: string };
+      if (!response.ok || !body.url)
+        throw new Error("Subscription management is unavailable.");
+      const destination = new URL(body.url);
+      if (
+        destination.protocol !== "https:" ||
+        destination.hostname !== "billing.stripe.com"
+      )
+        throw new Error(
+          "Could not verify the subscription-management destination.",
+        );
+      window.location.assign(destination.toString());
+    } catch (error) {
+      setPortalError(
+        error instanceof Error ? error.message : "Please try again later.",
+      );
+      setPortalBusy(false);
     }
   }
   const visible = history.filter((item) =>
@@ -290,6 +365,80 @@ export function WorkspaceShell({
       >
         <Icon name="sliders" size={17} /> Research preferences
       </Link>
+      <section className="workspace-budget" aria-label="Research budget">
+        <div className="workspace-budget-heading">
+          <strong>Research budget</strong>
+          <button
+            type="button"
+            className="workspace-budget-refresh"
+            aria-label="Refresh research budget"
+            onClick={() => setEntitlementRevision((revision) => revision + 1)}
+          >
+            <Icon name="arrow" size={13} />
+          </button>
+        </div>
+        {entitlementUnavailable ? (
+          <p role="status">Budget temporarily unavailable.</p>
+        ) : !entitlement ? (
+          <p role="status">Loading allowance…</p>
+        ) : entitlement.status === "active" &&
+          entitlement.availableUnits != null &&
+          entitlement.allowanceUnits != null ? (
+          <>
+            <p className="workspace-budget-plan">
+              {
+                {
+                  free: "Free",
+                  scholar: "Scholar",
+                  investigator: "Investigator",
+                }[entitlement.planKey ?? "free"]
+              }
+              {entitlement.periodEnd && (
+                <>
+                  {" "}
+                  · resets{" "}
+                  {new Intl.DateTimeFormat(undefined, {
+                    month: "short",
+                    day: "numeric",
+                  }).format(new Date(entitlement.periodEnd))}
+                </>
+              )}
+            </p>
+            <strong className="workspace-budget-balance">
+              {entitlement.availableUnits} units left
+            </strong>
+            <progress
+              max={entitlement.allowanceUnits || 1}
+              value={Math.max(
+                0,
+                entitlement.allowanceUnits - entitlement.availableUnits,
+              )}
+              aria-label={`${entitlement.consumedUnits ?? 0} of ${entitlement.allowanceUnits} units used; ${entitlement.reservedUnits ?? 0} reserved; ${entitlement.availableUnits} available`}
+            />
+            <p className="workspace-budget-detail">
+              {entitlement.consumedUnits ?? 0} of {entitlement.allowanceUnits}{" "}
+              used
+              {entitlement.reservedUnits
+                ? ` · ${entitlement.reservedUnits} reserved`
+                : ""}
+            </p>
+            {entitlement.planKey !== "free" ? (
+              <button
+                type="button"
+                onClick={() => void manageSubscription()}
+                disabled={portalBusy}
+              >
+                {portalBusy ? "Opening…" : "Manage plan"}
+              </button>
+            ) : (
+              <Link href="/pricing">Plan details</Link>
+            )}
+          </>
+        ) : (
+          <p>Monthly allowance has not been activated yet.</p>
+        )}
+        {portalError && <p role="alert">{portalError}</p>}
+      </section>
       <div className="sidebar-bottom">
         <div className="local-avatar">
           <Icon name="layers" size={18} />
