@@ -19,7 +19,7 @@ def test_migration_accepts_v11_and_v12_without_rewriting_snapshots():
     with patch.object(module, "op") as operation:
         module.upgrade()
 
-    sql = "\n".join(call.args[0] for call in operation.execute.call_args_list)
+    sql = " ".join(" ".join(call.args[0].split()) for call in operation.execute.call_args_list)
     assert "DROP CONSTRAINT IF EXISTS ck_report_retrieval_accounting_snapshot" in sql
     assert "schemaVersion' IN ('1.1', '1.2')" in sql
     assert "octet_length(retrieval_accounting::text) <= 65536" in sql
