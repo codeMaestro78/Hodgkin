@@ -75,6 +75,14 @@
         }
       },
       "additionalProperties": false
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "focused",
+        "balanced",
+        "deep"
+      ]
     }
   },
   "required": [
