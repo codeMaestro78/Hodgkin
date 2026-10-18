@@ -12,6 +12,7 @@ from research_api.db.models import (
     ExtractionSlot,
     ProviderCall,
     ProviderCallReservation,
+    ResearchRun,
     UsageLedger,
 )
 from research_api.research_limits import operation_limit
@@ -280,6 +281,16 @@ class BudgetReservationRepository:
         reservation.state = new_state
         reservation.terminal_at = datetime.now(UTC)
         await self._session.flush()
+        from research_api.billing.lifecycle import settle_terminal_run
+
+        run = await self._session.scalar(
+            select(ResearchRun).where(
+                ResearchRun.tenant_id == self._tenant_id,
+                ResearchRun.id == reservation.run_id,
+            )
+        )
+        if run is not None:
+            await settle_terminal_run(self._session, run)
         return reservation
 
     async def reconcile_from_receipt(self, reservation_id: uuid.UUID) -> ProviderCallReservation:
