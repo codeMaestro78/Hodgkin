@@ -6,6 +6,7 @@ import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
+from datetime import UTC, datetime
 from time import monotonic
 from typing import Any
 
@@ -14,6 +15,7 @@ from research_api.config import get_settings
 logger = logging.getLogger("research_api.dependencies")
 dependency_run: ContextVar[uuid.UUID | None] = ContextVar("dependency_run", default=None)
 request_id: ContextVar[str | None] = ContextVar("request_id", default=None)
+MILESTONES = {"research.first_verified_finding"}
 
 
 def error_facts(error: BaseException) -> list[dict[str, object]]:
@@ -54,6 +56,7 @@ def operation_event(
         "db.transaction",
         "db.connection.acquire",
         "db.snapshot.collections",
+        "db.statement.timing",
         "auth.verify",
         "auth.verify.coalesced",
         "http.headers",
@@ -62,12 +65,19 @@ def operation_event(
         facts.get("route", "").endswith("/events")
         or (duration_ms < 1000 and facts.get("statusCode", 200) < 400)
     )
+    slow_snapshot = (
+        operation == "db.snapshot.collections"
+        and duration_ms >= get_settings().DATABASE_SLOW_STATEMENT_MS
+    )
+    if slow_snapshot:
+        routine = False
     level = (
         logging.ERROR
         if outcome == "failed"
         else logging.WARNING
         if outcome in {"insufficient_evidence", "rejected"}
         or operation == "db.statement.slow"
+        or slow_snapshot
         or (operation == "db.connection.acquire" and duration_ms >= 1000)
         else logging.DEBUG
         if routine
@@ -81,6 +91,7 @@ def operation_event(
             {
                 "event": "operation.outcome",
                 "operation": operation,
+                "recordedAt": datetime.now(UTC).isoformat(timespec="milliseconds"),
                 "requestId": request_id.get(),
                 "runId": str(dependency_run.get()) if dependency_run.get() else None,
                 "durationMs": duration_ms,
@@ -90,6 +101,31 @@ def operation_event(
             },
             sort_keys=True,
         ),
+    )
+
+
+def milestone_event(milestone: str, *, verified_finding_count: int) -> None:
+    """Record a timestamped lifecycle marker without inventing a duration sample."""
+    if (
+        milestone not in MILESTONES
+        or type(verified_finding_count) is not int
+        or not 1 <= verified_finding_count <= 40
+    ):
+        raise ValueError("unsupported research milestone")
+    if not logger.isEnabledFor(logging.INFO):
+        return
+    logger.info(
+        json.dumps(
+            {
+                "event": "research.milestone",
+                "milestone": milestone,
+                "recordedAt": datetime.now(UTC).isoformat(timespec="milliseconds"),
+                "requestId": request_id.get(),
+                "runId": str(dependency_run.get()) if dependency_run.get() else None,
+                "verifiedFindingCount": verified_finding_count,
+            },
+            sort_keys=True,
+        )
     )
 
 
@@ -120,12 +156,19 @@ def dependency_event(
     role: str | None = None,
     max_attempts: int | None = None,
     retry_scheduled: bool | None = None,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
 ) -> None:
     """Record a dependency boundary without request/response content or credentials."""
     if role is not None and role not in {"planner", "writer", "claim_review"}:
         raise ValueError("unsupported telemetry model role")
     if model is not None and (not model.strip() or len(model) > 200):
         raise ValueError("invalid telemetry model name")
+    if any(
+        value is not None and (type(value) is not int or value < 0)
+        for value in (input_tokens, output_tokens)
+    ):
+        raise ValueError("invalid telemetry token count")
     logger.info(
         json.dumps(
             {
@@ -133,6 +176,7 @@ def dependency_event(
                 "requestId": request_id.get(),
                 "provider": provider,
                 "operation": operation,
+                "recordedAt": datetime.now(UTC).isoformat(timespec="milliseconds"),
                 "outcome": outcome,
                 "attempt": attempt,
                 "runId": str(dependency_run.get()) if dependency_run.get() else None,
@@ -146,6 +190,8 @@ def dependency_event(
                 **({"role": role} if role is not None else {}),
                 **({"maxAttempts": max_attempts} if max_attempts is not None else {}),
                 **({"retryScheduled": retry_scheduled} if retry_scheduled is not None else {}),
+                **({"inputTokens": input_tokens} if input_tokens is not None else {}),
+                **({"outputTokens": output_tokens} if output_tokens is not None else {}),
                 **(
                     {"remoteDurationMs": round(remote_duration_ms, 2)}
                     if remote_duration_ms is not None
