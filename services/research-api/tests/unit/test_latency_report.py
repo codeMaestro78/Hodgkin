@@ -57,9 +57,7 @@ def test_first_verified_finding_is_a_milestone_not_a_fake_duration():
         ),
     ]
     report = analyze(*records)
-    assert report["milestones"] == [
-        {"milestone": "research.first_verified_finding", "count": 2}
-    ]
+    assert report["milestones"] == [{"milestone": "research.first_verified_finding", "count": 2}]
     assert report["operations"] == []
     assert "2026-10-17" not in json.dumps(report)
 
@@ -162,8 +160,7 @@ def test_database_query_timings_are_grouped_by_safe_family_and_command():
         ),
     )["operations"]
     measurements = [
-        (row["command_category"], row["query_family"], row["success"]["max_ms"])
-        for row in rows
+        (row["command_category"], row["query_family"], row["success"]["max_ms"]) for row in rows
     ]
     assert measurements == [
         ("SELECT", "run", 12),
