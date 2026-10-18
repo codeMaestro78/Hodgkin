@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { activeElapsedMs } from "../app/components/run-clock";
+import {
+  activeElapsedMs,
+  formatRunDuration,
+} from "../app/components/run-clock";
 
 const start = Date.parse("2026-01-01T10:00:00Z");
 const at = (seconds: number) => start + seconds * 1000;
@@ -44,5 +47,16 @@ describe("activeElapsedMs", () => {
     expect(
       activeElapsedMs({ startedAt: start, end: at(10), pausedMs: Number.NaN }),
     ).toBe(10_000);
+  });
+});
+
+describe("formatRunDuration", () => {
+  it("formats processing and wait durations independently", () => {
+    expect(formatRunDuration(125_999)).toBe("2m 5s");
+    expect(formatRunDuration(48_000)).toBe("0m 48s");
+  });
+
+  it("does not display negative durations", () => {
+    expect(formatRunDuration(-1)).toBe("0m 0s");
   });
 });
