@@ -11,6 +11,8 @@ from sqlalchemy import func, select
 
 from research_api.api import _budget_from_request
 from research_api.auth import authenticated_caller as _caller
+from research_api.billing.ledger import BillingLedgerError, billing_http_status
+from research_api.billing.lifecycle import settle_terminal_run
 from research_api.config import get_settings
 from research_api.db.models import (
     Budget,
@@ -27,6 +29,7 @@ from research_api.graph.builder import PlannedQuestion, PlannerOutput
 from research_api.jobs import enqueue, lock_registry, refresh_due
 from research_api.lifecycle import lock_run
 from research_api.mode_planning import CoveragePlan, attach_coverage_plan, planning_admission
+from research_api.mode_policy import MODE_POLICY_VERSION
 from research_api.repositories.runs import RunBudgetDefaults, RunRepository
 from research_api.research_limits import is_run_quick, operation_limit, run_source_limit
 from research_api.schemas.generated.approval_request import ApprovalRequest
@@ -50,9 +53,12 @@ class EditResearchPlanRequest(GeneratedEditResearchPlanRequest):
         return value
 
 
-def budget_from(request: BatchRequest | ScheduleRequest) -> RunBudgetDefaults:
+def budget_from(
+    request: BatchRequest | ScheduleRequest, policy_version: str | None = None
+) -> RunBudgetDefaults:
     return _budget_from_request(
         CreateResearchRunRequest(
+            mode=request.mode.value if request.mode is not None else None,
             question="Batch template",
             require_approval=request.require_approval,
             report_requirements=[],
@@ -63,8 +69,25 @@ def budget_from(request: BatchRequest | ScheduleRequest) -> RunBudgetDefaults:
                 if request.budget_overrides
                 else None
             ),
-        )
+        ),
+        policy_version,
     )
+
+
+def _encoded_budget(budget: RunBudgetDefaults) -> dict[str, object]:
+    return {
+        field: str(getattr(budget, field))
+        if field == "max_estimated_cost_usd"
+        else getattr(budget, field)
+        for field in budget.__dataclass_fields__
+    }
+
+
+def _batch_request_fingerprint(payload: BatchRequest) -> str:
+    # Keep the exact legacy JSON representation when mode is absent, so a
+    # deployment adding this optional field does not break idempotent replays.
+    serialized = payload.model_dump_json(exclude={"mode"} if payload.mode is None else set())
+    return hashlib.sha256(serialized.encode()).hexdigest()
 
 
 @router.post("/runs/{run_id}/plan", response_model=EditResearchPlanResponse)
@@ -298,6 +321,7 @@ async def approve(
         if payload.decision == "reject":
             run.cancellation_requested_at = run.cancelled_at = datetime.now(UTC)
             run.status, job.state = "cancelled", "cancelled"
+            await settle_terminal_run(session, run)
         else:
             run.status, job.state = "planning", "queued"
         await EventOutbox(session, caller.tenant_id).append(
@@ -328,10 +352,7 @@ async def create_batch(
 ) -> dict[str, object]:
     settings = get_settings()
     caller = await _caller(settings, x_internal_service_auth, authorization=authorization)
-    fingerprint = hashlib.sha256(payload.model_dump_json().encode()).hexdigest()
-    budget = budget_from(payload)
-    if budget.max_search_calls < 2:
-        raise HTTPException(422, "at least two provider-call budget units are required")
+    fingerprint = _batch_request_fingerprint(payload)
     async with tenant_session(str(caller.tenant_id)) as session:
         registry = await lock_registry(session, caller.tenant_id)
         existing = await session.scalar(
@@ -342,7 +363,12 @@ async def create_batch(
             )
         )
         if existing:
-            if existing.request_fingerprint != fingerprint:
+            replay_budget = budget_from(payload, existing.mode_policy_version)
+            if replay_budget.max_search_calls < 2:
+                raise HTTPException(422, "at least two provider-call budget units are required")
+            if existing.request_fingerprint != fingerprint or existing.mode != (
+                payload.mode.value if payload.mode is not None else None
+            ):
                 raise HTTPException(409, "batch key belongs to another request")
             stored_ids = list(
                 await session.scalars(
@@ -352,28 +378,41 @@ async def create_batch(
                 )
             )
             return {"batchId": str(existing.id), "runIds": [str(item) for item in stored_ids]}
+        budget = budget_from(payload)
+        if budget.max_search_calls < 2:
+            raise HTTPException(422, "at least two provider-call budget units are required")
         batch = ResearchBatch(
             tenant_id=caller.tenant_id,
             user_id=caller.user_id,
             idempotency_key=payload.idempotency_key,
             request_fingerprint=fingerprint,
+            mode=payload.mode.value if payload.mode is not None else None,
+            mode_policy_version=MODE_POLICY_VERSION if payload.mode is not None else None,
         )
         session.add(batch)
         await session.flush()
         ids: list[str] = []
-        for index, question in enumerate(payload.questions):
-            run, _ = await RunRepository(session, caller.tenant_id).create_once(
-                user_id=caller.user_id,
-                question=question.root,
-                budget=budget,
-                idempotency_key=f"batch:{batch.id}:{index}",
-                approval_required=payload.require_approval,
-            )
-            await enqueue(session, run, settings, batch.id)
-            await EventOutbox(session, caller.tenant_id).append(
-                run_id=run.id, event_type="run.created", payload={"label": "Batch research queued"}
-            )
-            ids.append(str(run.id))
+        try:
+            for index, question in enumerate(payload.questions):
+                run, _ = await RunRepository(session, caller.tenant_id).create_once(
+                    user_id=caller.user_id,
+                    question=question.root,
+                    budget=budget,
+                    idempotency_key=f"batch:{batch.id}:{index}",
+                    approval_required=payload.require_approval,
+                    mode=payload.mode.value if payload.mode is not None else None,
+                    mode_policy_version=MODE_POLICY_VERSION if payload.mode is not None else None,
+                )
+                await enqueue(session, run, settings, batch.id)
+                await EventOutbox(session, caller.tenant_id).append(
+                    run_id=run.id,
+                    event_type="run.created",
+                    payload={"label": "Batch research queued"},
+                )
+                ids.append(str(run.id))
+        except BillingLedgerError as exc:
+            code, message, extra = billing_http_status(exc)
+            raise HTTPException(code, {"message": message, **extra}) from exc
         registry.next_due_at = datetime.now(UTC)
         return {"batchId": str(batch.id), "runIds": ids}
 
@@ -416,15 +455,6 @@ async def create_schedule(
 ) -> dict[str, str]:
     settings = get_settings()
     caller = await _caller(settings, x_internal_service_auth, authorization=authorization)
-    budget = budget_from(payload)
-    if budget.max_search_calls < 2:
-        raise HTTPException(422, "at least two provider-call budget units are required")
-    encoded = {
-        field: str(getattr(budget, field))
-        if field == "max_estimated_cost_usd"
-        else getattr(budget, field)
-        for field in budget.__dataclass_fields__
-    }
     async with tenant_session(str(caller.tenant_id)) as session:
         registry = await lock_registry(session, caller.tenant_id)
         existing = await session.scalar(
@@ -435,14 +465,21 @@ async def create_schedule(
             )
         )
         if existing:
+            replay_budget = budget_from(payload, existing.mode_policy_version)
+            encoded_replay_budget = _encoded_budget(replay_budget)
             if (
                 existing.question != payload.question
                 or existing.interval_minutes != payload.interval_minutes
                 or existing.approval_required != payload.require_approval
-                or existing.budget != encoded
+                or existing.budget != encoded_replay_budget
+                or existing.mode != (payload.mode.value if payload.mode is not None else None)
             ):
                 raise HTTPException(409, "schedule key belongs to another request")
             return {"id": str(existing.id)}
+        budget = budget_from(payload)
+        if budget.max_search_calls < 2:
+            raise HTTPException(422, "at least two provider-call budget units are required")
+        encoded = _encoded_budget(budget)
         count = await session.scalar(
             select(func.count())
             .select_from(ResearchSchedule)
@@ -458,6 +495,8 @@ async def create_schedule(
             idempotency_key=payload.idempotency_key,
             question=payload.question,
             budget=encoded,
+            mode=payload.mode.value if payload.mode is not None else None,
+            mode_policy_version=MODE_POLICY_VERSION if payload.mode is not None else None,
             interval_minutes=payload.interval_minutes,
             approval_required=payload.require_approval,
             next_run_at=datetime.now(UTC) + timedelta(minutes=payload.interval_minutes),
@@ -495,6 +534,10 @@ async def list_schedules(
                     "intervalMinutes": row.interval_minutes,
                     "enabled": row.enabled,
                     "nextRunAt": row.next_run_at.isoformat(),
+                    "quotaBlockedAt": (
+                        row.last_quota_blocked_at.isoformat() if row.last_quota_blocked_at else None
+                    ),
+                    "quotaBlockedReason": row.last_quota_blocked_reason,
                 }
                 for row in rows
             ]
