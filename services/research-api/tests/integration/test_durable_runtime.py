@@ -150,9 +150,14 @@ async def test_plan_pause_survives_new_pool_and_decision_is_idempotent(monkeypat
         assert "paused" in statuses and "failed" not in statuses
     assert collected == [] and planner.await_count == 1
     monkeypatch.setattr(api, "_caller", runtime_api._caller)
-    waiting = (await api.get_research_run(run_id))["approval"]
+    waiting_snapshot = await api.get_research_run(run_id)
+    waiting = waiting_snapshot["approval"]
+    waiting_timing = waiting_snapshot["timing"]
     assert waiting["state"] == "pending"
     assert waiting["waitStartedAt"] and waiting["waitedMs"] == 0
+    assert waiting_timing["processingMs"] == paused_ms
+    assert waiting_timing["approvalWaitMs"] >= waiting["waitedMs"]
+    assert waiting_timing["elapsedMs"] >= waiting_timing["processingMs"]
     payload = ApprovalRequest(planId=plan_id, decision=decision)
     await runtime_api.approve(run_id, payload)
     decided = (await api.get_research_run(run_id))["approval"]
