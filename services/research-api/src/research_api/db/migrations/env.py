@@ -8,6 +8,7 @@ from sqlalchemy import engine_from_config, pool
 
 from research_api.config import get_settings
 from research_api.db.assessments import ResearchAssessment  # noqa: F401
+from research_api.db.migrations.target import migration_database_url
 from research_api.db.models import Base
 from research_api.db.source_relationships import SourceRelationship  # noqa: F401
 
@@ -20,11 +21,12 @@ target_metadata = Base.metadata
 # remains optional for deployments that use a distinct migration principal.
 settings = get_settings()
 private_migration_env = dotenv_values(Path(__file__).resolve().parents[4] / ".env.migrations")
-database_url = (
-    os.getenv("DATABASE_ADMIN_URL")
-    or settings.DATABASE_ADMIN_URL
-    or private_migration_env.get("DATABASE_ADMIN_URL")
-    or settings.DATABASE_URL
+database_url = migration_database_url(
+    app_env=settings.APP_ENV,
+    explicit_admin_url=os.getenv("DATABASE_ADMIN_URL"),
+    settings_admin_url=settings.DATABASE_ADMIN_URL,
+    private_admin_url=private_migration_env.get("DATABASE_ADMIN_URL"),
+    application_url=settings.DATABASE_URL,
 )
 config.set_main_option("sqlalchemy.url", database_url)
 
