@@ -65,6 +65,7 @@ export const RetrievalProviderAccountingSchema = z
     shortlisted: z.number().int().nonnegative().nullable(),
     excluded: z.number().int().nonnegative().nullable(),
     duplicateWork: z.number().int().nonnegative().nullable(),
+    duplicateUrl: z.number().int().nonnegative().nullable().optional(),
     unavailable: z.number().int().nonnegative().nullable(),
     policyVersions: z.array(z.string().min(1).max(100)).max(10),
     countsComplete: z.boolean(),
@@ -95,8 +96,10 @@ export const RetrievalSemanticReviewOutcomesSchema = z
 
 export const RetrievalAccountingSchema = z
   .object({
-    schemaVersion: z.literal("1.1"),
+    schemaVersion: z.enum(["1.1", "1.2"]),
     providers: z.array(RetrievalProviderAccountingSchema).max(8),
+    exactDuplicateSources: z.number().int().nonnegative().optional(),
+    sourceClasses: z.record(z.string().min(1).max(32), z.number().int().nonnegative()).optional(),
     extractionCalls: z.number().int().nonnegative(),
     extractionOutcomes: RetrievalExtractionOutcomesSchema,
     extractedSources: z.number().int().nonnegative(),
