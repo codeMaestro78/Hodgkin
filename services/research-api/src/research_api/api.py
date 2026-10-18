@@ -12,6 +12,8 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 from sqlalchemy import func, select
 
 from research_api.auth import authenticated_caller as _caller
+from research_api.billing.ledger import BillingLedgerError, billing_http_status
+from research_api.billing.lifecycle import settle_terminal_run
 from research_api.config import get_settings
 from research_api.db.assessments import ResearchAssessment
 from research_api.db.models import (
@@ -260,6 +262,9 @@ async def create_research_run(
             )
         except IdempotencyConflictError as exc:
             raise HTTPException(409, "idempotency key belongs to another request") from exc
+        except BillingLedgerError as exc:
+            code, message, extra = billing_http_status(exc)
+            raise HTTPException(code, {"message": message, **extra}) from exc
         response = _created_projection(run, _budget_from_request(payload, run.mode_policy_version))
         if not created:
             return response
@@ -873,6 +878,7 @@ async def cancel_research_run(
             if job is not None:
                 job.state = "cancelled"
                 job.owner_id, job.lease_expires_at = None, None
+            await settle_terminal_run(session, run)
             await session.flush()
             await refresh_due(session, registry)
         return {"runId": str(run.id), "status": run.status}
@@ -929,25 +935,29 @@ async def retry_research_run(
                     "message": "explicit-mode retries inherit the original time limit",
                 },
             )
-        fresh = await RunRepository(session, caller.tenant_id).create(
-            user_id=caller.user_id,
-            question=prior.original_question,
-            report_requirements=prior.report_requirements,
-            budget=RunBudgetDefaults(
-                max_wall_clock_ms=max_wall_clock_ms or budget.max_wall_clock_ms,
-                max_search_calls=budget.max_search_calls,
-                max_browser_sessions=budget.max_browser_sessions,
-                max_reflection_rounds=budget.max_reflection_rounds,
-                max_input_tokens=budget.max_input_tokens,
-                max_output_tokens=budget.max_output_tokens,
-                max_estimated_cost_usd=budget.max_estimated_cost_usd,
-                max_provider_operations=budget.max_provider_operations,
-                max_sources=budget.max_sources,
-            ),
-            mode=prior.mode,
-            mode_policy_version=prior.mode_policy_version,
-            approval_required=prior.approval_required,
-        )
+        try:
+            fresh = await RunRepository(session, caller.tenant_id).create(
+                user_id=caller.user_id,
+                question=prior.original_question,
+                report_requirements=prior.report_requirements,
+                budget=RunBudgetDefaults(
+                    max_wall_clock_ms=max_wall_clock_ms or budget.max_wall_clock_ms,
+                    max_search_calls=budget.max_search_calls,
+                    max_browser_sessions=budget.max_browser_sessions,
+                    max_reflection_rounds=budget.max_reflection_rounds,
+                    max_input_tokens=budget.max_input_tokens,
+                    max_output_tokens=budget.max_output_tokens,
+                    max_estimated_cost_usd=budget.max_estimated_cost_usd,
+                    max_provider_operations=budget.max_provider_operations,
+                    max_sources=budget.max_sources,
+                ),
+                mode=prior.mode,
+                mode_policy_version=prior.mode_policy_version,
+                approval_required=prior.approval_required,
+            )
+        except BillingLedgerError as exc:
+            code, message, extra = billing_http_status(exc)
+            raise HTTPException(code, {"message": message, **extra}) from exc
         await EventOutbox(session, caller.tenant_id).append(
             run_id=fresh.id,
             event_type="run.retried",
@@ -1084,6 +1094,9 @@ async def followup_research_run(
             )
         except IdempotencyConflictError as exc:
             raise HTTPException(409, "idempotency key belongs to another request") from exc
+        except BillingLedgerError as exc:
+            code, message, extra = billing_http_status(exc)
+            raise HTTPException(code, {"message": message, **extra}) from exc
         if not created:
             return {"runId": str(fresh.id), "status": fresh.status}
         if gap:
