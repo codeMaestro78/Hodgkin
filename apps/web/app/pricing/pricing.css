@@ -60,6 +60,12 @@
   background: #fff;
   box-shadow: var(--lp-shadow-raised);
 }
+
+.pr-checkout-error {
+  margin: 8px 0 0;
+  color: #9d354f;
+  font-size: 0.82rem;
+}
 .pr-billing-thumb {
   position: absolute;
   inset: 4px auto 4px 4px;
