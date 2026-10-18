@@ -33,6 +33,20 @@ def canonicalize_url(value: str) -> str:
     return urlunsplit((parsed.scheme.lower(), hostname, path, urlencode(query), ""))
 
 
+def search_result_identity_url(value: str) -> str:
+    """Return a conservative result-dedup key that treats only ``www`` as an alias.
+
+    This is not a work identity: distinct paths, query parameters, and other
+    subdomains remain distinct. Keep the canonical URL for extraction/display.
+    """
+    canonical = canonicalize_url(value)
+    parsed = urlsplit(canonical)
+    hostname = parsed.netloc
+    if hostname.startswith("www."):
+        hostname = hostname[4:]
+    return urlunsplit((parsed.scheme, hostname, parsed.path, parsed.query, ""))
+
+
 def normalize_text(value: str) -> str:
     without_nulls = value.replace("\x00", "")
     lines = without_nulls.replace("\r\n", "\n").split("\n")
