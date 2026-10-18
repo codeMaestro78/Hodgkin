@@ -126,6 +126,11 @@ class ReportVersion(BaseModel):
     created_at: AwareDatetime = Field(..., alias="createdAt")
 
 
+class SchemaVersion1(StrEnum):
+    field_1_1 = "1.1"
+    field_1_2 = "1.2"
+
+
 class Provider1(StrEnum):
     openalex = "openalex"
     serper = "serper"
@@ -150,6 +155,7 @@ class Provider(BaseModel):
     shortlisted: conint(ge=0, le=9007199254740991) | None
     excluded: conint(ge=0, le=9007199254740991) | None
     duplicate_work: conint(ge=0, le=9007199254740991) | None = Field(..., alias="duplicateWork")
+    duplicate_url: conint(ge=0, le=9007199254740991) | None = Field(None, alias="duplicateUrl")
     unavailable: conint(ge=0, le=9007199254740991) | None
     policy_versions: list[PolicyVersion] = Field(..., alias="policyVersions", max_length=10)
     counts_complete: bool = Field(..., alias="countsComplete")
@@ -188,8 +194,14 @@ class RetrievalAccounting(BaseModel):
         extra="forbid",
         populate_by_name=True,
     )
-    schema_version: Literal["1.1"] = Field(..., alias="schemaVersion")
+    schema_version: SchemaVersion1 = Field(..., alias="schemaVersion")
     providers: list[Provider] = Field(..., max_length=8)
+    exact_duplicate_sources: conint(ge=0, le=9007199254740991) | None = Field(
+        None, alias="exactDuplicateSources"
+    )
+    source_classes: (
+        dict[constr(min_length=1, max_length=32), conint(ge=0, le=9007199254740991)] | None
+    ) = Field(None, alias="sourceClasses")
     extraction_calls: conint(ge=0, le=9007199254740991) = Field(..., alias="extractionCalls")
     extraction_outcomes: ExtractionOutcomes = Field(..., alias="extractionOutcomes")
     extracted_sources: conint(ge=0, le=9007199254740991) = Field(..., alias="extractedSources")
