@@ -66,16 +66,33 @@ export function runStage(status: string) {
   return stages[status] ?? "Updating status";
 }
 
-/** Coalesce routine evidence bursts; terminal feedback must not wait. */
-export function snapshotRefreshDelay(eventType?: string) {
-  return [
-    "run.failed",
-    "run.cancelled",
-    "run.completed",
-    "node.started",
-  ].includes(eventType ?? "")
-    ? 0
-    : 1500;
+/** Apply only the phase explicitly recorded by a durable graph-node event. */
+export function statusForNodeStart(nodeId: string): string | null {
+  const statuses: Record<string, string> = {
+    intake: "planning",
+    planner: "planning",
+    planner_delta: "planning",
+    research_worker: "researching",
+    research_task: "researching",
+    assess_evidence: "reflecting",
+    reflector: "reflecting",
+    verifier: "verifying",
+    synthesizer: "writing",
+  };
+  return statuses[nodeId] ?? null;
+}
+
+/** Bound full-snapshot reads during event bursts; terminal feedback must not wait. */
+export function snapshotRefreshDelay(
+  eventType?: string,
+  lastSnapshotFinishedAt = 0,
+  now = Date.now(),
+) {
+  if (["run.failed", "run.cancelled", "run.completed"].includes(eventType ?? ""))
+    return 0;
+  const preferredDelay = eventType === "node.started" ? 1000 : 5000;
+  const cadenceDelay = Math.max(0, lastSnapshotFinishedAt + 5000 - now);
+  return Math.max(preferredDelay, cadenceDelay);
 }
 
 /** One pending refresh. Important state changes can preempt a source burst. */
