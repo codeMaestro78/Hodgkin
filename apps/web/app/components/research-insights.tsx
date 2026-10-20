@@ -2,6 +2,7 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import type { z } from "zod";
 import type { RunInsightsSchema } from "@research/contracts";
+import { runFailure } from "../../lib/run-status";
 import { Badge, Empty } from "./workbench-ui";
 import "../orchestration.css";
 
@@ -436,8 +437,8 @@ export function ExecutionView({
           </dl>
           {task.errorCode && (
             <p role="status" className="orch-error">
-              {task.errorCode.replaceAll("_", " ")}. Retry the entire run using
-              its existing retry action; per-task restart is not available.
+              {runFailure(task.errorCode)} Retry the entire run using its
+              existing retry action; per-task restart is not available.
             </p>
           )}
           {task.sourceIds.length > 0 && (
