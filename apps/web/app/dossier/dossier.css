@@ -1,0 +1,346 @@
+/* Sample dossier — a public showcase of what a finished research run leaves
+   behind. Same paper-and-ink language as the landing, scoped under .ds. */
+
+.ds-hero {
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 88px 24px 40px;
+  text-align: center;
+}
+.ds-title {
+  margin: 14px 0 0;
+  font-size: clamp(34px, 6.4vw, 68px);
+  font-weight: 400;
+  line-height: 1.04;
+  letter-spacing: -0.05em;
+}
+.ds-line {
+  display: block;
+  white-space: nowrap;
+}
+.ds-lead {
+  margin: 18px auto 0;
+  max-width: 54ch;
+  color: var(--lp-muted);
+  font-size: 17px;
+  line-height: 1.6;
+}
+.ds-hero-actions {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 28px;
+}
+
+/* The dossier sheet. */
+.ds-stage {
+  position: relative;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 24px 0;
+}
+.ds-peek {
+  position: absolute;
+  top: -34px;
+  right: 6px;
+  z-index: 2;
+}
+.ds-report {
+  background: var(--lp-sand);
+  border: 1px solid var(--lp-line);
+  border-radius: 18px;
+  box-shadow: var(--lp-shadow-raised);
+  padding: 40px 44px 36px;
+}
+
+.ds-report-head .ds-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--lp-muted);
+  font-size: 13px;
+}
+.ds-question {
+  margin: 14px 0 0;
+  font-size: clamp(24px, 3.4vw, 32px);
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  line-height: 1.2;
+}
+
+.ds-gate {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 22px 0 0;
+  padding: 14px 16px;
+  background: var(--lp-paper);
+  border: 1px solid var(--lp-line);
+  border-radius: 12px;
+  color: var(--lp-muted);
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+.ds-gate svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--lp-ok);
+}
+.ds-gate strong {
+  color: var(--lp-ink);
+  font-weight: 600;
+}
+
+.ds-body-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 250px;
+  gap: 36px;
+  margin-top: 28px;
+}
+.ds-section {
+  padding: 18px 0;
+  border-top: 1px solid var(--lp-line);
+}
+.ds-section:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+.ds-section h3 {
+  margin: 0 0 10px;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+.ds-section p {
+  margin: 0 0 10px;
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+/* Citation chips — superscript numbers linking into the source list. */
+.ds-cite {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: super;
+  min-width: 17px;
+  height: 17px;
+  margin-left: 3px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--lp-cite-soft);
+  color: var(--lp-cite);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  transition: background 160ms var(--lp-inout), color 160ms var(--lp-inout);
+}
+@media (hover: hover) and (pointer: fine) {
+  .ds-cite:hover {
+    background: var(--lp-cite);
+    color: #fff;
+  }
+}
+
+/* The trail aside — what the run actually recorded. */
+.ds-trail {
+  align-self: start;
+  padding: 18px;
+  background: var(--lp-paper);
+  border: 1px solid var(--lp-line);
+  border-radius: 12px;
+  font-size: 13px;
+}
+.ds-trail h3 {
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--lp-muted);
+}
+.ds-trail ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+.ds-trail li {
+  display: grid;
+  gap: 2px;
+  padding-left: 16px;
+  position: relative;
+}
+.ds-trail li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--lp-cite);
+}
+.ds-trail-step {
+  font-weight: 600;
+  color: var(--lp-ink);
+}
+.ds-trail-detail {
+  color: var(--lp-muted);
+  line-height: 1.5;
+}
+.ds-trail-note {
+  margin: 14px 0 0;
+  padding-top: 12px;
+  border-top: 1px dashed var(--lp-line-strong);
+  color: var(--lp-muted);
+  line-height: 1.5;
+}
+
+/* Sources. */
+.ds-sources {
+  margin-top: 28px;
+  padding-top: 22px;
+  border-top: 1px solid var(--lp-line);
+}
+.ds-sources h3 {
+  margin: 0 0 14px;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+.ds-sources ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+.ds-sources li {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  scroll-margin-top: 96px;
+}
+.ds-source-n {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--lp-cite-soft);
+  color: var(--lp-cite);
+  font-size: 12px;
+  font-weight: 600;
+}
+.ds-sources a {
+  color: var(--lp-ink);
+  font-weight: 600;
+  font-size: 14.5px;
+  text-decoration-color: var(--lp-line-strong);
+  text-underline-offset: 3px;
+}
+@media (hover: hover) and (pointer: fine) {
+  .ds-sources a:hover {
+    text-decoration-color: var(--lp-cite);
+  }
+}
+.ds-sources p {
+  margin: 2px 0 0;
+  color: var(--lp-muted);
+  font-size: 13px;
+}
+.ds-sources-note {
+  margin: 16px 0 0;
+  color: var(--lp-muted);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+/* Feature trio + closing reuse the landing's own classes. */
+.ds-features {
+  padding-top: 96px;
+}
+.ds-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  max-width: var(--lp-width);
+  margin: 0 auto;
+  padding: 0 24px;
+}
+.ds-feature {
+  padding: 24px;
+  background: var(--lp-sand);
+  border: 1px solid var(--lp-line);
+  border-radius: 14px;
+}
+.ds-feature-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--lp-cite-soft);
+  color: var(--lp-cite);
+}
+.ds-feature h3 {
+  margin: 14px 0 6px;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.ds-feature p {
+  margin: 0;
+  color: var(--lp-muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+@media (max-width: 960px) {
+  .ds-body-grid {
+    grid-template-columns: 1fr;
+  }
+  .ds-feature-grid {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 720px) {
+  .ds-hero {
+    padding: 64px 20px 28px;
+  }
+  .ds-stage {
+    padding: 16px 16px 0;
+  }
+  .ds-report {
+    padding: 26px 22px 24px;
+  }
+  .ds-peek {
+    top: -28px;
+    right: 0;
+  }
+}
+
+.ds-download {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 14px;
+  color: var(--lp-cite);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.ds-download svg {
+  flex: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  .ds-download:hover {
+    color: var(--lp-ink);
+  }
+}
