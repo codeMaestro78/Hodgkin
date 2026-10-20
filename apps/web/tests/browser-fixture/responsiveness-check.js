@@ -13,6 +13,7 @@ async (page) => {
     const path = new URL(route.request().url()).pathname;
     const reply = body => route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
     if (path === "/api/auth/session") return reply({ user: { id: "latency-fixture", name: "Fixture" } });
+    if (path === "/api/billing/entitlement") return reply({ status: "not_configured" });
     if (path === "/api/onboarding") {
       defaultsRequested = true;
       await defaults;
