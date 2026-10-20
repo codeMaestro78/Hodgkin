@@ -58,6 +58,8 @@ export function SiteFooter() {
         <Link href="/research/library">Library</Link>
         <Link href="/research/compare">Compare runs</Link>
         <Link href="/research/automation">Automation</Link>
+        <Link href="/dossier">Sample dossier</Link>
+        <Link href="/guides">Guides</Link>
         <Link href="/pricing">Pricing</Link>
       </nav>
       <nav aria-label="Account">
@@ -65,6 +67,15 @@ export function SiteFooter() {
         <Link href="/login">Log in</Link>
         <Link href="/signup">Create account</Link>
         <Link href="/forgot-password">Reset password</Link>
+      </nav>
+      <nav aria-label="Company">
+        <h2>Company</h2>
+        <Link href="/about">About</Link>
+      </nav>
+      <nav aria-label="Legal">
+        <h2>Legal</h2>
+        <Link href="/terms">Terms</Link>
+        <Link href="/privacy">Privacy</Link>
       </nav>
     </footer>
   );
