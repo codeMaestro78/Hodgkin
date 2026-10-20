@@ -558,7 +558,7 @@ async def reserve_units(
             available_units=max(available, 0) + credit_available,
             period_end=period.ends_at,
         )
-    entry = None
+    entry: BillingUnitEntry | BillingCreditEntry | None = None
     if monthly_units:
         entry = BillingUnitEntry(
             tenant_id=tenant_id,
