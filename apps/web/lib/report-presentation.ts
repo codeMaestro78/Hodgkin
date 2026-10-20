@@ -14,11 +14,22 @@ export function hasNoVerifiedFindings(
 }
 
 /** Hide the old generated publication ratio, preserving other report mathematics. */
-export function reportDisplayMarkdown(markdown: string): string {
-  return markdown.replace(
+export function reportDisplayMarkdown(
+  markdown: string,
+  structuredTechnicalResults = false,
+): string {
+  const cleaned = markdown.replace(
     /^\$\$\r?\n\\text\{published share\} = \\frac\{\d+\}\{\d+\} \\approx [\d.]+\\%\r?\n\$\$[\t ]*(?:\r?\n)?/gm,
     "",
   );
+  if (!structuredTechnicalResults) return cleaned;
+  const start = "<!-- technical-results-v1:start -->";
+  const end = "<!-- technical-results-v1:end -->";
+  const from = cleaned.indexOf(start);
+  const to = cleaned.indexOf(end, from + start.length);
+  return from >= 0 && to >= 0
+    ? cleaned.slice(0, from) + cleaned.slice(to + end.length)
+    : cleaned;
 }
 
 /** Match rendered Markdown headings, excluding fenced examples and source lists. */
