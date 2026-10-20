@@ -107,13 +107,14 @@ tail risk. A mode's maximum provider budget is a safety ceiling, not expected
 cost. If mode weights change, version the catalog and charge only new admissions
 under the new version; never reprice an existing reservation or historical run.
 
-For v1, do not change a unit price based on provider/model choice,
+For the subscription-only v1, do not change a unit price based on provider/model choice,
 discovered-source count, actual token usage, retries, or repair rounds. That would
 make the price hard to predict and couple the customer balance to noisy provider
 measurements. Keep per-run provider-operation, source, wall-clock, token, and
-estimated-cost ceilings as separate safety controls. A future variable-cost or
-top-up product requires a distinct product decision, disclosed pricing, and its
-own ledger semantics; it must not emerge implicitly from this unit system.
+estimated-cost ceilings as separate safety controls. Purchased top-ups are a
+proposed extension described below; they require separate disclosed pricing and
+ledger semantics and do not become active merely because this document describes
+them.
 
 **Balance formula:**
 
@@ -157,6 +158,143 @@ balance from implying Deep access. The current pricing UI and this proposal
 disagree about Free access (the page advertises Focused and Balanced, while the
 proposal table says Focused only). Product must resolve that mismatch before the
 server catalog or UI promises either policy.
+
+### 3.2.3 Purchased research-unit top-ups (product policy approved; launch gated)
+
+The requested “add credits for dollars” experience should be modeled as a
+**one-time purchase of a fixed research-unit pack**, not a cash-value wallet.
+This product meters research by fixed mode weights, not actual provider invoice
+dollars; a dollar balance would promise metered cash settlement that the runtime
+does not provide. If the product later charges against actual provider spend,
+that is a separate billing architecture and customer promise.
+
+The product owner approved the local product policy below on 2026-10-19.
+This is not legal advice or authorization to sell. Customer-facing wording and
+jurisdictional compliance remain launch gates. The implementation permits only
+explicitly configured Stripe **test-mode** checkout; live-mode top-ups are
+hard-blocked in code.
+
+Draft customer disclosure for finance/legal review:
+
+> Research credits are units for research use, not cash and not a payment
+> balance. They are separate from monthly plan units, do not renew monthly, and
+> do not expire while your account remains active. Credits do not unlock modes
+> excluded by your plan. If a purchase is refunded, unused and unreserved
+> credits are reversed. If any credits have been spent or reserved, wallet use
+> will be paused while we review and reconcile the account. A payment dispute
+> will temporarily pause wallet use while it is unresolved. These terms do not
+> limit any rights you have under applicable law.
+
+- The UI may call these “research credits” only with an adjacent definition:
+  **1 research credit = 1 research unit**. A run still costs the existing
+  server-owned mode price (Focused 1, Balanced 2, Deep 4).
+- Sell fixed server-configured packs through a one-time Stripe Checkout Session.
+  The browser chooses a package key only; the server maps it to one configured,
+  active, one-time Stripe Price and a fixed unit grant. No arbitrary
+  client-entered dollar amount, client-selected grant, or automatic recharge in
+  the first release.
+- Keep purchased units in a separate account-level wallet and append-only ledger;
+  do not inflate `BillingPeriod.allowance_units` or represent purchases as
+  operator adjustments. Monthly units retain their period expiration and
+  settlement rules. Purchased units do not expire with the monthly billing
+  period and do not expire while the customer account remains active. Account
+  closure, dormant balances, and any legally required treatment must be resolved
+  in jurisdiction-specific legal terms; do not silently delete or forfeit a
+  balance.
+- Spend included monthly units first, then purchased units. Reserve both sources
+  atomically under the existing account serialization lock, record exact
+  per-run allocation, and settle/release each allocation exactly once. Mode
+  access gates and source/time/operation/token/cost safety ceilings remain
+  unchanged; buying units never unlocks a plan-gated mode.
+- Grant units only after a signed, deduplicated Stripe webhook proves the
+  expected Checkout Session is paid and matches the server's package, owner,
+  currency, and configured amount. A redirect is only a pending UX state.
+  Delayed payment is not spendable before its verified payment-success event.
+- Persist an order projection and an append-only purchased-credit ledger with
+  unique Stripe session/payment references, exact unit grant, price/currency
+  snapshot, owner, status, and reversal linkage. Never delete or rewrite a grant.
+- On a verified refund, reverse unused, unreserved purchased units using an
+  idempotent append-only ledger entry. If any purchased units are already
+  reserved or consumed, pause wallet spending and mark the purchase/account for
+  auditable reconciliation; do not create a negative balance or automatically
+  claw back units from an active run. Apply any additional remedy only under the
+  approved, jurisdiction-specific refund terms.
+- On a payment dispute, pause wallet spending while the dispute is unresolved.
+  A verified dispute win restores the purchase and wallet availability; a lost
+  dispute follows the verified-refund/reconciliation path. Every transition
+  must be idempotent, tied to the Stripe event/payment, and recoverable after a
+  crash. A dispute notification alone is not proof that a refund completed.
+- Expose monthly included and purchased balances separately. Top-ups do not
+  renew monthly and do not enable a mode the current plan excludes. When
+  included units are insufficient, preserve the draft and show package choices
+  only after purchase is fully configured.
+- Add server-side wallet ceilings and purchase/rate limits before launch. Do not
+  add automatic top-ups until explicit spend caps, consent, alerts, retry rules,
+  and support/refund handling have been designed.
+
+**Commercial and launch decisions still required before live checkout:**
+
+1. Pack sizes and USD prices. The six-run matched pilot on two draft cases is
+   directional only (two observations per mode; no failed-run sample, invoice
+   reconciliation, or quality adjudication). Validate margins against larger
+   cost distributions, failed/uncertain dispatch, payment fees, taxes, support,
+   and infrastructure before approving prices.
+2. Obtain jurisdiction-specific finance/legal review of the customer-facing
+   non-expiry, refund, dispute, account-closure, tax, and consumer-rights terms.
+   The product policy above is approved locally but is not legally reviewed.
+3. Confirm balance treatment on plan cancellation/downgrade. Purchased units do
+   not unlock plan-gated modes; the final customer terms must explain this.
+4. Approve maximum wallet balance, purchase/rate limits, and handling of
+   multiple/pending payments.
+
+**Implementation status (2026-10-20):** The wallet/order schema and migration
+`0030` passed disposable PostgreSQL tests. Authenticated package listing,
+idempotent one-time Checkout, signed paid-session fulfillment, separate wallet
+balance, monthly-first allocation, terminal settlement, refund reversal,
+dispute pause/win/loss handling, and the budget-card top-up control are coded.
+The disposable-PostgreSQL integration test covers replay, unpaid/async-success
+delivery, reservation, failed-run release, dispute pause/win, full-unspent
+refund reversal, refund holds for reserved units, and 21 concurrent admissions
+against 20 purchased units. Additional matched quality/cost receipts,
+out-of-order webhook adjudication, a real browser Checkout return, and
+customer/legal review remain release gates. The three sandbox Prices are
+5 units/$1.99, 12/$3.99, and
+25/$6.99; these are **test offers**, not approved live prices. Wallet ceiling
+is configurable and checkout limits are two pending and five starts per day.
+
+The current API configuration points to a hosted Supabase database at migration
+`0029`. Do not set `BILLING_CREDIT_*` purchase flags there until migration
+`0030` is explicitly approved and applied to that target with a verified backup.
+The added code tolerates the pre-`0030` schema when top-ups are off. No hosted
+migration was applied by this slice. Test-mode activation also requires a
+reachable Stripe webhook destination subscribed to Checkout completion/async,
+refund, and dispute events, plus the matching signing secret. Live-mode
+top-ups stay code-blocked even if subscription billing is live.
+
+To exercise the test-mode UI after the target database has been backed up and
+`0030` has been approved/applied, configure the existing Stripe **test** key,
+webhook signing secret, API version, and app base URL, then set the credit flags
+in `services/research-api/.env.example` to their enabled values in the real
+environment. Use the three sandbox Prices in this order: `starter` =
+`price_1USKPRA9ncihy4DE18XCfXpB` (199 cents, 5 units), `standard` =
+`price_1USKPSA9ncihy4DEsInBr8n5` (399 cents, 12 units), and `value` =
+`price_1USKPSA9ncihy4DEEirb1llU` (699 cents, 25 units). Each JSON pack must
+have `currency: "usd"` and `expiryDays: null`; set terms version
+`research-credit-terms-v1` and a positive wallet ceiling. The webhook must
+forward `checkout.session.completed`, `checkout.session.expired`,
+`checkout.session.async_payment_succeeded`,
+`checkout.session.async_payment_failed`, `refund.created`, `refund.updated`,
+`charge.dispute.created`, and `charge.dispute.closed` to the API's
+`/billing/webhooks/stripe` path. Restart the API after changing settings. A
+successful Checkout redirect is only pending; confirm the owner-scoped purchase
+status becomes `paid` and the separate purchased balance increases exactly
+once. Never use these sandbox Price IDs with a live Stripe key.
+
+Stripe Checkout supports both one-time `payment` Sessions and `subscription`
+Sessions. Fulfillment must follow verified payment events, including asynchronous
+success/failure where delayed payment methods are enabled—not the success
+redirect. See [Stripe Checkout Session modes](https://docs.stripe.com/api/checkout/sessions/object)
+and [Stripe's payment fulfillment events](https://docs.stripe.com/payments/existing-customers?platform=web&ui=stripe-hosted).
 
 ### 3.2.2 Budget-card contract and display states
 
@@ -466,8 +604,9 @@ paid launch remain off by default.
 4. Decide batch pricing semantics. Recommended v1: one explicit batch-wide mode, all child runs use that mode, and total reservation is `question_count × mode_unit_cost`; later per-question mode selection requires a UI/API version that shows the exact sum before submit.
 5. **Approved local v1 schedule rule:** persist the selected mode and operational policy on the schedule; each occurrence reserves at execution time from the user's active billing-period/catalog snapshot. Thus an already-created schedule does not itself grandfather a commercial catalog; a new period may carry a new version. If the active plan does not permit the mode or units are insufficient, mark the occurrence quota-blocked and surface it; never silently downgrade mode or launch a partial batch.
 6. Analyze observed provider-cost distributions by mode, including failures, uncertain dispatch, retries and repair. Do not treat `max_estimated_cost_usd` as an invoice or assume mode operational ceilings equal expected spend.
-7. Decide whether “unit” is the customer-facing term (recommended for non-monetary monthly capacity). Do not market these as dollars or stored-value credits.
+7. Use “research units” for included monthly capacity. Under the approved local top-up policy, “research credits” may be used only when explicitly defined as units, never as a dollar/provider-spend wallet.
 8. Remove unsupported live claims or mark them as planned until enforcement and the capability are usable end to end.
+9. **Approved local product policy, not approved for live sale:** one-time research-unit packs follow §3.2.3 and policy version `research-credit-terms-v1`. Purchased units are non-expiring while an account remains active, do not unlock plan-gated modes, and follow the verified refund/dispute/reconciliation policy. Sandbox purchases remain disabled in the current hosted-backed environment until migration `0030` is applied to the explicitly approved target; live sales additionally require legal, finance, tax, and recovery review.
 
 **Exit gate:** local catalog and settlement contract are versioned and approved; before paid launch, measured cost tails and finance/legal review for the launch geography must also pass.
 
@@ -494,6 +633,18 @@ The generated report labels costs as estimates and does not claim that 1/2/4
 weights match provider-cost ratios.
 Use it only with representative matched-mode receipts; an empty or small sample
 does not satisfy the economics exit gate.
+
+**Matched live pilot (2026-10-19):** six runs across the same two draft cases
+(comparison and factual), two per mode. All six completed. Mean end-to-end times
+were 23s Focused, 35s Balanced, and 53s Deep; mean first-source times were 7.4s,
+8.2s, and 8.7s respectively. Application ledger cost estimates averaged
+$0.0506, $0.0677, and $0.1014 per run; model usage accounting averaged
+$0.0026, $0.0037, and $0.0054. Estimated total ledger cost was $0.439442,
+including $0.023442 in model usage estimates. These are not provider invoices.
+There were no failed runs, no human quality adjudication, only two cases, and no
+first-verified-finding measurement; the pilot is not sufficient to approve pack
+prices, failure reserves, or product quality. Raw observations are retained
+outside the repository at `/tmp/research-mode-eval.KlVLYJ/` for follow-up.
 
 **Phase 2 shadow-observation slice (2026-10-18):** migration `0021` adds a
 tenant-scoped, append-only `billing_shadow_observations` record for each newly
