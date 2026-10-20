@@ -7,14 +7,23 @@ from typing import Literal
 from research_api.repositories.runs import RunBudgetDefaults
 
 ResearchMode = Literal["focused", "balanced", "deep"]
-MODE_POLICY_VERSION = "research-mode-policy-v1"
+MODE_POLICY_VERSION = "research-mode-policy-v2"
 # Keep historical versions available for idempotent replay after a policy rollout.
 MODE_POLICIES = {
     "research-mode-policy-v1": {
         "focused": (6, 180_000),
         "balanced": (12, 300_000),
         "deep": (20, 600_000),
-    }
+    },
+    "research-mode-policy-v2": {
+        "focused": (6, 180_000),
+        "balanced": (12, 300_000),
+        "deep": (20, 600_000),
+    },
+}
+MODE_OUTPUT_TOKEN_BUDGETS = {
+    "research-mode-policy-v1": {"focused": 20_000, "balanced": 20_000, "deep": 20_000},
+    "research-mode-policy-v2": {"focused": 20_000, "balanced": 20_000, "deep": 40_000},
 }
 
 
@@ -25,6 +34,9 @@ def resolve_mode_budget(
     if version not in MODE_POLICIES or mode not in MODE_POLICIES[version]:
         raise ValueError("unsupported research mode or policy version")
     operations, wall_ms = MODE_POLICIES[version][mode]
+    output_budgets = MODE_OUTPUT_TOKEN_BUDGETS.get(
+        version, MODE_OUTPUT_TOKEN_BUDGETS["research-mode-policy-v1"]
+    )
     defaults = RunBudgetDefaults(
         max_search_calls=operations,
         max_provider_operations=operations,
@@ -33,7 +45,7 @@ def resolve_mode_budget(
         max_browser_sessions=0,
         max_reflection_rounds=1,
         max_input_tokens=100_000,
-        max_output_tokens=20_000,
+        max_output_tokens=output_budgets[mode],
         max_estimated_cost_usd=Decimal("5.00"),
     )
     fields: set[str] = getattr(overrides, "model_fields_set", set())
