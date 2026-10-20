@@ -88,12 +88,28 @@ export function snapshotRefreshDelay(
   lastSnapshotFinishedAt = 0,
   now = Date.now(),
 ) {
-  if (["run.failed", "run.cancelled", "run.completed"].includes(eventType ?? ""))
+  if (
+    ["run.failed", "run.cancelled", "run.completed"].includes(eventType ?? "")
+  )
     return 0;
   const preferredDelay = eventType === "node.started" ? 1000 : 5000;
   const cadenceDelay = Math.max(0, lastSnapshotFinishedAt + 5000 - now);
   return Math.max(preferredDelay, cadenceDelay);
 }
+
+/** Polling outages do not imply that the durable research run has failed. */
+export function isTransientSnapshotFailure(status: number | undefined) {
+  return status === undefined || (status >= 500 && status < 600);
+}
+
+/** Bounded exponential retry for a temporarily unavailable run snapshot. */
+export function snapshotRetryDelay(attempt: number) {
+  const safeAttempt = Math.max(1, Math.floor(attempt));
+  return Math.min(1000 * 2 ** (safeAttempt - 1), 10_000);
+}
+
+export const SNAPSHOT_RECONNECTING_MESSAGE =
+  "We temporarily couldn’t refresh the run status. Your research may still be running; reconnecting…";
 
 /** One pending refresh. Important state changes can preempt a source burst. */
 export function createSnapshotRefresh(refresh: () => void) {
@@ -133,9 +149,94 @@ export function runFailure(code: string | null) {
       "Automatic recovery stopped after repeated interruptions. Review the activity before starting again.",
     graph_version_incompatible:
       "This run needs an operator review after a runtime update.",
+    writer_output_limit_reached:
+      "The report writer reached its configured output limit before it could return a complete, verifiable response. No report was published; collected sources remain available. Try a new run with a shorter scope, or retry after the writer limit is adjusted.",
+    model_output_incomplete:
+      "A model response ended before it could be validated. No unverified answer was published; collected evidence remains available.",
+    model_refused_output:
+      "A model could not complete a required research step. No unverified answer was published; collected evidence remains available.",
+    model_output_invalid:
+      "A model response could not be validated for this research step. No unverified answer was published; collected evidence remains available.",
   };
   return (
     (code && messages[code]) ||
     "The run stopped at an execution step. Review the recorded activity for details."
   );
+}
+
+export function modeAccessMessage(
+  mode: "focused" | "balanced" | "deep",
+  allowedModes: readonly string[] | undefined,
+): string | null {
+  if (!allowedModes || allowedModes.includes(mode)) return null;
+  const available =
+    allowedModes.length > 0
+      ? allowedModes
+          .map((value) => value.charAt(0).toUpperCase() + value.slice(1))
+          .join(" and ")
+      : "no research modes";
+  if (mode === "deep") {
+    return `Deep mode requires the Investigator plan. Your current plan includes ${available}. View plans to unlock Deep.`;
+  }
+  return `Your current plan includes ${available}, not ${mode}. View plans to unlock this mode.`;
+}
+
+export function researchStartFailure(
+  status: number,
+  detail: unknown,
+  mode: "focused" | "balanced" | "deep",
+  allowedModes?: readonly string[],
+): string | null {
+  if (status !== 403) return null;
+  const message =
+    typeof detail === "string"
+      ? detail
+      : detail &&
+          typeof detail === "object" &&
+          "message" in detail &&
+          typeof detail.message === "string"
+        ? detail.message
+        : "";
+  if (!message.toLowerCase().includes("mode is not available")) return null;
+  return (
+    modeAccessMessage(mode, allowedModes) ??
+    (mode === "deep"
+      ? "Deep mode isn't included in your current plan. Upgrade to Investigator to use it."
+      : `${mode.charAt(0).toUpperCase() + mode.slice(1)} mode isn't included in your current plan. View plans to unlock it.`)
+  );
+}
+
+export type ResearchBudgetFailure = {
+  requiredUnits: number;
+  availableUnits: number;
+  periodEnd: string | null;
+};
+
+/** Recognize only the backend's explicit monthly-entitlement admission error. */
+export function researchBudgetFailure(
+  status: number,
+  detail: unknown,
+): ResearchBudgetFailure | null {
+  if (
+    status !== 402 ||
+    detail === null ||
+    typeof detail !== "object" ||
+    !("message" in detail) ||
+    detail.message !== "insufficient research units"
+  )
+    return null;
+  const requiredUnits = "requiredUnits" in detail ? detail.requiredUnits : null;
+  const availableUnits = "availableUnits" in detail ? detail.availableUnits : null;
+  const periodEnd = "periodEnd" in detail ? detail.periodEnd : null;
+  if (
+    typeof requiredUnits !== "number" ||
+    !Number.isInteger(requiredUnits) ||
+    requiredUnits < 1 ||
+    typeof availableUnits !== "number" ||
+    !Number.isInteger(availableUnits) ||
+    availableUnits < 0 ||
+    (periodEnd !== null && typeof periodEnd !== "string")
+  )
+    return null;
+  return { requiredUnits, availableUnits, periodEnd };
 }
