@@ -31,7 +31,7 @@ from research_api.db.models import (
     SubQuestion,
     UsageLedger,
 )
-from research_api.db.session import tenant_session
+from research_api.db.session import set_user_context, tenant_session
 from research_api.events.outbox import EventOutbox
 from research_api.events.wakeups import event_wakeups
 from research_api.execution import prior_dependencies, task_projection
@@ -246,6 +246,7 @@ async def create_research_run(
             detail="the Tavily research slice requires at least two search-call budget units",
         )
     async with tenant_session(str(caller.tenant_id)) as session:
+        await set_user_context(session, str(caller.user_id))
         repository = RunRepository(session, caller.tenant_id)
         try:
             run, created = await repository.create_once(
@@ -575,6 +576,9 @@ async def get_research_run(
             task_projection(
                 node,
                 dependencies=prior_dependencies(node, nodes),
+                error_code=(
+                    run.error_code if run.status == "failed" and node.status == "failed" else None
+                ),
             )
             for node in nodes
         ]
@@ -906,6 +910,7 @@ async def retry_research_run(
         authorization=authorization,
     )
     async with tenant_session(str(caller.tenant_id)) as session:
+        await set_user_context(session, str(caller.user_id))
         prior = await session.scalar(
             select(ResearchRun).where(
                 ResearchRun.tenant_id == caller.tenant_id,
@@ -992,6 +997,7 @@ async def followup_research_run(
         authorization=authorization,
     )
     async with tenant_session(str(caller.tenant_id)) as session:
+        await set_user_context(session, str(caller.user_id))
         await lock_registry(session, caller.tenant_id)
         prior = await session.scalar(
             select(ResearchRun)
