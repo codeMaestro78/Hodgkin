@@ -3,9 +3,10 @@ import type {
   ReportDocumentV2,
   ReportDocumentV3,
   ReportDocumentV4,
+  ReportDocumentV5,
 } from "@research/contracts";
 
-type AssessedReport = ReportDocumentV2 | ReportDocumentV3 | ReportDocumentV4;
+type AssessedReport = ReportDocumentV2 | ReportDocumentV3 | ReportDocumentV4 | ReportDocumentV5;
 
 const outcomeLabels = {
   established: "Established",
@@ -182,7 +183,7 @@ function AssessedCoverage({
           </ul>
         )}
       </details>
-      {document.version === 4 && (
+      {"narrative" in document && (
         <NarrativeComposition document={document} dimensions={dimensions} />
       )}
       {document.version >= 3 && "sourceRelationships" in document && (
@@ -265,7 +266,7 @@ function NarrativeComposition({
   document,
   dimensions,
 }: {
-  document: ReportDocumentV4;
+  document: ReportDocumentV4 | ReportDocumentV5;
   dimensions: Map<string, string>;
 }) {
   const narrative = document.narrative;
