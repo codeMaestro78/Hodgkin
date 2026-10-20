@@ -384,7 +384,13 @@ async def test_deep_output_allowance_is_explicit_and_bounded():
     client = SimpleNamespace(responses=SimpleNamespace(create=create))
     await model_response(client, model="fixture", max_output_tokens=8192)
     assert create.call_args.kwargs["max_output_tokens"] == 8192
-    await model_response(client, model="fixture", max_output_tokens=999999)
+    await model_response(
+        client, model="gpt-6-luna", role="writer", max_output_tokens=999999
+    )
+    assert create.call_args.kwargs["max_output_tokens"] == 16384
+    await model_response(
+        client, model="gpt-6-luna", role="planner", max_output_tokens=999999
+    )
     assert create.call_args.kwargs["max_output_tokens"] == 8192
 
 
@@ -484,7 +490,7 @@ async def test_unlocated_assertions_are_insufficient_evidence_not_execution_fail
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("calls,cap,output", [(6, 12, 4096), (12, 24, 6144), (20, 40, 8192)])
+@pytest.mark.parametrize("calls,cap,output", [(6, 12, 4096), (12, 24, 6144), (20, 40, 16384)])
 async def test_mode_draft_uses_one_bounded_claim_call_not_prose_then_audit(
     monkeypatch, calls, cap, output
 ):
