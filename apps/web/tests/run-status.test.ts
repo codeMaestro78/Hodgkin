@@ -5,8 +5,14 @@ import {
   runStage,
   statusForNodeStart,
   runFailure,
+  modeAccessMessage,
+  researchStartFailure,
+  researchBudgetFailure,
   snapshotRefreshDelay,
   createSnapshotRefresh,
+  isTransientSnapshotFailure,
+  snapshotRetryDelay,
+  SNAPSHOT_RECONNECTING_MESSAGE,
   runPhaseIndex,
   runPhases,
 } from "../lib/run-status";
@@ -23,6 +29,17 @@ it("enforces a five-second minimum between full snapshots", () => {
   expect(snapshotRefreshDelay("node.started", 10_000, 12_000)).toBe(3000);
   expect(snapshotRefreshDelay("source.discovered", 10_000, 15_000)).toBe(5000);
   expect(snapshotRefreshDelay("run.completed", 10_000, 10_001)).toBe(0);
+});
+
+it("retries transient snapshot outages without treating them as run failures", () => {
+  expect(isTransientSnapshotFailure(503)).toBe(true);
+  expect(isTransientSnapshotFailure(504)).toBe(true);
+  expect(isTransientSnapshotFailure(404)).toBe(false);
+  expect(snapshotRetryDelay(1)).toBe(1000);
+  expect(snapshotRetryDelay(2)).toBe(2000);
+  expect(snapshotRetryDelay(8)).toBe(10000);
+  expect(SNAPSHOT_RECONNECTING_MESSAGE).toContain("may still be running");
+  expect(SNAPSHOT_RECONNECTING_MESSAGE).toContain("reconnecting");
 });
 
 afterEach(() => vi.useRealTimers());
@@ -64,6 +81,64 @@ it("explains a time limit without an opaque code", () => {
   expect(runFailure("wall_clock_limit_exceeded")).toContain(
     "active-time limit",
   );
+});
+it("explains when a Deep writer response hit its output ceiling", () => {
+  expect(runFailure("writer_output_limit_reached")).toContain("output limit");
+  expect(runFailure("writer_output_limit_reached")).toContain(
+    "collected sources remain available",
+  );
+});
+it("explains Deep mode access from server-owned plan modes", () => {
+  expect(modeAccessMessage("deep", ["focused", "balanced"])).toContain(
+    "Investigator plan",
+  );
+  expect(modeAccessMessage("deep", ["focused", "balanced"])).toContain(
+    "Focused and Balanced",
+  );
+  expect(modeAccessMessage("deep", ["focused", "balanced", "deep"])).toBeNull();
+  expect(modeAccessMessage("deep", undefined)).toBeNull();
+});
+it("turns a server mode denial into a specific upgrade message", () => {
+  expect(
+    researchStartFailure(
+      403,
+      "research mode is not available on this plan",
+      "deep",
+      ["focused", "balanced"],
+    ),
+  ).toContain("Investigator plan");
+  expect(
+    researchStartFailure(
+      403,
+      { message: "Research mode is not available on this plan" },
+      "deep",
+    ),
+  ).toContain("Upgrade to Investigator");
+  expect(
+    researchStartFailure(403, "authentication required", "deep"),
+  ).toBeNull();
+});
+
+it("recognizes only the structured insufficient-research-units response", () => {
+  expect(
+    researchBudgetFailure(402, {
+      message: "insufficient research units",
+      requiredUnits: 2,
+      availableUnits: 0,
+      periodEnd: "2026-11-19T00:00:00Z",
+    }),
+  ).toEqual({
+    requiredUnits: 2,
+    availableUnits: 0,
+    periodEnd: "2026-11-19T00:00:00Z",
+  });
+  expect(researchBudgetFailure(402, "payment required")).toBeNull();
+  expect(
+    researchBudgetFailure(402, { message: "billing configuration unavailable" }),
+  ).toBeNull();
+  expect(
+    researchBudgetFailure(403, { message: "insufficient research units" }),
+  ).toBeNull();
 });
 it.each([
   [6, 180_000],
