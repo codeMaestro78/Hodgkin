@@ -363,6 +363,142 @@ class BillingUnitEntry(Base, TenantScopedMixin):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class BillingCreditPurchase(Base, TenantScopedMixin):
+    """Minimal one-time pack order projection; never stores raw Stripe payloads."""
+
+    __tablename__ = "billing_credit_purchases"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_billing_credit_purchase_tenant_id"),
+        UniqueConstraint(
+            "tenant_id", "billing_account_id", "id", name="uq_billing_credit_purchase_owner"
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "billing_account_id",
+            "request_key_hash",
+            name="uq_billing_credit_purchase_request_key",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "billing_account_id"],
+            ["billing_accounts.tenant_id", "billing_accounts.id"],
+            name="fk_billing_credit_purchase_account",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "user_id"],
+            ["users.tenant_id", "users.id"],
+            name="fk_billing_credit_purchase_user",
+        ),
+        CheckConstraint("length(btrim(package_key)) BETWEEN 1 AND 64"),
+        CheckConstraint("length(btrim(stripe_price_id)) BETWEEN 1 AND 255"),
+        CheckConstraint("amount_minor > 0 AND unit_grant > 0"),
+        CheckConstraint("currency ~ '^[A-Z]{3}$'", name="ck_billing_credit_purchase_currency"),
+        CheckConstraint(
+            "state IN ('pending','paid','failed','refunded','disputed','reconciliation_required')",
+            name="ck_billing_credit_purchase_state",
+        ),
+        UniqueConstraint("stripe_checkout_session_id", name="uq_billing_credit_checkout_session"),
+        UniqueConstraint("stripe_payment_intent_id", name="uq_billing_credit_payment_intent"),
+        Index(
+            "ix_billing_credit_purchase_account_created",
+            "tenant_id",
+            "billing_account_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    billing_account_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    package_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    stripe_price_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    request_key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    stripe_idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    terms_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    amount_minor: Mapped[int] = mapped_column(Integer, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    unit_grant: Mapped[int] = mapped_column(Integer, nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    stripe_checkout_session_id: Mapped[str | None] = mapped_column(String(255), unique=True)
+    stripe_payment_intent_id: Mapped[str | None] = mapped_column(String(255), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class BillingCreditEntry(Base, TenantScopedMixin):
+    """Append-only purchased-credit lot ledger; independent of monthly allowances."""
+
+    __tablename__ = "billing_credit_entries"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "billing_account_id"],
+            ["billing_accounts.tenant_id", "billing_accounts.id"],
+            name="fk_billing_credit_entry_account",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "billing_account_id", "purchase_id"],
+            [
+                "billing_credit_purchases.tenant_id",
+                "billing_credit_purchases.billing_account_id",
+                "billing_credit_purchases.id",
+            ],
+            name="fk_billing_credit_entry_purchase_owner",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "run_id"], ["research_runs.tenant_id", "research_runs.id"]
+        ),
+        CheckConstraint(
+            "(entry_type = 'grant' AND available_delta > 0 "
+            "AND reserved_delta = 0 AND run_id IS NULL) OR "
+            "(entry_type = 'reservation' AND available_delta < 0 "
+            "AND reserved_delta = -available_delta AND run_id IS NOT NULL) OR "
+            "(entry_type = 'consumption' AND available_delta = 0 "
+            "AND reserved_delta < 0 AND run_id IS NOT NULL) OR "
+            "(entry_type = 'release' AND available_delta > 0 "
+            "AND reserved_delta = -available_delta AND run_id IS NOT NULL) OR "
+            "(entry_type = 'reversal' AND available_delta < 0 "
+            "AND reserved_delta = 0 AND run_id IS NULL)",
+            name="ck_billing_credit_entry_shape",
+        ),
+        Index(
+            "uq_billing_credit_owner_idempotency",
+            "tenant_id",
+            "billing_account_id",
+            "idempotency_key",
+            unique=True,
+        ),
+        Index(
+            "ix_billing_credit_purchase_created",
+            "tenant_id",
+            "billing_account_id",
+            "purchase_id",
+            "created_at",
+        ),
+        Index(
+            "uq_billing_credit_run_purchase_type",
+            "tenant_id",
+            "run_id",
+            "purchase_id",
+            "entry_type",
+            unique=True,
+            postgresql_where=text("run_id IS NOT NULL"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    billing_account_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    purchase_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    run_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    entry_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    available_delta: Mapped[int] = mapped_column(Integer, nullable=False)
+    reserved_delta: Mapped[int] = mapped_column(Integer, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class BillingShadowObservation(Base):
     """Immutable, non-enforcing unit-policy snapshot for one admitted run."""
 
