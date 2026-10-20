@@ -195,20 +195,28 @@ async def readiness() -> dict[str, str]:
             migration_table_exists = await connection.scalar(
                 text("SELECT to_regclass('public.alembic_version') IS NOT NULL")
             )
-            migration_ready = bool(
-                migration_table_exists
-                and await connection.scalar(
+            if not migration_table_exists:
+                raise HTTPException(
+                    503, f"database migrations through {required_revision} are required"
+                )
+            migration_history_readable = await connection.scalar(
+                text(
+                    "SELECT has_table_privilege(current_user, "
+                    "'public.alembic_version', 'SELECT')"
+                )
+            )
+            if migration_history_readable:
+                migration_ready = await connection.scalar(
                     text(
                         "SELECT EXISTS (SELECT 1 FROM public.alembic_version "
                         "WHERE version_num >= :revision)"
                     ),
                     {"revision": required_revision},
                 )
-            )
-            if not migration_ready:
-                raise HTTPException(
-                    503, f"database migrations through {required_revision} are required"
-                )
+                if not migration_ready:
+                    raise HTTPException(
+                        503, f"database migrations through {required_revision} are required"
+                    )
             ready = await connection.scalar(
                 text(
                     "SELECT to_regclass('public.runtime_jobs') "
