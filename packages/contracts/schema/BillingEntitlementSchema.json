@@ -11,6 +11,18 @@
         "active"
       ]
     },
+    "allowedModes": {
+      "maxItems": 3,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "focused",
+          "balanced",
+          "deep"
+        ]
+      }
+    },
     "planKey": {
       "anyOf": [
         {
