@@ -7,6 +7,8 @@ import { GET } from "../app/api/billing/entitlement/route";
 import { POST as checkout } from "../app/api/billing/checkout/route";
 import { POST as portal } from "../app/api/billing/portal/route";
 import { GET as availability } from "../app/api/billing/checkout-availability/route";
+import { GET as creditPacks } from "../app/api/billing/credit-packs/route";
+import { POST as creditCheckout } from "../app/api/billing/credit-checkout/route";
 
 beforeEach(() => {
   proxy.mockReset();
@@ -63,5 +65,29 @@ it("forwards Checkout, Portal, and purchase availability through the authenticat
   expect(proxy).toHaveBeenLastCalledWith(
     availabilityRequest,
     "/billing/checkout-availability",
+  );
+
+  const packsRequest = new NextRequest(
+    "http://localhost/api/billing/credit-packs",
+  );
+  await creditPacks(packsRequest);
+  expect(proxy).toHaveBeenLastCalledWith(packsRequest, "/billing/credit-packs");
+
+  const creditCheckoutRequest = new NextRequest(
+    "http://localhost/api/billing/credit-checkout",
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "idempotency-key": "credit-request-key-123",
+      },
+      body: JSON.stringify({ packageKey: "starter" }),
+    },
+  );
+  await creditCheckout(creditCheckoutRequest);
+  expect(proxy).toHaveBeenLastCalledWith(
+    creditCheckoutRequest,
+    "/billing/credit-checkout",
+    "POST",
   );
 });
