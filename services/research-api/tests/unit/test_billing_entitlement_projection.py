@@ -52,6 +52,7 @@ def test_entitlement_balance_is_derived_from_persisted_period_and_ledger():
     assert result.model_dump(by_alias=True) == {
         "status": "active",
         "planKey": "scholar",
+        "allowedModes": ["focused", "balanced"],
         "catalogVersion": "approved-catalog-v1",
         "periodStart": start,
         "periodEnd": datetime(2026, 11, 1, tzinfo=UTC),
