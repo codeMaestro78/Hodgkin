@@ -3,11 +3,17 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Icon } from "../components/ui";
 import { Critter, type CritterKind } from "../components/crew/critter";
+import {
+  checkoutFailureMessage,
+  parseCheckoutAvailability,
+  type CheckoutAvailability,
+  type PaidPlanKey,
+} from "../../lib/billing-pricing";
 
 type Billing = "monthly" | "yearly";
 
 type Plan = {
-  id: string;
+  id: "free" | PaidPlanKey;
   name: string;
   summary: string;
   monthly: string;
@@ -73,19 +79,25 @@ const PLANS: Plan[] = [
 function PlanCard({
   plan,
   billing,
-  checkoutEnabled,
-  signedIn,
+  availability,
+  availablePlans,
+  authStatus,
+  signInRequired,
   busy,
   error,
   onChoose,
+  onRetryAvailability,
 }: {
   plan: Plan;
   billing: Billing;
-  checkoutEnabled: boolean;
-  signedIn: boolean;
+  availability: CheckoutAvailability["status"] | "loading";
+  availablePlans: PaidPlanKey[];
+  authStatus: "unknown" | "signed-in" | "signed-out";
+  signInRequired: boolean;
   busy: string | null;
   error: string;
-  onChoose: (planKey: string) => void;
+  onChoose: (planKey: PaidPlanKey) => void;
+  onRetryAvailability: () => void;
 }) {
   const price = billing === "yearly" ? plan.yearly : plan.monthly;
   return (
@@ -126,14 +138,27 @@ function PlanCard({
         >
           {plan.cta}
         </Link>
-      ) : !checkoutEnabled ? (
+      ) : availability === "loading" ? (
+        <span className="lp-btn lp-btn-paper" aria-disabled="true">
+          Checking checkout…
+        </span>
+      ) : signInRequired ||
+        (authStatus === "signed-out" && availability !== "disabled") ? (
+        <Link href="/login?next=%2Fpricing" className="lp-btn lp-btn-paper">
+          Sign in to choose
+        </Link>
+      ) : availability === "error" ? (
+        <button
+          type="button"
+          className="lp-btn lp-btn-paper"
+          onClick={onRetryAvailability}
+        >
+          Retry checkout status
+        </button>
+      ) : availability === "disabled" || !availablePlans.includes(plan.id) ? (
         <span className="lp-btn lp-btn-paper" aria-disabled="true">
           Paid plans coming soon
         </span>
-      ) : !signedIn ? (
-        <Link href="/login" className="lp-btn lp-btn-paper">
-          Sign in to choose
-        </Link>
       ) : billing === "yearly" ? (
         <span className="lp-btn lp-btn-paper" aria-disabled="true">
           Annual billing coming soon
@@ -143,7 +168,9 @@ function PlanCard({
           type="button"
           className="lp-btn lp-btn-paper"
           disabled={busy !== null}
-          onClick={() => onChoose(plan.id)}
+          onClick={() => {
+            if (plan.id !== "free") onChoose(plan.id);
+          }}
         >
           {busy === plan.id ? "Opening secure checkout…" : plan.cta}
         </button>
@@ -167,39 +194,63 @@ function PlanCard({
 
 export function PricingPlans() {
   const [billing, setBilling] = useState<Billing>("monthly");
-  const [checkoutEnabled, setCheckoutEnabled] = useState(false);
-  const [signedIn, setSignedIn] = useState(false);
+  const [availability, setAvailability] = useState<
+    CheckoutAvailability["status"] | "loading"
+  >("loading");
+  const [authStatus, setAuthStatus] = useState<
+    "unknown" | "signed-in" | "signed-out"
+  >("unknown");
+  const [availablePlans, setAvailablePlans] = useState<PaidPlanKey[]>([]);
+  const [signInRequiredPlan, setSignInRequiredPlan] = useState<PaidPlanKey | null>(null);
+  const [availabilityAttempt, setAvailabilityAttempt] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
   const [checkoutError, setCheckoutError] = useState("");
   const [free, ...paid] = PLANS;
 
   useEffect(() => {
     const controller = new AbortController();
+    setAvailability("loading");
     void fetch("/api/billing/checkout-availability", {
       cache: "no-store",
       signal: controller.signal,
     })
       .then(async (response) => {
-        if (response.status === 401) {
-          setSignedIn(false);
-          return;
-        }
-        if (!response.ok) return;
-        const result = (await response.json()) as {
-          enabled?: boolean;
-          plans?: string[];
-        };
-        setSignedIn(true);
-        setCheckoutEnabled(result.enabled === true);
+        const result: unknown = await response.json().catch(() => null);
+        const parsed = parseCheckoutAvailability(response.ok, result);
+        setAvailability(parsed.status);
+        setAvailablePlans(parsed.plans);
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setAvailability("error");
+          setAvailablePlans([]);
+        }
+      });
+    void fetch("/api/auth/session", {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then((response) => {
+        if (!controller.signal.aborted)
+          setAuthStatus(
+            response.status === 401
+              ? "signed-out"
+              : response.ok
+                ? "signed-in"
+                : "unknown",
+          );
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setAuthStatus("unknown");
+      });
     return () => controller.abort();
-  }, []);
+  }, [availabilityAttempt]);
 
-  async function choosePlan(planKey: string) {
+  async function choosePlan(planKey: PaidPlanKey) {
     if (busy) return;
     setBusy(planKey);
     setCheckoutError("");
+    setSignInRequiredPlan(null);
     try {
       const response = await fetch("/api/billing/checkout", {
         method: "POST",
@@ -209,16 +260,17 @@ export function PricingPlans() {
         },
         body: JSON.stringify({ planKey, interval: "monthly" }),
       });
-      const result = (await response.json()) as {
+      const result = (await response.json().catch(() => null)) as {
         url?: string;
         detail?: string;
-      };
-      if (!response.ok || !result.url) {
-        throw new Error(
-          response.status === 401
-            ? "Sign in again to continue."
-            : "Secure checkout could not be opened. Please try again.",
-        );
+      } | null;
+      if (response.status === 401) {
+        setSignInRequiredPlan(planKey);
+        setBusy(null);
+        return;
+      }
+      if (!response.ok || !result?.url) {
+        throw new Error(checkoutFailureMessage(response.status, result?.detail));
       }
       const target = new URL(result.url);
       if (
@@ -263,11 +315,14 @@ export function PricingPlans() {
             <PlanCard
               plan={free}
               billing={billing}
-              checkoutEnabled={false}
-              signedIn={signedIn}
+              availability="disabled"
+              availablePlans={[]}
+              authStatus={authStatus}
+              signInRequired={false}
               busy={busy}
               error=""
               onChoose={choosePlan}
+              onRetryAvailability={() => setAvailabilityAttempt((value) => value + 1)}
             />
           )}
         </div>
@@ -277,11 +332,14 @@ export function PricingPlans() {
               key={plan.id}
               plan={plan}
               billing={billing}
-              checkoutEnabled={checkoutEnabled}
-              signedIn={signedIn}
+              availability={availability}
+              availablePlans={availablePlans}
+              authStatus={authStatus}
+              signInRequired={signInRequiredPlan === plan.id}
               busy={busy}
               error={checkoutError}
               onChoose={choosePlan}
+              onRetryAvailability={() => setAvailabilityAttempt((value) => value + 1)}
             />
           ))}
         </div>
