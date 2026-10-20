@@ -54,9 +54,12 @@ def receipt(**overrides):
 def test_worst_case_uses_run_token_ceilings_and_admission_is_inclusive():
     budget = resolve_mode_budget("deep")
     worst = live.worst_case_model_usd(budget, "gpt-4o-mini", "openai")
-    assert worst == Decimal("0.027000")
-    assert live.admit(Decimal("2.973"), worst, Decimal("3.00"))
-    assert not live.admit(Decimal("2.973001"), worst, Decimal("3.00"))
+    assert budget.max_output_tokens == 40_000
+    assert worst == Decimal("0.039000")
+    assert live.admit(Decimal("2.961"), worst, Decimal("3.00"))
+    assert not live.admit(Decimal("2.961001"), worst, Decimal("3.00"))
+    archived = resolve_mode_budget("deep", policy_version="research-mode-policy-v1")
+    assert live.worst_case_model_usd(archived, "gpt-4o-mini", "openai") == Decimal("0.027000")
     assert live.worst_case_model_usd(budget, "unpriced", "openai") == budget.max_estimated_cost_usd
 
 
