@@ -1,0 +1,233 @@
+/* About — extends the shared info sheet (.lg-* in info.css) with the
+   principle tiles, pipeline rail, and crew row. Same paper system. */
+
+.ab-hero {
+  text-align: left;
+}
+
+.ab-accent {
+  color: var(--lp-cite);
+}
+
+.ab-jump {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 26px;
+}
+.ab-jump a {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 15px;
+  border: 1px solid var(--lp-line-strong);
+  border-radius: 999px;
+  color: var(--lp-muted);
+  font-size: 13.5px;
+  font-weight: 600;
+  transition: color 160ms var(--lp-inout), border-color 160ms var(--lp-inout);
+}
+.ab-jump a svg {
+  color: var(--lp-cite);
+  flex: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  .ab-jump a:hover {
+    color: var(--lp-ink);
+    border-color: var(--lp-ink);
+  }
+}
+
+/* Section headings sit a notch above the legal sheet's dense h2s but below
+   the landing display scale. */
+.ab .lg-section {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 34px 24px 6px;
+}
+.ab-h2 {
+  margin: 0 0 12px;
+  font-size: clamp(26px, 4vw, 34px);
+  font-weight: 400;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+}
+
+/* Principles. */
+.ab-principles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 26px;
+}
+.ab-principle {
+  padding: 24px 26px;
+  background: var(--lp-sand);
+  border: 1px solid var(--lp-line);
+  border-radius: 16px;
+  transition: border-color 200ms var(--lp-inout);
+}
+.ab-principle:hover {
+  border-color: var(--lp-line-strong);
+}
+.ab-principle-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: var(--lp-cite-soft);
+  border-radius: 10px;
+  color: var(--lp-cite);
+}
+.ab-principle h3 {
+  margin: 14px 0 0;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.ab-principle p {
+  margin: 8px 0 0;
+  color: var(--lp-muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+/* Pipeline rail — the real four stages, numbered like the workspace does. */
+.ab-pipeline {
+  display: grid;
+  gap: 12px;
+  margin-top: 26px;
+  counter-reset: stage;
+}
+.ab-stage {
+  position: relative;
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 4px 18px;
+  padding: 20px 26px 20px 20px;
+  background: var(--lp-sand);
+  border: 1px solid var(--lp-line);
+  border-radius: 16px;
+}
+.ab-stage::before {
+  content: "";
+  position: absolute;
+  left: 20px;
+  top: 76px;
+  bottom: -14px;
+  width: 1px;
+  background: var(--lp-line);
+}
+.ab-stage:last-child::before {
+  display: none;
+}
+.ab-stage-n {
+  grid-row: span 2;
+  align-self: start;
+  justify-self: center;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  background: var(--lp-paper);
+  border: 1px solid var(--lp-line-strong);
+  border-radius: 50%;
+  color: var(--lp-cite);
+  font-size: 13px;
+  font-weight: 600;
+}
+.ab-stage h3 {
+  margin: 6px 0 0;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.ab-stage p {
+  margin: 6px 0 0;
+  grid-column: 2;
+  color: var(--lp-muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+/* Honesty sheet prose. */
+.ab-prose p {
+  margin: 0 0 14px;
+  font-size: 15px;
+  line-height: 1.7;
+}
+.ab-prose p:last-child {
+  margin-bottom: 0;
+}
+
+/* Crew. */
+.ab-crew {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 26px;
+}
+.ab-member {
+  padding: 20px 20px 22px;
+  background: var(--lp-sand);
+  border: 1px solid var(--lp-line);
+  border-radius: 16px;
+  text-align: center;
+}
+.ab-member-figure {
+  display: grid;
+  place-items: center;
+  min-height: 78px;
+}
+.ab-member h3 {
+  margin: 8px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.ab-member p {
+  margin: 6px 0 0;
+  color: var(--lp-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.ab-crew-note {
+  margin-top: 14px;
+  font-size: 13px;
+}
+
+.ab-end-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+@media (max-width: 900px) {
+  .ab-principles,
+  .ab-crew {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 720px) {
+  .ab-principles,
+  .ab-crew {
+    grid-template-columns: 1fr;
+  }
+  .ab-stage {
+    grid-template-columns: 40px minmax(0, 1fr);
+    padding: 16px 18px 16px 14px;
+  }
+  .ab-stage-n {
+    width: 36px;
+    height: 36px;
+    font-size: 11px;
+  }
+  .ab-stage::before {
+    left: 31px;
+    top: 62px;
+  }
+  .ab-stage p {
+    grid-column: 2;
+  }
+}
