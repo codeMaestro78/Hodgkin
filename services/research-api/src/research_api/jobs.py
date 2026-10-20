@@ -26,7 +26,7 @@ from research_api.db.models import (
     RuntimeJob,
     SubQuestionAttempt,
 )
-from research_api.db.session import session_factory, tenant_session
+from research_api.db.session import session_factory, set_user_context, tenant_session
 from research_api.events.outbox import EventOutbox
 from research_api.repositories.runs import RunBudgetDefaults, RunRepository
 from research_api.runtime_context import JobFence
@@ -76,31 +76,53 @@ REPAIR_MODE_OPENALEX_GRAPH_VERSION = "research-v14-criterion-budget-bounded-repa
 REPAIR_MODE_OPENALEX_SERPER_GRAPH_VERSION = (
     "research-v14-criterion-budget-bounded-repair-openalex-serper"
 )
+TECHNICAL_MODE_OPENALEX_SERPER_GRAPH_VERSION = (
+    "research-v17-technical-results-protected-tail-openalex-serper"
+)
+TECHNICAL_MODE_GRAPH_VERSION = "research-v17-technical-results-protected-tail"
+TECHNICAL_MODE_SERPER_GRAPH_VERSION = "research-v17-technical-results-protected-tail-serper"
+TECHNICAL_MODE_OPENALEX_GRAPH_VERSION = "research-v17-technical-results-protected-tail-openalex"
+PROTECTED_MODE_GRAPH_VERSION = "research-v16-protected-assessment-tail"
+PROTECTED_MODE_SERPER_GRAPH_VERSION = "research-v16-protected-assessment-tail-serper"
+PROTECTED_MODE_OPENALEX_GRAPH_VERSION = "research-v16-protected-assessment-tail-openalex"
+PROTECTED_MODE_OPENALEX_SERPER_GRAPH_VERSION = (
+    "research-v16-protected-assessment-tail-openalex-serper"
+)
+PROTECTED_REPAIR_MODE_GRAPH_VERSION = "research-v16-protected-assessment-tail-repair"
+PROTECTED_REPAIR_MODE_SERPER_GRAPH_VERSION = "research-v16-protected-assessment-tail-repair-serper"
+PROTECTED_REPAIR_MODE_OPENALEX_GRAPH_VERSION = (
+    "research-v16-protected-assessment-tail-repair-openalex"
+)
+PROTECTED_REPAIR_MODE_OPENALEX_SERPER_GRAPH_VERSION = (
+    "research-v16-protected-assessment-tail-repair-openalex-serper"
+)
 
 
 def graph_version_for(settings: Settings, *, explicit_mode: bool) -> str:
     """Pin discovery and bounded-repair capabilities when the job is created."""
     if explicit_mode:
         repair_versions = settings.BOUNDED_GAP_REPAIR_ENABLED
-        if settings.OPENALEX_DISCOVERY_ENABLED:
-            if settings.SERPER_DISCOVERY_ENABLED:
-                return (
-                    REPAIR_MODE_OPENALEX_SERPER_GRAPH_VERSION
-                    if repair_versions
-                    else SAFE_MODE_OPENALEX_SERPER_GRAPH_VERSION
-                )
-            return (
-                REPAIR_MODE_OPENALEX_GRAPH_VERSION
-                if repair_versions
-                else SAFE_MODE_OPENALEX_GRAPH_VERSION
-            )
-        if settings.SERPER_DISCOVERY_ENABLED:
-            return (
-                REPAIR_MODE_SERPER_GRAPH_VERSION
-                if repair_versions
-                else SAFE_MODE_SERPER_GRAPH_VERSION
-            )
-        return REPAIR_MODE_GRAPH_VERSION if repair_versions else SAFE_MODE_GRAPH_VERSION
+        discovery_key = (settings.OPENALEX_DISCOVERY_ENABLED, settings.SERPER_DISCOVERY_ENABLED)
+        if settings.TECHNICAL_RESULTS_ENABLED and not repair_versions:
+            return {
+                (False, False): TECHNICAL_MODE_GRAPH_VERSION,
+                (False, True): TECHNICAL_MODE_SERPER_GRAPH_VERSION,
+                (True, False): TECHNICAL_MODE_OPENALEX_GRAPH_VERSION,
+                (True, True): TECHNICAL_MODE_OPENALEX_SERPER_GRAPH_VERSION,
+            }[discovery_key]
+        if repair_versions:
+            return {
+                (False, False): PROTECTED_REPAIR_MODE_GRAPH_VERSION,
+                (False, True): PROTECTED_REPAIR_MODE_SERPER_GRAPH_VERSION,
+                (True, False): PROTECTED_REPAIR_MODE_OPENALEX_GRAPH_VERSION,
+                (True, True): PROTECTED_REPAIR_MODE_OPENALEX_SERPER_GRAPH_VERSION,
+            }[discovery_key]
+        return {
+            (False, False): PROTECTED_MODE_GRAPH_VERSION,
+            (False, True): PROTECTED_MODE_SERPER_GRAPH_VERSION,
+            (True, False): PROTECTED_MODE_OPENALEX_GRAPH_VERSION,
+            (True, True): PROTECTED_MODE_OPENALEX_SERPER_GRAPH_VERSION,
+        }[discovery_key]
     if settings.OPENALEX_DISCOVERY_ENABLED:
         return (
             OPENALEX_SERPER_GRAPH_VERSION
@@ -212,6 +234,7 @@ async def schedule_due(session: AsyncSession, tenant: uuid.UUID, settings: Setti
     for schedule in schedules:
         if (count or 0) >= settings.MAX_PENDING_RUNS_PER_TENANT:
             break
+        await set_user_context(session, str(schedule.user_id))
         data = {
             **schedule.budget,
             "max_estimated_cost_usd": Decimal(schedule.budget["max_estimated_cost_usd"]),
@@ -386,6 +409,18 @@ async def claim(tenant: uuid.UUID, owner: uuid.UUID, settings: Settings) -> JobF
                 REPAIR_MODE_SERPER_GRAPH_VERSION,
                 REPAIR_MODE_OPENALEX_GRAPH_VERSION,
                 REPAIR_MODE_OPENALEX_SERPER_GRAPH_VERSION,
+                TECHNICAL_MODE_GRAPH_VERSION,
+                TECHNICAL_MODE_SERPER_GRAPH_VERSION,
+                TECHNICAL_MODE_OPENALEX_GRAPH_VERSION,
+                TECHNICAL_MODE_OPENALEX_SERPER_GRAPH_VERSION,
+                PROTECTED_MODE_GRAPH_VERSION,
+                PROTECTED_MODE_SERPER_GRAPH_VERSION,
+                PROTECTED_MODE_OPENALEX_GRAPH_VERSION,
+                PROTECTED_MODE_OPENALEX_SERPER_GRAPH_VERSION,
+                PROTECTED_REPAIR_MODE_GRAPH_VERSION,
+                PROTECTED_REPAIR_MODE_SERPER_GRAPH_VERSION,
+                PROTECTED_REPAIR_MODE_OPENALEX_GRAPH_VERSION,
+                PROTECTED_REPAIR_MODE_OPENALEX_SERPER_GRAPH_VERSION,
             }
             if run.mode is not None
             else job.graph_version
