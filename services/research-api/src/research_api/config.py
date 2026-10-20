@@ -58,6 +58,10 @@ class Settings(BaseSettings):
     DISPATCHER_ENABLED: bool = True
     REDIS_URL: str = "redis://localhost:56379/0"
     SSE_REDIS_WAKEUPS_ENABLED: bool = True
+    LANGSMITH_TRACING_ENABLED: bool = False
+    LANGSMITH_API_KEY: SecretStr | None = None
+    LANGSMITH_ENDPOINT: str | None = Field(default=None, min_length=1, max_length=500)
+    LANGSMITH_PROJECT: str = Field(default="research-api", min_length=1, max_length=200)
     LLM_PROVIDER: Literal["openai", "openrouter"] = "openai"
     LLM_MODEL_NAME: str = Field(default="gpt-4o-mini", min_length=1, max_length=200)
     LLM_PLANNER_PROVIDER: Literal["openai", "openrouter"] | None = None
@@ -68,7 +72,7 @@ class Settings(BaseSettings):
     LLM_CLAIM_REVIEW_MODEL_NAME: str | None = Field(default=None, min_length=1, max_length=200)
     PROVIDER_MAX_ATTEMPTS: int = Field(default=3, ge=1, le=3)
     PROVIDER_TIMEOUT_SECONDS: float = Field(default=30, gt=0, le=120)
-    MODEL_WRITER_TIMEOUT_SECONDS: float = Field(default=45, gt=0, le=120)
+    MODEL_WRITER_TIMEOUT_SECONDS: float = Field(default=60, gt=0, le=120)
     OPENAI_API_KEY: SecretStr | None = None
     OPENROUTER_API_KEY: SecretStr | None = None
     TAVILY_API_KEY: SecretStr | None = None
@@ -81,6 +85,8 @@ class Settings(BaseSettings):
     # New explicit-mode runs keep bounded repair off unless this is explicitly enabled.
     BOUNDED_GAP_REPAIR_ENABLED: bool = False
     TECHNICAL_RESULTS_ENABLED: bool = False
+    # Opt-in typed measurements; requires technical results and bounded repair disabled.
+    SOURCE_MEASUREMENTS_ENABLED: bool = False
     # Records mode-unit observations only; never reserves or rejects runs.
     BILLING_SHADOW_ACCOUNTING_ENABLED: bool = False
     # Fail-closed monthly unit admission; remains opt-in until migrations and rollout gates pass.

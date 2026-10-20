@@ -33,7 +33,7 @@ from research_api.db.models import (
     User,
 )
 from research_api.db.session import tenant_session
-from research_api.jobs import SAFE_MODE_GRAPH_VERSION, SAFE_MODE_SERPER_GRAPH_VERSION
+from research_api.jobs import PROTECTED_MODE_GRAPH_VERSION, PROTECTED_MODE_SERPER_GRAPH_VERSION
 from research_api.mode_planning import CoveragePlan, attach_coverage_plan, planning_admission
 from research_api.repositories.budgets import BudgetExceededError, BudgetReservationRepository
 from research_api.repositories.runs import RunBudgetDefaults, RunRepository
@@ -112,7 +112,7 @@ async def test_explicit_admission_projection_and_job(identity, mode, operations,
             budget.max_sources,
             budget.max_wall_clock_ms,
         ) == (operations, operations, sources, wall)
-        assert job.graph_version == SAFE_MODE_GRAPH_VERSION
+        assert job.graph_version == PROTECTED_MODE_GRAPH_VERSION
     projection = await api.get_research_run(run_id)
     assert projection["quickMode"] is False
     assert projection["modeResolution"] == "explicit"
@@ -378,7 +378,7 @@ async def test_serper_route_is_pinned_at_enqueue(identity, monkeypatch):
     async with tenant_session(str(tenant)) as session:
         assert (
             await session.get(RuntimeJob, run_id)
-        ).graph_version == SAFE_MODE_SERPER_GRAPH_VERSION
+        ).graph_version == PROTECTED_MODE_SERPER_GRAPH_VERSION
 
 
 async def test_repository_resolves_absent_explicit_budget(identity):
@@ -652,7 +652,9 @@ async def test_edit_preserves_repair_reserve_and_projection_admission(identity, 
         assert coverage.repair_sources_reserved == 1
         assert coverage.sources_per_question == (5,)
         budget = await session.scalar(select(Budget).where(Budget.run_id == run_id))
-        coverage.validate_budget(budget, mode="focused", policy_version="research-mode-policy-v1")
+        coverage.validate_budget(
+            budget, mode="focused", policy_version=mode_policy.MODE_POLICY_VERSION
+        )
 
 
 @pytest.mark.parametrize(

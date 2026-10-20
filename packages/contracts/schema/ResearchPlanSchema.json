@@ -1,5 +1,5 @@
 {
-  "$id": "https://schemas.research.local/1.6/ResearchPlanSchema.json",
+  "$id": "https://schemas.research.local/1.7/ResearchPlanSchema.json",
   "title": "ResearchPlanSchema",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
@@ -12,7 +12,8 @@
         "1.3",
         "1.4",
         "1.5",
-        "1.6"
+        "1.6",
+        "1.7"
       ]
     },
     "id": {

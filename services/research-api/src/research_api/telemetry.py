@@ -7,15 +7,187 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import UTC, datetime
+from functools import lru_cache
 from time import monotonic
 from typing import Any
 
 from research_api.config import get_settings
 
 logger = logging.getLogger("research_api.dependencies")
+PROCESS_INSTANCE_ID = str(uuid.uuid4())
 dependency_run: ContextVar[uuid.UUID | None] = ContextVar("dependency_run", default=None)
 request_id: ContextVar[str | None] = ContextVar("request_id", default=None)
 MILESTONES = {"research.first_verified_finding"}
+
+
+def _safe_trace_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    """Allow only explicit, bounded correlation fields into LangSmith."""
+    safe: dict[str, Any] = {}
+    run_id_value = metadata.get("run_id")
+    if isinstance(run_id_value, str):
+        try:
+            safe["run_id"] = str(uuid.UUID(run_id_value))
+        except ValueError:
+            pass
+    graph_version = metadata.get("graph_version")
+    if (
+        isinstance(graph_version, str)
+        and bool(graph_version)
+        and len(graph_version) <= 100
+        and graph_version.replace("-", "").replace("_", "").replace(".", "").isalnum()
+    ):
+        safe["graph_version"] = graph_version
+    mode = metadata.get("mode")
+    if isinstance(mode, str) and mode in {"focused", "balanced", "deep", "legacy"}:
+        safe["mode"] = mode
+    return safe
+
+
+def _redact_trace_error(value: dict[str, Any]) -> dict[str, str]:
+    """Do not upload provider exception text, which may contain request data."""
+    return {"error": "exception details redacted"} if "error" in value else {}
+
+
+@contextmanager
+def _disabled_trace_scope(factory: Any, *, started: float) -> Iterator[None]:
+    """Suppress environment-enabled tracing if opt-in setup did not succeed."""
+    try:
+        context = factory(enabled=False)
+        context.__enter__()
+    except Exception as exc:
+        operation_event("langsmith.trace.suppress", started=started, outcome="failed", error=exc)
+        yield
+        return
+    try:
+        yield
+    except BaseException as body_error:
+        try:
+            context.__exit__(type(body_error), body_error, body_error.__traceback__)
+        except Exception as trace_error:
+            operation_event(
+                "langsmith.trace.suppress", started=started, outcome="failed", error=trace_error
+            )
+        raise
+    else:
+        try:
+            context.__exit__(None, None, None)
+        except Exception as exc:
+            operation_event(
+                "langsmith.trace.suppress", started=started, outcome="failed", error=exc
+            )
+
+
+@lru_cache(maxsize=4)
+def _langsmith_client(api_key: str, endpoint: str | None) -> Any:
+    """Create one privacy-configured client per process/configuration."""
+    from langsmith import Client
+
+    return Client(
+        api_key=api_key,
+        api_url=endpoint,
+        hide_inputs=True,
+        hide_outputs=True,
+        hide_metadata=_safe_trace_metadata,
+        anonymizer=_redact_trace_error,
+        omit_traced_runtime_info=True,
+    )
+
+
+@contextmanager
+def langsmith_trace_context(
+    settings: Any,
+    *,
+    run_id: uuid.UUID,
+    graph_version: str,
+    mode: str | None,
+) -> Iterator[None]:
+    """Enable privacy-minimized LangGraph tracing only when explicitly configured.
+
+    LangSmith is diagnostic only: initialization and export failures are logged
+    without run contents and must not change the research result.
+    """
+    started = monotonic()
+    trace_factory: Any | None = None
+    try:
+        from langsmith.run_helpers import tracing_context
+        trace_factory = tracing_context
+
+        tracing_enabled = (
+            settings.LANGSMITH_TRACING_ENABLED and settings.LANGSMITH_API_KEY is not None
+        )
+        if tracing_enabled:
+            client = _langsmith_client(
+                settings.LANGSMITH_API_KEY.get_secret_value(), settings.LANGSMITH_ENDPOINT
+            )
+            metadata = {
+                "run_id": str(run_id),
+                "graph_version": graph_version[:100],
+                "mode": mode if mode in {"focused", "balanced", "deep"} else "legacy",
+            }
+            trace_context = tracing_context(
+                client=client,
+                enabled=True,
+                project_name=settings.LANGSMITH_PROJECT,
+                metadata=metadata,
+            )
+        else:
+            trace_context = tracing_context(enabled=False)
+            if settings.LANGSMITH_TRACING_ENABLED:
+                operation_event(
+                    "langsmith.trace.setup",
+                    started=started,
+                    outcome="rejected",
+                    reason="missing_api_key",
+                )
+        trace_context.__enter__()
+    except Exception as exc:
+        operation_event(
+            "langsmith.trace.setup", started=started, outcome="failed", error=exc
+        )
+        if trace_factory is None:
+            yield
+        else:
+            with _disabled_trace_scope(trace_factory, started=started):
+                yield
+        return
+
+    try:
+        yield
+    except BaseException as exc:
+        try:
+            trace_context.__exit__(type(exc), exc, exc.__traceback__)
+        except Exception as trace_error:
+            operation_event(
+                "langsmith.trace.export", started=started, outcome="failed", error=trace_error
+            )
+        raise
+    else:
+        try:
+            trace_context.__exit__(None, None, None)
+        except Exception as exc:
+            operation_event(
+                "langsmith.trace.export", started=started, outcome="failed", error=exc
+            )
+
+
+def dispatcher_slot_event(
+    *,
+    worker_instance_id: uuid.UUID,
+    run_id: uuid.UUID,
+    phase: str,
+    active_workers: int,
+    concurrency_limit: int,
+) -> None:
+    """Emit one replica-local worker-slot transition for log aggregation."""
+    operation_event(
+        "dispatcher.worker.slot",
+        started=monotonic(),
+        phase=phase,
+        workerInstanceId=str(worker_instance_id),
+        runId=str(run_id),
+        activeWorkers=max(0, active_workers),
+        concurrencyLimit=max(1, concurrency_limit),
+    )
 
 
 def error_facts(error: BaseException) -> list[dict[str, object]]:
@@ -94,6 +266,7 @@ def operation_event(
                 "recordedAt": datetime.now(UTC).isoformat(timespec="milliseconds"),
                 "requestId": request_id.get(),
                 "runId": str(dependency_run.get()) if dependency_run.get() else None,
+                "processInstanceId": PROCESS_INSTANCE_ID,
                 "durationMs": duration_ms,
                 "outcome": outcome,
                 "errors": error_facts(error) if error else [],
@@ -174,6 +347,7 @@ def dependency_event(
             {
                 "event": "dependency.outcome",
                 "requestId": request_id.get(),
+                "processInstanceId": PROCESS_INSTANCE_ID,
                 "provider": provider,
                 "operation": operation,
                 "recordedAt": datetime.now(UTC).isoformat(timespec="milliseconds"),

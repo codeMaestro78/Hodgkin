@@ -1,5 +1,5 @@
 {
-  "$id": "https://schemas.research.local/1.6/Sha256Schema.json",
+  "$id": "https://schemas.research.local/1.7/Sha256Schema.json",
   "title": "Sha256Schema",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "string",

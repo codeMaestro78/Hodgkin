@@ -51,6 +51,12 @@ def test_writer_can_use_gpt_6_luna_on_openai_independently():
     )
 
 
+def test_writer_timeout_has_a_bounded_window_for_long_structured_assessments():
+    settings = Settings(_env_file=None, OPENAI_API_KEY="fixture")
+
+    assert settings.MODEL_WRITER_TIMEOUT_SECONDS == 60
+
+
 def test_saved_routing_accepts_legacy_partial_snapshots():
     legacy: dict[str, object] = {"provider": "openai", "model": "gpt-4o-mini"}
     routes = normalize_routing({"planner": legacy})

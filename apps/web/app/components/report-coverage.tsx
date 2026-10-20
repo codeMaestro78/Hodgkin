@@ -4,9 +4,15 @@ import type {
   ReportDocumentV3,
   ReportDocumentV4,
   ReportDocumentV5,
+  ReportDocumentV6,
 } from "@research/contracts";
 
-type AssessedReport = ReportDocumentV2 | ReportDocumentV3 | ReportDocumentV4 | ReportDocumentV5;
+type AssessedReport =
+  | ReportDocumentV2
+  | ReportDocumentV3
+  | ReportDocumentV4
+  | ReportDocumentV5
+  | ReportDocumentV6;
 
 const outcomeLabels = {
   established: "Established",
@@ -266,7 +272,7 @@ function NarrativeComposition({
   document,
   dimensions,
 }: {
-  document: ReportDocumentV4 | ReportDocumentV5;
+  document: ReportDocumentV4 | ReportDocumentV5 | ReportDocumentV6;
   dimensions: Map<string, string>;
 }) {
   const narrative = document.narrative;

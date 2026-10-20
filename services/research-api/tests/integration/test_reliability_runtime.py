@@ -31,7 +31,7 @@ from research_api.db.models import (
 from research_api.db.session import engine as runtime_engine
 from research_api.db.session import tenant_session
 from research_api.execution import finish_node, start_node
-from research_api.graph import builder
+from research_api.graph import builder, collection
 from research_api.model_budget import model_response, model_run
 from research_api.repositories.budgets import ReservationReplayError
 from research_api.repositories.runs import RunBudgetDefaults, RunRepository
@@ -124,7 +124,7 @@ async def test_report_audit_retains_conflicts_but_publishes_only_supported_asser
                 await session.flush()
                 return [source.id]
 
-    monkeypatch.setattr(builder, "TavilyEvidenceIngestor", Ingestor)
+    monkeypatch.setattr(collection, "TavilyEvidenceIngestor", Ingestor)
 
     async def context(_settings, *, sources, **_):
         return [builder.SourceMaterial(source=sources[0], content=quote)], "SOURCE [1] " + quote
@@ -191,7 +191,7 @@ async def test_report_audit_retains_conflicts_but_publishes_only_supported_asser
         )
         monkeypatch.setattr(builder, "_model_response", candidate_call)
 
-    async def reviews(_settings, *, claims):
+    async def reviews(_settings, *, claims, **_kwargs):
         return [
             builder.SemanticReview(
                 claim_index=index,

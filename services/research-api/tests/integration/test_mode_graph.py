@@ -8,7 +8,7 @@ from sqlalchemy import select
 from research_api.config import Settings
 from research_api.db.models import Report, ResearchRun
 from research_api.db.session import tenant_session
-from research_api.graph import builder
+from research_api.graph import builder, collection
 from research_api.mode_policy import MODE_POLICY_VERSION, resolve_mode_budget
 from research_api.repositories.runs import RunRepository
 from tests.integration.test_reliability_runtime import seed
@@ -39,7 +39,7 @@ async def test_explicit_deep_evergreen_empty_collection_is_honest_report(monkeyp
             invocations.append(kwargs)
             return []
 
-    monkeypatch.setattr(builder, "TavilyEvidenceIngestor", EmptyIngestor)
+    monkeypatch.setattr(collection, "TavilyEvidenceIngestor", EmptyIngestor)
     writer = AsyncMock(side_effect=AssertionError("empty evidence must not call a writer"))
     monkeypatch.setattr(builder, "_synthesize_with_openai", writer)
     await builder.run_graph(

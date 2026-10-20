@@ -1348,11 +1348,453 @@ class ReportDocument5(BaseModel):
     technical_results: list[TechnicalResult] = Field(..., alias="technicalResults", max_length=12)
 
 
+class Section10(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    id: Id
+    title: constr(min_length=1, max_length=200)
+    claim_ids: list[ClaimId] = Field(..., alias="claimIds", max_length=40)
+
+
+class Section11(StrEnum):
+    overview = "overview"
+    mechanisms = "mechanisms"
+    comparison = "comparison"
+    risks = "risks"
+    implications = "implications"
+
+
+class Finding5(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    id: UUID
+    text: constr(min_length=1, max_length=1200)
+    section: Section11
+    citation_ids: list[CitationId] = Field(..., alias="citationIds", max_length=8, min_length=1)
+    source_ids: list[SourceId] = Field(..., alias="sourceIds", max_length=8, min_length=1)
+
+
+class Status30(StrEnum):
+    addressed = "addressed"
+    unresolved = "unresolved"
+
+
+class Basis26(StrEnum):
+    model_linked_verified_findings = "model_linked_verified_findings"
+    not_established = "not_established"
+
+
+class Requirements10(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    id: Literal["question"]
+    origin: Literal["main_question"]
+    text: constr(min_length=1, max_length=10000)
+    status: Status30
+    claim_ids: list[ClaimId] = Field(..., alias="claimIds", max_length=40)
+    basis: Basis26
+
+
+class Requirements11(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    id: constr(pattern=r"^requirement-([1-9]|1[0-9]|20)$")
+    origin: Literal["user_requirement"]
+    text: constr(pattern=r"\S", min_length=1, max_length=500)
+    status: Status30
+    claim_ids: list[ClaimId] = Field(..., alias="claimIds", max_length=40)
+    basis: Basis26
+
+
+class Basis28(StrEnum):
+    collection_provenance = "collection_provenance"
+    not_established = "not_established"
+
+
+class QuestionCoverageItem5(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    id: UUID
+    text: constr(min_length=1, max_length=1000)
+    status: Status30
+    claim_ids: list[ClaimId] = Field(..., alias="claimIds", max_length=40)
+    basis: Basis28
+
+
+class Status33(StrEnum):
+    partial = "partial"
+    insufficient_evidence = "insufficient_evidence"
+
+
+class Quality5(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    status: Status33
+    reason: constr(min_length=1, max_length=1000)
+    verified_findings: conint(ge=0, le=40) = Field(..., alias="verifiedFindings")
+    excluded_findings: conint(ge=0, le=9007199254740991) = Field(..., alias="excludedFindings")
+
+
+class Status34(StrEnum):
+    not_started = "not_started"
+    searching = "searching"
+    evidence_found = "evidence_found"
+    verified_covered = "verified_covered"
+    unresolved = "unresolved"
+    blocked = "blocked"
+
+
+class Basis29(StrEnum):
+    criterion_review_v1 = "criterion-review-v1"
+    not_assessed = "not_assessed"
+
+
+class Outcome8(StrEnum):
+    met = "met"
+    partial = "partial"
+    not_met = "not_met"
+    unknown = "unknown"
+
+
+class Criterion4(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    id: UUID
+    outcome: Outcome8
+    claim_ids: list[ClaimId] = Field(..., alias="claimIds", max_length=40)
+    basis: Basis29
+    reason: constr(pattern=r"\S", min_length=1, max_length=1000)
+
+
+class Dimension4(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    id: UUID
+    label: constr(pattern=r"\S", min_length=1, max_length=1000)
+    requirement_ids: list[RequirementId] = Field(
+        ..., alias="requirementIds", max_length=21, min_length=1
+    )
+    status: Status34
+    claim_ids: list[ClaimId] = Field(..., alias="claimIds", max_length=40)
+    reason: constr(pattern=r"\S", min_length=1, max_length=1000)
+    basis: Basis29
+    criteria: list[Criterion4] = Field(..., max_length=16, min_length=1)
+
+
+class Outcome9(StrEnum):
+    established = "established"
+    partially_established = "partially_established"
+    not_established = "not_established"
+    not_assessed = "not_assessed"
+
+
+class RequirementOutcome4(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    id: constr(pattern=r"^(question|requirement-([1-9]|1[0-9]|20))$")
+    outcome: Outcome9
+    dimension_ids: list[DimensionId] = Field(..., alias="dimensionIds", max_length=32)
+    claim_ids: list[ClaimId] = Field(..., alias="claimIds", max_length=40)
+    reason: constr(pattern=r"\S", min_length=1, max_length=1000)
+
+
+class Status35(StrEnum):
+    supported = "supported"
+    not_established = "not_established"
+
+
+class Cell4(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    alternative: constr(min_length=1, max_length=300)
+    status: Status35
+    claim_ids: list[ClaimId] = Field(..., alias="claimIds", max_length=40)
+
+
+class Comparison4(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    dimension_id: UUID = Field(..., alias="dimensionId")
+    cells: list[Cell4] = Field(..., max_length=20, min_length=2)
+
+
+class Kind4(StrEnum):
+    same_content = "same_content"
+    same_work = "same_work"
+    same_publisher = "same_publisher"
+
+
+class Basis31(StrEnum):
+    observed_content_hash_match = "observed_content_hash_match"
+    observed_doi_match = "observed_doi_match"
+    verified_publisher_metadata_match = "verified_publisher_metadata_match"
+
+
+class SourceRelationship3(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    from_source_id: UUID = Field(..., alias="fromSourceId")
+    to_source_id: UUID = Field(..., alias="toSourceId")
+    kind: Kind4
+    confidence: Literal["observed"]
+    basis: Basis31
+    identifier: constr(min_length=1, max_length=2500) | None = None
+
+
+class Conflict3(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    id: UUID
+    dimension_id: UUID = Field(..., alias="dimensionId")
+    criterion_ids: list[CriterionId] = Field(..., alias="criterionIds", max_length=16, min_length=1)
+    claim_ids: list[ClaimId] = Field(..., alias="claimIds", max_length=40, min_length=2)
+    status: Literal["potential"]
+    basis: Literal["criterion-review-v1"]
+    reason: Literal["Independent criterion review nominated a potential disagreement."]
+
+
+class Status36(StrEnum):
+    composed = "composed"
+    not_composed = "not_composed"
+
+
+class Sentence2(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    claim_id: UUID = Field(..., alias="claimId")
+    citation_ids: list[CitationId] = Field(..., alias="citationIds", max_length=8, min_length=1)
+    origin: Origin
+
+
+class Block2(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    id: constr(pattern=r"^narrative-([1-9]|1[0-4])$")
+    role: Role
+    dimension_id: UUID | None = Field(..., alias="dimensionId")
+    sentences: list[Sentence2] = Field(..., max_length=8, min_length=1)
+
+
+class Narrative2(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    basis: Literal["narrative-composition-v1"]
+    status: Status36
+    reason: Reason | None
+    blocks: list[Block2] = Field(..., max_length=14)
+    narrative_claim_ids: list[NarrativeClaimId] = Field(
+        ..., alias="narrativeClaimIds", max_length=16
+    )
+    proposed_sentence_count: conint(ge=0, le=112) = Field(..., alias="proposedSentenceCount")
+    published_sentence_count: conint(ge=0, le=112) = Field(..., alias="publishedSentenceCount")
+    rejected_sentence_count: conint(ge=0, le=112) = Field(..., alias="rejectedSentenceCount")
+
+
+class Kind5(StrEnum):
+    definition = "definition"
+    theorem = "theorem"
+    bound = "bound"
+    algorithm = "algorithm"
+    comparison = "comparison"
+    open_problem = "open_problem"
+    method = "method"
+    measurement = "measurement"
+
+
+class Expression1(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    source_text: constr(min_length=1, max_length=500) = Field(..., alias="sourceText")
+    representation: Representation
+    transformation: Literal["none"]
+
+
+class TechnicalResult1(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    kind: Kind5
+    title: constr(min_length=1, max_length=160)
+    claim_id: UUID = Field(..., alias="claimId")
+    citation_ids: list[CitationId] = Field(..., alias="citationIds", max_length=1, min_length=1)
+    source_ids: list[SourceId] = Field(..., alias="sourceIds", max_length=1, min_length=1)
+    source_artifact_hash: constr(pattern=r"^[0-9a-f]{64}$") = Field(..., alias="sourceArtifactHash")
+    assumptions: list[Assumption] = Field(..., max_length=8)
+    notation: list[NotationItem] = Field(..., max_length=8)
+    source_location: constr(min_length=1, max_length=120) | None = Field(
+        ..., alias="sourceLocation"
+    )
+    expression: Expression1 | None
+    verification: Literal["exact_passage_and_scoped_semantic_claim_review_v2"]
+
+
+class Measurement(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    id: constr(min_length=1, max_length=80)
+    title: constr(min_length=1, max_length=160)
+    claim_id: UUID = Field(..., alias="claimId")
+    citation_id: UUID = Field(..., alias="citationId")
+    source_id: UUID = Field(..., alias="sourceId")
+    source_artifact_hash: constr(pattern=r"^[0-9a-f]{64}$") = Field(..., alias="sourceArtifactHash")
+    subject: constr(min_length=1, max_length=160)
+    metric: constr(min_length=1, max_length=160)
+    value: constr(min_length=1, max_length=80)
+    unit: constr(min_length=1, max_length=40) | None
+    population: constr(min_length=1, max_length=240) | None
+    period: constr(min_length=1, max_length=120) | None
+    method: constr(min_length=1, max_length=240) | None
+    definition: constr(min_length=1, max_length=300) | None
+    source_passage: constr(min_length=1, max_length=12000) = Field(..., alias="sourcePassage")
+    source_location: constr(min_length=1, max_length=120) | None = Field(
+        ..., alias="sourceLocation"
+    )
+    plot_value: constr(pattern=r"^[+-]?(?:\d+)(?:\.\d+)?$") | None = Field(..., alias="plotValue")
+    verification: Literal["exact_passage_and_scoped_semantic_claim_review_v1"]
+
+
+class MeasurementId(RootModel[constr(min_length=1, max_length=80)]):
+    root: constr(min_length=1, max_length=80)
+
+
+class Status37(StrEnum):
+    comparable = "comparable"
+    not_established = "not_established"
+
+
+class Basis32(StrEnum):
+    exact_scope_match_v1 = "exact_scope_match_v1"
+    missing_or_incompatible_scope_v1 = "missing_or_incompatible_scope_v1"
+
+
+class MeasurementComparison(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    id: constr(min_length=1, max_length=80)
+    metric: constr(min_length=1, max_length=160)
+    measurement_ids: list[MeasurementId] = Field(
+        ..., alias="measurementIds", max_length=24, min_length=2
+    )
+    status: Status37
+    basis: Basis32
+
+
+class MeasurementChart(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    id: constr(min_length=1, max_length=80)
+    title: constr(min_length=1, max_length=200)
+    metric: constr(min_length=1, max_length=160)
+    unit: constr(min_length=1, max_length=40)
+    population: constr(min_length=1, max_length=240)
+    period: constr(min_length=1, max_length=120)
+    method: constr(min_length=1, max_length=240)
+    definition: constr(min_length=1, max_length=300)
+    measurement_ids: list[MeasurementId] = Field(
+        ..., alias="measurementIds", max_length=24, min_length=2
+    )
+    basis: Literal["identical_metric_unit_population_period_method_definition_v1"]
+
+
+class ReportDocument6(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    version: Literal[6]
+    assessment_version: Literal["typed-measurements-v1"] = Field(..., alias="assessmentVersion")
+    mode: Mode
+    title: constr(min_length=1, max_length=10000)
+    sections: list[Section10] = Field(..., max_length=5, min_length=5)
+    findings: list[Finding5] = Field(..., max_length=40)
+    requirements: list[Requirements10 | Requirements11] = Field(..., max_length=21, min_length=1)
+    question_coverage: list[QuestionCoverageItem5] = Field(
+        ..., alias="questionCoverage", max_length=16
+    )
+    quality: Quality5
+    run_id: UUID = Field(..., alias="runId")
+    plan_id: UUID = Field(..., alias="planId")
+    assessment_id: UUID = Field(..., alias="assessmentId")
+    mode_policy_version: constr(pattern=r"\S", min_length=1, max_length=100) = Field(
+        ..., alias="modePolicyVersion"
+    )
+    dimensions: list[Dimension4] = Field(..., max_length=32)
+    requirement_outcomes: list[RequirementOutcome4] = Field(
+        ..., alias="requirementOutcomes", max_length=21, min_length=1
+    )
+    comparisons: list[Comparison4] = Field([], max_length=32, validate_default=True)
+    source_independence: SourceIndependence = Field(..., alias="sourceIndependence")
+    source_relationships: list[SourceRelationship3] = Field(
+        ..., alias="sourceRelationships", max_length=190
+    )
+    conflicts: list[Conflict3] = Field(..., max_length=128)
+    narrative: Narrative2
+    technical_results: list[TechnicalResult1] = Field(..., alias="technicalResults", max_length=12)
+    measurements: list[Measurement] = Field(..., max_length=24)
+    measurement_comparisons: list[MeasurementComparison] = Field(
+        ..., alias="measurementComparisons", max_length=12
+    )
+    measurement_charts: list[MeasurementChart] = Field(
+        ..., alias="measurementCharts", max_length=12
+    )
+
+
 class ReportDocument(
     RootModel[
-        ReportDocument1 | ReportDocument2 | ReportDocument3 | ReportDocument4 | ReportDocument5
+        ReportDocument1
+        | ReportDocument2
+        | ReportDocument3
+        | ReportDocument4
+        | ReportDocument5
+        | ReportDocument6
     ]
 ):
     root: (
-        ReportDocument1 | ReportDocument2 | ReportDocument3 | ReportDocument4 | ReportDocument5
+        ReportDocument1
+        | ReportDocument2
+        | ReportDocument3
+        | ReportDocument4
+        | ReportDocument5
+        | ReportDocument6
     ) = Field(..., title="ReportDocumentSchema")

@@ -110,16 +110,103 @@ function stageState(nodes: Task[]): "idle" | "active" | "done" | "failed" {
   return "idle";
 }
 
-export function OrchestrationSummary({ insights }: { insights: RunInsights }) {
+type TaskPresentation = {
+  status: Status;
+  label: string;
+  timelineLabel: string;
+  timelineValue: string;
+  timelineDone: boolean;
+};
+
+/** Translate an approval interrupt into the run-level state it represents. */
+function approvalTaskPresentation(
+  task: Task,
+  tasks: Task[],
+  runStatus: string,
+): TaskPresentation | null {
+  if (task.nodeId !== "approval_gate" || task.status !== "paused") return null;
+
+  const resumedAttempt = tasks
+    .filter(
+      (candidate) =>
+        candidate.nodeId === task.nodeId && candidate.attempt > task.attempt,
+    )
+    .sort((left, right) => right.attempt - left.attempt)[0];
+  if (resumedAttempt) {
+    return {
+      status: "completed",
+      label: `Resumed · paused attempt ${task.attempt} → attempt ${resumedAttempt.attempt}`,
+      timelineLabel: "Resumed",
+      timelineValue: resumedAttempt.startedAt
+        ? new Date(resumedAttempt.startedAt).toLocaleString()
+        : `Attempt ${resumedAttempt.attempt}`,
+      timelineDone: true,
+    };
+  }
+
+  if (runStatus === "awaiting_approval") {
+    return {
+      status: "paused",
+      label: `Awaiting plan approval · attempt ${task.attempt}`,
+      timelineLabel: "Waiting",
+      timelineValue: "Your plan decision",
+      timelineDone: false,
+    };
+  }
+
+  if (runStatus === "completed") {
+    return {
+      status: "completed",
+      label: `Approval resolved · attempt ${task.attempt}`,
+      timelineLabel: "Resolved",
+      timelineValue: "Research continued",
+      timelineDone: true,
+    };
+  }
+
+  if (runStatus === "failed" || runStatus === "cancelled") {
+    return {
+      status: runStatus === "failed" ? "failed" : "cancelled",
+      label: `Run ${runStatus} · approval attempt ${task.attempt}`,
+      timelineLabel: "Run ended",
+      timelineValue: `Research ${runStatus}`,
+      timelineDone: true,
+    };
+  }
+
+  return {
+    status: "completed",
+    label: `Approval recorded · attempt ${task.attempt}`,
+    timelineLabel: "Next",
+    timelineValue: "Research is resuming",
+    timelineDone: true,
+  };
+}
+
+function presentationStatus(task: Task, tasks: Task[], runStatus: string) {
+  return (
+    approvalTaskPresentation(task, tasks, runStatus)?.status ?? task.status
+  );
+}
+
+export function OrchestrationSummary({
+  insights,
+  runStatus,
+}: {
+  insights: RunInsights;
+  runStatus: string;
+}) {
+  const taskStatus = (task: Task) =>
+    presentationStatus(task, insights.tasks, runStatus);
   const total = insights.tasks.length;
   const done = insights.tasks.filter((task) =>
-    ["completed", "skipped"].includes(task.status),
+    ["completed", "skipped"].includes(taskStatus(task)),
   ).length;
   const running = insights.tasks.filter(
-    (task) => task.status === "running",
+    (task) => taskStatus(task) === "running",
   ).length;
   const failed = insights.tasks.filter(
-    (task) => task.status === "failed",
+    (task) => taskStatus(task) === "failed",
   ).length;
   return (
     <span className="orch-summary">
@@ -158,9 +245,11 @@ export function OrchestrationSummary({ insights }: { insights: RunInsights }) {
 
 export function ExecutionView({
   insights,
+  runStatus,
   inspectSource,
 }: {
   insights: RunInsights;
+  runStatus: string;
   inspectSource: (id: string) => void;
 }) {
   const [view, setView] = useState<"graph" | "list">("graph");
@@ -170,6 +259,9 @@ export function ExecutionView({
   }, []);
   const tasks = insights.tasks;
   const task = tasks.find((item) => item.id === selected);
+  const taskPresentation = task
+    ? approvalTaskPresentation(task, tasks, runStatus)
+    : null;
   const groups = [
     {
       title: "Plan",
@@ -194,10 +286,14 @@ export function ExecutionView({
       status,
       count: tasks.filter((item) =>
         status === "queued"
-          ? ["queued", "paused"].includes(item.status)
+          ? ["queued", "paused"].includes(
+              presentationStatus(item, tasks, runStatus),
+            )
           : status === "failed"
-            ? ["failed", "cancelled"].includes(item.status)
-            : item.status === status,
+            ? ["failed", "cancelled"].includes(
+                presentationStatus(item, tasks, runStatus),
+              )
+            : presentationStatus(item, tasks, runStatus) === status,
       ).length,
     }),
   );
@@ -228,26 +324,34 @@ export function ExecutionView({
   const dependencyTask = (id: string) =>
     tasks.find((item) => item.id === id) ??
     tasks.find((item) => item.nodeId === id);
-  const renderTask = (item: Task, index: number) => (
-    <button
-      key={item.id}
-      type="button"
-      className="execution-node"
-      data-status={item.status}
-      aria-pressed={selected === item.id}
-      onClick={() => setSelected(selected === item.id ? null : item.id)}
-      style={{ "--n": index } as CSSProperties}
-    >
-      <StatusGlyph status={item.status} />
-      <span className="execution-node-name">{taskLabel(item.name)}</span>
-      <small>
-        {STATUS_LABEL[item.status]} · <Elapsed task={item} />
-        {item.attempt > 1 && ` · attempt ${item.attempt}`}
-        {item.sourceIds.length > 0 &&
-          ` · ${item.sourceIds.length} ${item.sourceIds.length === 1 ? "source" : "sources"}`}
-      </small>
-    </button>
-  );
+  const renderTask = (item: Task, index: number) => {
+    const presentation = approvalTaskPresentation(item, tasks, runStatus);
+    const status = presentation?.status ?? item.status;
+    return (
+      <button
+        key={item.id}
+        type="button"
+        className="execution-node"
+        data-status={status}
+        aria-pressed={selected === item.id}
+        onClick={() => setSelected(selected === item.id ? null : item.id)}
+        style={{ "--n": index } as CSSProperties}
+      >
+        <StatusGlyph status={status} />
+        <span className="execution-node-name">{taskLabel(item.name)}</span>
+        <small>
+          {presentation?.label ?? (
+            <>
+              {STATUS_LABEL[item.status]} · <Elapsed task={item} />
+              {item.attempt > 1 && ` · attempt ${item.attempt}`}
+            </>
+          )}
+          {item.sourceIds.length > 0 &&
+            ` · ${item.sourceIds.length} ${item.sourceIds.length === 1 ? "source" : "sources"}`}
+        </small>
+      </button>
+    );
+  };
   return (
     <section className="execution-view" aria-label="Recorded orchestration">
       <div className="orch-toolbar">
@@ -293,9 +397,16 @@ export function ExecutionView({
         <div className="execution-graph">
           <ol className="orch-lanes">
             {groups.map((group, index) => {
-              const state = stageState(group.nodes);
+              const state = stageState(
+                group.nodes.map((node) => ({
+                  ...node,
+                  status: presentationStatus(node, tasks, runStatus),
+                })),
+              );
               const finished = group.nodes.filter((node) =>
-                ["completed", "skipped"].includes(node.status),
+                ["completed", "skipped"].includes(
+                  presentationStatus(node, tasks, runStatus),
+                ),
               ).length;
               return (
                 <li
@@ -352,7 +463,10 @@ export function ExecutionView({
       ) : (
         <ol className="execution-list">
           {tasks.map((item, index) => (
-            <li key={item.id} data-status={item.status}>
+            <li
+              key={item.id}
+              data-status={presentationStatus(item, tasks, runStatus)}
+            >
               {renderTask(item, index)}
             </li>
           ))}
@@ -365,12 +479,16 @@ export function ExecutionView({
           aria-label="Selected task details"
         >
           <header>
-            <StatusGlyph status={task.status} />
+            <StatusGlyph status={taskPresentation?.status ?? task.status} />
             <div>
               <h3>{taskLabel(task.name)}</h3>
               <p>
-                {STATUS_LABEL[task.status]} · attempt {task.attempt} ·{" "}
-                <Elapsed task={task} />
+                {taskPresentation?.label ?? (
+                  <>
+                    {STATUS_LABEL[task.status]} · attempt {task.attempt} ·{" "}
+                    <Elapsed task={task} />
+                  </>
+                )}
               </p>
             </div>
             <button
@@ -398,12 +516,17 @@ export function ExecutionView({
                   : "Not started"}
               </time>
             </li>
-            <li data-done={Boolean(task.completedAt)}>
-              <span>Finished</span>
+            <li
+              data-done={
+                taskPresentation?.timelineDone ?? Boolean(task.completedAt)
+              }
+            >
+              <span>{taskPresentation?.timelineLabel ?? "Finished"}</span>
               <time>
-                {task.completedAt
-                  ? new Date(task.completedAt).toLocaleString()
-                  : "Not recorded"}
+                {taskPresentation?.timelineValue ??
+                  (task.completedAt
+                    ? new Date(task.completedAt).toLocaleString()
+                    : "Not recorded")}
               </time>
             </li>
           </ol>

@@ -366,6 +366,12 @@ class OpenAlexAdapter:
                 except asyncio.CancelledError as exc:
                     raise OpenAlexCancelledBeforeDispatch(attempt_count=attempt - 1) from exc
             started = asyncio.get_running_loop().time()
+            dependency_event(
+                provider="openalex",
+                operation="works.search",
+                outcome="started",
+                attempt=attempt,
+            )
             try:
                 response = await self._client.get(
                     OPENALEX_API,

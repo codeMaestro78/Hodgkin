@@ -702,6 +702,32 @@ html .evidence-desk .report-scroll > * {
   cursor: pointer;
 }
 
+.report-measurements { margin-block: 2rem; min-width: 0; }
+.report-measurement-table-wrap { max-width: 100%; overflow: auto; border: 1px solid var(--steel); border-radius: 0.8rem; background: var(--surface); }
+.report-measurement-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.report-measurement-table th,
+.report-measurement-table td { min-width: 7rem; padding: 0.75rem; border-bottom: 1px solid var(--steel); text-align: left; vertical-align: top; }
+.report-measurement-table th { color: var(--ink); }
+.report-measurement-table td { color: var(--muted); }
+.report-measurement-table td:nth-child(3) { color: var(--ink); font-variant-numeric: tabular-nums; }
+.report-measurement-table button { border: 0; background: none; color: var(--brand-accent); text-decoration: underline; text-underline-offset: 0.15em; cursor: pointer; }
+.source-measurement-chart { margin-block: 1.25rem; padding: 1rem; border: 1px solid var(--steel); border-radius: 0.9rem; background: var(--surface); }
+.source-measurement-chart figcaption { display: grid; gap: 0.25rem; margin-bottom: 1rem; }
+.source-measurement-chart figcaption span,
+.source-measurement-bar-row > span:first-child { color: var(--muted); }
+.source-measurement-bars { display: grid; gap: 0.7rem; }
+.source-measurement-bar-row { display: grid; grid-template-columns: minmax(7rem, 0.8fr) minmax(4rem, 2fr) auto; align-items: center; gap: 0.75rem; }
+.source-measurement-bar-row strong { font-variant-numeric: tabular-nums; }
+.source-measurement-track { height: 0.7rem; overflow: hidden; border-radius: 99px; background: var(--canvas); }
+.source-measurement-track > span { display: block; height: 100%; border-radius: inherit; background: var(--brand-accent); }
+.measurement-source-passage { margin-top: 0.5rem; border-top: 1px solid var(--steel); padding: 0.75rem 0; }
+.measurement-source-passage summary { cursor: pointer; color: var(--muted); }
+.measurement-source-passage blockquote { margin: 0.75rem 0; border-left: 3px solid var(--brand-accent); padding-left: 1rem; color: var(--ink); }
+@media (max-width: 700px) {
+  .source-measurement-bar-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .source-measurement-track { grid-column: 1 / -1; grid-row: 2; }
+}
+
 @media (max-width: 700px) {
   .report-chart-bars li {
     grid-template-columns: minmax(0, 1fr) auto;

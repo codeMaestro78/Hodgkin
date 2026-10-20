@@ -67,6 +67,10 @@ class _Input(BaseModel):
 
 
 def validate_report_document(document: dict[str, Any]) -> dict[str, Any]:
+    if document.get("version") == 6:
+        from research_api.report_document_v6 import validate_report_document_v6
+
+        return validate_report_document_v6(document)
     if document.get("version") == 5:
         from research_api.report_document_v5 import validate_report_document_v5
 

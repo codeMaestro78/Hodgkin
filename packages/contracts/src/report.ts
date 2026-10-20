@@ -448,7 +448,9 @@ const assessedConflict = z
     claimIds: z.array(UuidSchema).min(2).max(40),
     status: z.literal("potential"),
     basis: z.literal("criterion-review-v1"),
-    reason: z.literal("Independent criterion review nominated a potential disagreement."),
+    reason: z.literal(
+      "Independent criterion review nominated a potential disagreement.",
+    ),
   })
   .strict();
 
@@ -479,9 +481,15 @@ export const ReportDocumentV3Schema = z
     const checked = ReportDocumentV2Schema.safeParse(v2);
     if (!checked.success)
       for (const issue of checked.error.issues)
-        ctx.addIssue({ code: "custom", path: issue.path, message: issue.message });
+        ctx.addIssue({
+          code: "custom",
+          path: issue.path,
+          message: issue.message,
+        });
 
-    const reportSources = new Set(doc.findings.flatMap((finding) => finding.sourceIds));
+    const reportSources = new Set(
+      doc.findings.flatMap((finding) => finding.sourceIds),
+    );
     const relationshipKeys = new Set<string>();
     for (const row of doc.sourceRelationships) {
       if (
@@ -489,7 +497,9 @@ export const ReportDocumentV3Schema = z
         !reportSources.has(row.fromSourceId) ||
         !reportSources.has(row.toSourceId)
       )
-        fail("Source relationships must link two distinct report sources in canonical order");
+        fail(
+          "Source relationships must link two distinct report sources in canonical order",
+        );
       const key = `${row.fromSourceId}:${row.toSourceId}:${row.kind}`;
       if (relationshipKeys.has(key)) fail("Duplicate source relationship");
       relationshipKeys.add(key);
@@ -498,7 +508,8 @@ export const ReportDocumentV3Schema = z
         same_work: "observed_doi_match",
         same_publisher: "verified_publisher_metadata_match",
       }[row.kind];
-      if (row.basis !== expectedBasis) fail("Relationship basis does not match its kind");
+      if (row.basis !== expectedBasis)
+        fail("Relationship basis does not match its kind");
       if (
         (row.kind === "same_content" && row.identifier !== undefined) ||
         (row.kind !== "same_content" && !row.identifier?.trim())
@@ -506,12 +517,16 @@ export const ReportDocumentV3Schema = z
         fail("Relationship identifier does not match its evidence basis");
       if (
         row.kind === "same_work" &&
-        !/^doi:10\.\d{4,9}\/[^\s\u0000-\u001f\u007f]+$/i.test(row.identifier ?? "")
+        !/^doi:10\.\d{4,9}\/[^\s\u0000-\u001f\u007f]+$/i.test(
+          row.identifier ?? "",
+        )
       )
         fail("Same-work relationship requires an observed DOI identifier");
     }
 
-    const dimensions = new Map(doc.dimensions.map((dimension) => [dimension.id, dimension]));
+    const dimensions = new Map(
+      doc.dimensions.map((dimension) => [dimension.id, dimension]),
+    );
     const conflictKeys = new Set<string>();
     const conflictIds = new Set<string>();
     for (const conflict of doc.conflicts) {
@@ -524,7 +539,9 @@ export const ReportDocumentV3Schema = z
         new Set(conflict.claimIds).size !== conflict.claimIds.length
       )
         fail("Conflict links must be unique");
-      const criteria = new Set(dimension?.criteria.map((criterion) => criterion.id) ?? []);
+      const criteria = new Set(
+        dimension?.criteria.map((criterion) => criterion.id) ?? [],
+      );
       if (conflict.criterionIds.some((id) => !criteria.has(id)))
         fail("Conflict references an unknown criterion");
       const claims = new Set(dimension?.claimIds ?? []);
@@ -532,7 +549,9 @@ export const ReportDocumentV3Schema = z
         fail("Conflict claims must belong to the linked dimension");
       const criterionClaims = new Set(
         conflict.criterionIds.flatMap(
-          (id) => dimension?.criteria.find((criterion) => criterion.id === id)?.claimIds ?? [],
+          (id) =>
+            dimension?.criteria.find((criterion) => criterion.id === id)
+              ?.claimIds ?? [],
         ),
       );
       if (conflict.claimIds.some((id) => !criterionClaims.has(id)))
@@ -543,10 +562,21 @@ export const ReportDocumentV3Schema = z
     }
   });
 
-const narrativeRole = z.enum(["answer", "dimension", "synthesis", "tradeoffs", "implications"]);
+const narrativeRole = z.enum([
+  "answer",
+  "dimension",
+  "synthesis",
+  "tradeoffs",
+  "implications",
+]);
 /** Mode-specific organisation limits mirrored by the backend narrative composer. */
 export const NARRATIVE_LIMITS = {
-  focused: { roles: ["answer", "tradeoffs"], maxBlocks: 3, maxSentences: 6, maxNewClaims: 4 },
+  focused: {
+    roles: ["answer", "tradeoffs"],
+    maxBlocks: 3,
+    maxSentences: 6,
+    maxNewClaims: 4,
+  },
   balanced: {
     roles: ["answer", "dimension", "tradeoffs", "implications"],
     maxBlocks: 8,
@@ -628,19 +658,26 @@ export const ReportDocumentV4Schema = z
     const checked = ReportDocumentV3Schema.safeParse(v3);
     if (!checked.success)
       for (const issue of checked.error.issues)
-        ctx.addIssue({ code: "custom", path: issue.path, message: issue.message });
+        ctx.addIssue({
+          code: "custom",
+          path: issue.path,
+          message: issue.message,
+        });
 
     const narrative = doc.narrative;
     const limits = NARRATIVE_LIMITS[doc.mode];
     const composed = narrative.status === "composed";
-    if (composed !== (narrative.blocks.length > 0))
+    if (composed !== narrative.blocks.length > 0)
       fail("Composed narrative status must match its blocks");
     if (composed !== (narrative.reason === null))
       fail("Only an uncomposed narrative records a reason");
-    if (narrative.blocks.length > limits.maxBlocks) fail("Narrative exceeds its mode block limit");
+    if (narrative.blocks.length > limits.maxBlocks)
+      fail("Narrative exceeds its mode block limit");
     if (narrative.narrativeClaimIds.length > limits.maxNewClaims)
       fail("Narrative exceeds its mode claim limit");
-    const findings = new Map(doc.findings.map((finding) => [finding.id, finding]));
+    const findings = new Map(
+      doc.findings.map((finding) => [finding.id, finding]),
+    );
     const dimensions = new Set(doc.dimensions.map((dimension) => dimension.id));
     const narrativeIds = new Set(narrative.narrativeClaimIds);
     if (narrativeIds.size !== narrative.narrativeClaimIds.length)
@@ -649,10 +686,12 @@ export const ReportDocumentV4Schema = z
     const blockKeys = new Set<string>();
     let sentences = 0;
     narrative.blocks.forEach((block, index) => {
-      if (block.id !== `narrative-${index + 1}`) fail("Narrative block IDs must be sequential");
+      if (block.id !== `narrative-${index + 1}`)
+        fail("Narrative block IDs must be sequential");
       if (!(limits.roles as readonly string[]).includes(block.role))
         fail("Narrative role is not allowed for this mode");
-      if (block.role === "answer" && index !== 0) fail("The answer block must open the narrative");
+      if (block.role === "answer" && index !== 0)
+        fail("The answer block must open the narrative");
       if ((block.role === "dimension") !== (block.dimensionId !== null))
         fail("Only dimension blocks reference a dimension");
       if (block.dimensionId !== null && !dimensions.has(block.dimensionId))
@@ -666,11 +705,18 @@ export const ReportDocumentV4Schema = z
         sentences += 1;
         const finding = findings.get(sentence.claimId);
         if (!finding) fail("Narrative sentence references an unknown finding");
-        else if (JSON.stringify(sentence.citationIds) !== JSON.stringify(finding.citationIds))
+        else if (
+          JSON.stringify(sentence.citationIds) !==
+          JSON.stringify(finding.citationIds)
+        )
           fail("Narrative citations must match the verified finding");
-        if (placed.has(sentence.claimId)) fail("A finding may appear once in the narrative");
+        if (placed.has(sentence.claimId))
+          fail("A finding may appear once in the narrative");
         placed.add(sentence.claimId);
-        if ((sentence.origin === "narrative") !== narrativeIds.has(sentence.claimId))
+        if (
+          (sentence.origin === "narrative") !==
+          narrativeIds.has(sentence.claimId)
+        )
           fail("Narrative sentence origin does not match its claim");
       }
     });
@@ -688,8 +734,14 @@ export const ReportDocumentV4Schema = z
 const technicalResult = z
   .object({
     kind: z.enum([
-      "definition", "theorem", "bound", "algorithm", "comparison",
-      "open_problem", "method", "measurement",
+      "definition",
+      "theorem",
+      "bound",
+      "algorithm",
+      "comparison",
+      "open_problem",
+      "method",
+      "measurement",
     ]),
     title: z.string().min(1).max(160),
     claimId: UuidSchema,
@@ -707,7 +759,9 @@ const technicalResult = z
       })
       .strict()
       .nullable(),
-    verification: z.literal("exact_passage_and_scoped_semantic_claim_review_v2"),
+    verification: z.literal(
+      "exact_passage_and_scoped_semantic_claim_review_v2",
+    ),
   })
   .strict();
 
@@ -730,8 +784,14 @@ export const ReportDocumentV5Schema = z
     const checked = ReportDocumentV4Schema.safeParse(v4);
     if (!checked.success)
       for (const issue of checked.error.issues)
-        ctx.addIssue({ code: "custom", path: issue.path, message: issue.message });
-    const findings = new Map(doc.findings.map((finding) => [finding.id, finding]));
+        ctx.addIssue({
+          code: "custom",
+          path: issue.path,
+          message: issue.message,
+        });
+    const findings = new Map(
+      doc.findings.map((finding) => [finding.id, finding]),
+    );
     for (const result of doc.technicalResults) {
       const finding = findings.get(result.claimId);
       if (!finding) {
@@ -739,9 +799,217 @@ export const ReportDocumentV5Schema = z
         continue;
       }
       if (!result.citationIds.every((id) => finding.citationIds.includes(id)))
-        ctx.addIssue({ code: "custom", message: "Technical citation is not verified" });
+        ctx.addIssue({
+          code: "custom",
+          message: "Technical citation is not verified",
+        });
       if (!result.sourceIds.every((id) => finding.sourceIds.includes(id)))
-        ctx.addIssue({ code: "custom", message: "Technical source is not verified" });
+        ctx.addIssue({
+          code: "custom",
+          message: "Technical source is not verified",
+        });
+    }
+  });
+
+const reportMeasurement = z
+  .object({
+    id: z.string().min(1).max(80),
+    title: z.string().min(1).max(160),
+    claimId: UuidSchema,
+    citationId: UuidSchema,
+    sourceId: UuidSchema,
+    sourceArtifactHash: z.string().regex(/^[0-9a-f]{64}$/),
+    subject: z.string().min(1).max(160),
+    metric: z.string().min(1).max(160),
+    value: z.string().min(1).max(80),
+    unit: z.string().min(1).max(40).nullable(),
+    population: z.string().min(1).max(240).nullable(),
+    period: z.string().min(1).max(120).nullable(),
+    method: z.string().min(1).max(240).nullable(),
+    definition: z.string().min(1).max(300).nullable(),
+    sourcePassage: z.string().min(1).max(12000),
+    sourceLocation: z.string().min(1).max(120).nullable(),
+    plotValue: z
+      .string()
+      .regex(/^[+-]?(?:\d+)(?:\.\d+)?$/)
+      .nullable(),
+    verification: z.literal(
+      "exact_passage_and_scoped_semantic_claim_review_v1",
+    ),
+  })
+  .strict();
+
+const measurementChart = z
+  .object({
+    id: z.string().min(1).max(80),
+    title: z.string().min(1).max(200),
+    metric: z.string().min(1).max(160),
+    unit: z.string().min(1).max(40),
+    population: z.string().min(1).max(240),
+    period: z.string().min(1).max(120),
+    method: z.string().min(1).max(240),
+    definition: z.string().min(1).max(300),
+    measurementIds: z.array(z.string().min(1).max(80)).min(2).max(24),
+    basis: z.literal(
+      "identical_metric_unit_population_period_method_definition_v1",
+    ),
+  })
+  .strict();
+
+const measurementComparison = z
+  .object({
+    id: z.string().min(1).max(80),
+    metric: z.string().min(1).max(160),
+    measurementIds: z.array(z.string().min(1).max(80)).min(2).max(24),
+    status: z.enum(["comparable", "not_established"]),
+    basis: z.enum(["exact_scope_match_v1", "missing_or_incompatible_scope_v1"]),
+  })
+  .strict();
+
+/** V6 adds only source-admitted measurements and charts grouped by exact comparability fields. */
+export const ReportDocumentV6Schema = z
+  .object({
+    ...ReportDocumentV5Schema.shape,
+    version: z.literal(6),
+    assessmentVersion: z.literal("typed-measurements-v1"),
+    measurements: z.array(reportMeasurement).max(24),
+    measurementComparisons: z.array(measurementComparison).max(12),
+    measurementCharts: z.array(measurementChart).max(12),
+  })
+  .strict()
+  .superRefine((doc, ctx) => {
+    const v5 = {
+      ...doc,
+      version: 5,
+      assessmentVersion: "technical-results-v1",
+    };
+    delete (v5 as Partial<typeof doc>).measurements;
+    delete (v5 as Partial<typeof doc>).measurementComparisons;
+    delete (v5 as Partial<typeof doc>).measurementCharts;
+    const checked = ReportDocumentV5Schema.safeParse(v5);
+    if (!checked.success)
+      for (const issue of checked.error.issues)
+        ctx.addIssue({
+          code: "custom",
+          path: issue.path,
+          message: issue.message,
+        });
+    const findings = new Map(
+      doc.findings.map((finding) => [finding.id, finding]),
+    );
+    const measurementById = new Map(
+      doc.measurements.map((row) => [row.id, row]),
+    );
+    if (measurementById.size !== doc.measurements.length)
+      ctx.addIssue({ code: "custom", message: "Duplicate measurement IDs" });
+    for (const row of doc.measurements) {
+      const finding = findings.get(row.claimId);
+      if (
+        !finding ||
+        !finding.citationIds.includes(row.citationId) ||
+        !finding.sourceIds.includes(row.sourceId)
+      )
+        ctx.addIssue({
+          code: "custom",
+          message: "Measurement provenance must link to its verified finding",
+        });
+      if (
+        row.plotValue !== null &&
+        !/^[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?$/.test(row.value)
+      )
+        ctx.addIssue({
+          code: "custom",
+          message: "Only a single literal numeric value may be plotted",
+        });
+    }
+    const groupedMeasurements = new Map<string, typeof doc.measurements>();
+    for (const row of doc.measurements) {
+      const rows = groupedMeasurements.get(row.metric) ?? [];
+      rows.push(row);
+      groupedMeasurements.set(row.metric, rows);
+    }
+    const expectedComparisons = [...groupedMeasurements.entries()]
+      .filter(([, rows]) => rows.length >= 2)
+      .map(([metric, rows], index) => {
+        const fields = [
+          "unit",
+          "population",
+          "period",
+          "method",
+          "definition",
+        ] as const;
+        const complete = rows.every((row) =>
+          fields.every((field) => Boolean(row[field]?.trim())),
+        );
+        const uniqueSubjects =
+          new Set(rows.map((row) => row.subject)).size === rows.length;
+        const scope = rows.map((row) => fields.map((field) => row[field]));
+        const equalScope = scope.every(
+          (item) => JSON.stringify(item) === JSON.stringify(scope[0]),
+        );
+        const comparable = complete && uniqueSubjects && equalScope;
+        return {
+          id: `measurement-comparison-${index + 1}`,
+          metric,
+          measurementIds: rows.map((row) => row.id),
+          status: comparable
+            ? ("comparable" as const)
+            : ("not_established" as const),
+          basis: comparable
+            ? ("exact_scope_match_v1" as const)
+            : ("missing_or_incompatible_scope_v1" as const),
+        };
+      });
+    if (
+      JSON.stringify(doc.measurementComparisons) !==
+      JSON.stringify(expectedComparisons)
+    )
+      ctx.addIssue({
+        code: "custom",
+        message: "Measurement comparisons must be deterministic projections",
+      });
+    if (
+      new Set(doc.measurementComparisons.map((item) => item.id)).size !==
+      doc.measurementComparisons.length
+    )
+      ctx.addIssue({
+        code: "custom",
+        message: "Duplicate measurement comparison IDs",
+      });
+    if (
+      new Set(doc.measurementCharts.map((chart) => chart.id)).size !==
+      doc.measurementCharts.length
+    )
+      ctx.addIssue({
+        code: "custom",
+        message: "Duplicate measurement chart IDs",
+      });
+    for (const chart of doc.measurementCharts) {
+      const rows = chart.measurementIds.map((id) => measurementById.get(id));
+      const fields = [
+        "metric",
+        "unit",
+        "population",
+        "period",
+        "method",
+        "definition",
+      ] as const;
+      const compatible =
+        rows.every((row) => row && row.plotValue !== null) &&
+        fields.every(
+          (field) =>
+            rows.every((row) => row?.[field] === chart[field]) &&
+            rows.every((row) => row?.[field] === rows[0]?.[field]),
+        );
+      if (
+        !compatible ||
+        new Set(rows.map((row) => row?.subject)).size !== rows.length
+      )
+        ctx.addIssue({
+          code: "custom",
+          message:
+            "Chart references missing, incompatible, or duplicate measurements",
+        });
     }
   });
 
@@ -751,9 +1019,11 @@ export const ReportDocumentSchema = z.union([
   ReportDocumentV3Schema,
   ReportDocumentV4Schema,
   ReportDocumentV5Schema,
+  ReportDocumentV6Schema,
 ]);
 export type ReportDocumentV2 = z.infer<typeof ReportDocumentV2Schema>;
 export type ReportDocumentV3 = z.infer<typeof ReportDocumentV3Schema>;
 export type ReportDocumentV4 = z.infer<typeof ReportDocumentV4Schema>;
 export type ReportDocumentV5 = z.infer<typeof ReportDocumentV5Schema>;
+export type ReportDocumentV6 = z.infer<typeof ReportDocumentV6Schema>;
 export type ReportDocument = z.infer<typeof ReportDocumentSchema>;

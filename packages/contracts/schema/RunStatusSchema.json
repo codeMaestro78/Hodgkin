@@ -1,5 +1,5 @@
 {
-  "$id": "https://schemas.research.local/1.6/RunStatusSchema.json",
+  "$id": "https://schemas.research.local/1.7/RunStatusSchema.json",
   "title": "RunStatusSchema",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "string",

@@ -34,7 +34,7 @@ from research_api.db.models import (
 from research_api.db.session import tenant_session
 from research_api.events.outbox import EventOutbox
 from research_api.execution import finish_node, start_node
-from research_api.graph import builder
+from research_api.graph import builder, collection
 from research_api.lifecycle import lock_run
 from research_api.repositories.runs import RunRepository
 from research_api.runtime_context import LeaseLostError, current_job
@@ -769,12 +769,12 @@ async def test_collection_shutdown_resumes_but_user_cancel_stays_terminal(monkey
             await asyncio.Event().wait()  # Cancel before any provider dispatch.
         return [uuid.uuid4()]
 
-    monkeypatch.setattr(builder, "S3ArtifactStore", lambda **kwargs: object())
+    monkeypatch.setattr(collection, "S3ArtifactStore", lambda **kwargs: object())
     monkeypatch.setattr(
-        builder, "TavilyAdapter", lambda **kwargs: SimpleNamespace(aclose=AsyncMock())
+        collection, "TavilyAdapter", lambda **kwargs: SimpleNamespace(aclose=AsyncMock())
     )
     monkeypatch.setattr(
-        builder, "TavilyEvidenceIngestor", lambda **kwargs: SimpleNamespace(ingest=ingest)
+        collection, "TavilyEvidenceIngestor", lambda **kwargs: SimpleNamespace(ingest=ingest)
     )
     original_build = builder.build_graph
 

@@ -10,6 +10,7 @@ import hashlib
 import json
 import uuid
 from datetime import UTC, datetime
+from time import monotonic
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -37,7 +38,7 @@ from research_api.db.models import (
     UsageLedger,
 )
 from research_api.db.session import tenant_session
-from research_api.graph import builder
+from research_api.graph import builder, collection, node_runtime
 from research_api.mode_policy import MODE_POLICY_VERSION, resolve_mode_budget
 from research_api.repositories.budgets import BudgetExceededError
 from research_api.repositories.runs import RunRepository
@@ -98,6 +99,7 @@ async def harness(monkeypatch):
             return bodies[artifact_ref]
 
     monkeypatch.setattr(builder, "S3ArtifactStore", Store)
+    monkeypatch.setattr(collection, "S3ArtifactStore", Store)
     ingestion_queries = []
 
     class Ingestor:
@@ -126,7 +128,7 @@ async def harness(monkeypatch):
                 await session.flush()
                 return [source.id]
 
-    monkeypatch.setattr(builder, "TavilyEvidenceIngestor", Ingestor)
+    monkeypatch.setattr(collection, "TavilyEvidenceIngestor", Ingestor)
     dispatches = []
     criterion_failure = []
     controls = {
@@ -330,7 +332,7 @@ async def test_technical_writer_receipt_replays_without_paid_redispatch(harness,
 
 async def test_completed_technical_receipt_is_write_once_and_replays(harness, monkeypatch):
     harness.settings.TECHNICAL_RESULTS_ENABLED = True
-    original_event = builder.operation_event
+    original_event = node_runtime.operation_event
     interrupted = False
 
     def interrupt_after_assessment(name, **kwargs):
@@ -340,7 +342,7 @@ async def test_completed_technical_receipt_is_write_once_and_replays(harness, mo
             raise asyncio.CancelledError
         return original_event(name, **kwargs)
 
-    monkeypatch.setattr(builder, "operation_event", interrupt_after_assessment)
+    monkeypatch.setattr(node_runtime, "operation_event", interrupt_after_assessment)
     with pytest.raises(asyncio.CancelledError):
         await harness.execute()
     with pytest.raises(IntegrityError, match="write-once"):
@@ -456,7 +458,7 @@ async def test_crash_replays_receipts_or_committed_assessment_without_added_disp
 
         monkeypatch.setattr(builder, "exact_reviews", reviews)
     else:
-        original_event = builder.operation_event
+        original_event = node_runtime.operation_event
 
         def event(name, **kwargs):
             nonlocal crashed
@@ -465,7 +467,7 @@ async def test_crash_replays_receipts_or_committed_assessment_without_added_disp
                 raise asyncio.CancelledError
             return original_event(name, **kwargs)
 
-        monkeypatch.setattr(builder, "operation_event", event)
+        monkeypatch.setattr(node_runtime, "operation_event", event)
     with pytest.raises(asyncio.CancelledError):
         await harness.execute()
     _, _, before, _, _ = await harness.snapshot()
@@ -527,7 +529,19 @@ async def test_optional_criterion_failure_keeps_exact_findings_and_unknown_cover
     assert sum(row.state == "uncertain" for row in reservations) == 1
 
 
-async def test_near_deadline_publishes_verified_report_without_optional_criterion_call(harness):
+async def test_near_deadline_publishes_verified_report_without_optional_criterion_call(
+    harness, monkeypatch
+):
+    original_reviews = builder.exact_reviews
+
+    async def consume_review_window(*args, **kwargs):
+        reviews = await original_reviews(*args, **kwargs)
+        # Simulate collection and claim review consuming the active-time budget;
+        # leave too little time for criterion review, but enough to publish.
+        builder.assessment_deadline.set(monotonic() + 20)
+        return reviews
+
+    monkeypatch.setattr(builder, "exact_reviews", consume_review_window)
     await builder.run_graph(
         harness.settings,
         tenant_id=harness.tenant,
@@ -535,7 +549,7 @@ async def test_near_deadline_publishes_verified_report_without_optional_criterio
         run_id=harness.run_id,
         question="Explain workflow state preservation",
         checkpointer=harness.checkpointer,
-        remaining_ms=60_000,
+        remaining_ms=300_000,
     )
     run, report, assessment, _, calls = await harness.snapshot()
     assert run.status == "completed", run.error_code

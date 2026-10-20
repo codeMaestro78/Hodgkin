@@ -63,8 +63,8 @@ def validate_alignment(document: dict[str, Any], blocks: list[FactualBlock]) -> 
 
 def compose_report(document: dict[str, Any], *, sources: list[tuple[str, str, str]]) -> str:
     doc = validate_report_document(document)
-    if doc["version"] not in {2, 3, 4, 5}:
-        raise ValueError("Explicit report composition requires report document V2-V5")
+    if doc["version"] not in {2, 3, 4, 5, 6}:
+        raise ValueError("Explicit report composition requires report document V2-V6")
     claims = {f["id"]: f for f in doc["findings"]}
     source_numbers = {source_id: index + 1 for index, (source_id, _, _) in enumerate(sources)}
     if len(source_numbers) != len(sources):
@@ -83,7 +83,7 @@ def compose_report(document: dict[str, Any], *, sources: list[tuple[str, str, st
         refs = " ".join(f"[{source_numbers[s]}]" for s in finding["sourceIds"])
         return f"{text} {refs}"
 
-    def scope(text: str) -> str:
+    def scope(text: str, *, table: bool = False) -> str:
         # Inputs are scope metadata, never factual findings. Keep headings one line.
         return text.replace("\r", " ").replace("\n", " ").replace("|", "\\|")
 
@@ -194,6 +194,57 @@ def compose_report(document: dict[str, Any], *, sources: list[tuple[str, str, st
                 )
                 lines += ["Literal source expression:", "", fence, source_text, fence, ""]
         lines += ["<!-- technical-results-v1:end -->", ""]
+    if doc["version"] >= 6:
+        lines += ["## Source-stated measurements", ""]
+        lines += [
+            "Values below preserve the source literal. Missing or incompatible scope is not "
+            "inferred; charts use only exact-matching metric, unit, population, period, method "
+            "and definition.",
+            "",
+            "| Subject | Metric | Reported value | Unit | Population | Period | Method | "
+            "Definition | Comparison |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        ]
+        comparison_by_measurement = {
+            measurement_id: comparison
+            for comparison in doc["measurementComparisons"]
+            for measurement_id in comparison["measurementIds"]
+        }
+        for row in doc["measurements"]:
+            comparison = comparison_by_measurement.get(row["id"])
+            comparison_status = (
+                "Comparable within recorded scope"
+                if comparison and comparison["status"] == "comparable"
+                else "Not established — scope is missing or incompatible"
+                if comparison
+                else "Not compared — no second observation"
+            )
+            fields = [
+                row["subject"],
+                row["metric"],
+                row["value"],
+                row["unit"],
+                row["population"],
+                row["period"],
+                row["method"],
+                row["definition"],
+                comparison_status,
+            ]
+            cells = [scope(value or "Not established", table=True) for value in fields]
+            lines.append("| " + " | ".join(cells) + " |")
+        if not doc["measurements"]:
+            lines.append(
+                "| No measurements passed exact-passage and supported-claim checks "
+                "| | | | | | | | |"
+            )
+        lines += [""]
+        for row in doc["measurements"]:
+            lines += [
+                f"Exact source passage ({scope(row['title'])}):",
+                "",
+                "> " + row["sourcePassage"].replace("\n", "\n> "),
+                "",
+            ]
     for comparison in doc["comparisons"]:
         dimension = next(d for d in doc["dimensions"] if d["id"] == comparison["dimensionId"])
         lines += [

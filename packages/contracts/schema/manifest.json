@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "1.6",
+  "schemaVersion": "1.7",
   "schemas": [
     "AgentEventSchema",
     "ApprovalRequestSchema",
@@ -41,6 +41,7 @@
     "ReportDocumentV3Schema",
     "ReportDocumentV4Schema",
     "ReportDocumentV5Schema",
+    "ReportDocumentV6Schema",
     "ResearchGapSchema",
     "ResearchModeResolutionSchema",
     "ResearchModeSchema",

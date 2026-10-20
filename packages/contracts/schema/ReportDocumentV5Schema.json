@@ -1,5 +1,5 @@
 {
-  "$id": "https://schemas.research.local/1.6/ReportDocumentV5Schema.json",
+  "$id": "https://schemas.research.local/1.7/ReportDocumentV5Schema.json",
   "title": "ReportDocumentV5Schema",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",

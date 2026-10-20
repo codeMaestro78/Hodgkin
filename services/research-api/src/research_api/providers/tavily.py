@@ -188,6 +188,12 @@ class TavilyAdapter:
                     # can only be proven non-dispatched connect failures.
                     raise TavilyCancelledBeforeDispatch from exc
             started = monotonic()
+            dependency_event(
+                provider="tavily",
+                operation=path.lstrip("/"),
+                outcome="started",
+                attempt=attempt,
+            )
             try:
                 response = await self._client.post(path, headers=self._headers, json=payload)
                 response.raise_for_status()
