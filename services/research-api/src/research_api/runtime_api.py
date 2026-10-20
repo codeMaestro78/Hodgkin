@@ -23,7 +23,7 @@ from research_api.db.models import (
     RuntimeJob,
     SubQuestion,
 )
-from research_api.db.session import tenant_session
+from research_api.db.session import set_user_context, tenant_session
 from research_api.events.outbox import EventOutbox
 from research_api.graph.builder import PlannedQuestion, PlannerOutput
 from research_api.jobs import enqueue, lock_registry, refresh_due
@@ -354,6 +354,7 @@ async def create_batch(
     caller = await _caller(settings, x_internal_service_auth, authorization=authorization)
     fingerprint = _batch_request_fingerprint(payload)
     async with tenant_session(str(caller.tenant_id)) as session:
+        await set_user_context(session, str(caller.user_id))
         registry = await lock_registry(session, caller.tenant_id)
         existing = await session.scalar(
             select(ResearchBatch).where(
