@@ -19,7 +19,7 @@ class ReportPolicy:
 
     @property
     def output_tokens(self) -> int:
-        return {"focused": 4096, "balanced": 6144, "deep": 8192}[self.mode]
+        return {"focused": 4096, "balanced": 6144, "deep": 16384}[self.mode]
 
 
 def report_policy(calls: int) -> ReportPolicy:
