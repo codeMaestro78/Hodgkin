@@ -12,10 +12,10 @@ from research_api.graph import builder
         (False, True, False, jobs.SERPER_GRAPH_VERSION),
         (False, False, True, jobs.OPENALEX_GRAPH_VERSION),
         (False, True, True, jobs.OPENALEX_SERPER_GRAPH_VERSION),
-        (True, False, False, jobs.SAFE_MODE_GRAPH_VERSION),
-        (True, True, False, jobs.SAFE_MODE_SERPER_GRAPH_VERSION),
-        (True, False, True, jobs.SAFE_MODE_OPENALEX_GRAPH_VERSION),
-        (True, True, True, jobs.SAFE_MODE_OPENALEX_SERPER_GRAPH_VERSION),
+        (True, False, False, jobs.PROTECTED_MODE_GRAPH_VERSION),
+        (True, True, False, jobs.PROTECTED_MODE_SERPER_GRAPH_VERSION),
+        (True, False, True, jobs.PROTECTED_MODE_OPENALEX_GRAPH_VERSION),
+        (True, True, True, jobs.PROTECTED_MODE_OPENALEX_SERPER_GRAPH_VERSION),
     ],
 )
 def test_new_job_pins_each_discovery_capability_combination(
@@ -34,10 +34,10 @@ def test_new_job_pins_each_discovery_capability_combination(
 @pytest.mark.parametrize(
     ("serper", "openalex", "expected"),
     [
-        (False, False, jobs.REPAIR_MODE_GRAPH_VERSION),
-        (True, False, jobs.REPAIR_MODE_SERPER_GRAPH_VERSION),
-        (False, True, jobs.REPAIR_MODE_OPENALEX_GRAPH_VERSION),
-        (True, True, jobs.REPAIR_MODE_OPENALEX_SERPER_GRAPH_VERSION),
+        (False, False, jobs.PROTECTED_REPAIR_MODE_GRAPH_VERSION),
+        (True, False, jobs.PROTECTED_REPAIR_MODE_SERPER_GRAPH_VERSION),
+        (False, True, jobs.PROTECTED_REPAIR_MODE_OPENALEX_GRAPH_VERSION),
+        (True, True, jobs.PROTECTED_REPAIR_MODE_OPENALEX_SERPER_GRAPH_VERSION),
     ],
 )
 def test_explicit_repair_is_selected_only_when_opted_in(serper, openalex, expected):
