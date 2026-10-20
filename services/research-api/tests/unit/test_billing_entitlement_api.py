@@ -1,6 +1,8 @@
 import uuid
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from fastapi import FastAPI
@@ -36,6 +38,46 @@ def test_entitlement_rejects_calls_without_the_existing_service_auth_boundary():
     response = TestClient(app).get("/billing/entitlement")
 
     assert response.status_code == 401
+
+
+def test_entitlement_api_serializes_catalog_allowed_modes(monkeypatch):
+    from research_api.billing.catalog import BILLING_CATALOG
+    from research_api.billing.entitlements import project_entitlement
+
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[caller_dependency] = lambda: Caller(
+        tenant_id=uuid.UUID("11111111-1111-4111-8111-111111111111"),
+        user_id=uuid.UUID("11111111-1111-4111-8111-111111111111"),
+    )
+    period = SimpleNamespace(
+        catalog_version=BILLING_CATALOG.version,
+        plan_key="scholar",
+        starts_at=datetime(2026, 10, 1, tzinfo=UTC),
+        ends_at=datetime(2026, 11, 1, tzinfo=UTC),
+        allowance_units=20,
+    )
+    projected = project_entitlement(period, consumed_units=8, reserved_units=4)
+    monkeypatch.setattr(
+        "research_api.billing.api.read_caller_entitlement",
+        AsyncMock(return_value=projected),
+    )
+
+    response = TestClient(app).get("/billing/entitlement")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "active",
+        "planKey": "scholar",
+        "allowedModes": ["focused", "balanced"],
+        "catalogVersion": BILLING_CATALOG.version,
+        "periodStart": "2026-10-01T00:00:00Z",
+        "periodEnd": "2026-11-01T00:00:00Z",
+        "allowanceUnits": 20,
+        "consumedUnits": 8,
+        "reservedUnits": 4,
+        "availableUnits": 8,
+    }
 
 
 async def test_entitlement_read_binds_authenticated_identity_to_rls(monkeypatch):
@@ -94,3 +136,18 @@ def test_catalog_exposes_the_lower_price_v2_proposal_and_preserves_v1_terms():
         "investigator": 120,
     }
     assert require_approved_catalog(BILLING_CATALOG) is BILLING_CATALOG
+
+
+def test_entitlement_exposes_modes_from_its_approved_catalog_snapshot():
+    from research_api.billing.catalog import BILLING_CATALOG
+    from research_api.billing.entitlements import project_entitlement
+
+    period = SimpleNamespace(
+        catalog_version=BILLING_CATALOG.version,
+        plan_key="scholar",
+        starts_at=datetime(2026, 10, 1, tzinfo=UTC),
+        ends_at=datetime(2026, 11, 1, tzinfo=UTC),
+        allowance_units=20,
+    )
+    entitlement = project_entitlement(period, consumed_units=0, reserved_units=0)
+    assert [mode.value for mode in entitlement.allowed_modes] == ["focused", "balanced"]
