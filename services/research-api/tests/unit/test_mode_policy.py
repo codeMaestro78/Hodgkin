@@ -4,7 +4,7 @@ import pytest
 from fastapi import HTTPException
 
 from research_api.api import _budget_from_request
-from research_api.mode_policy import resolve_mode_budget
+from research_api.mode_policy import MODE_POLICY_VERSION, resolve_mode_budget
 from research_api.research_limits import is_run_quick, operation_limit, run_source_limit
 from research_api.schemas.generated.create_research_run_request import CreateResearchRunRequest
 
@@ -23,6 +23,16 @@ def test_explicit_mode_defaults(mode, ceiling, wall):
     assert run_source_limit(result) == ceiling
     assert result.max_wall_clock_ms == wall
     assert not is_run_quick(mode=mode, question="What is gravity?")
+
+
+def test_new_deep_policy_reserves_enough_total_output_for_long_writer():
+    result = resolve_mode_budget("deep")
+
+    assert MODE_POLICY_VERSION == "research-mode-policy-v2"
+    assert result.max_output_tokens == 40_000
+    assert resolve_mode_budget(
+        "deep", policy_version="research-mode-policy-v1"
+    ).max_output_tokens == 20_000
 
 
 def test_partial_override_does_not_apply_generated_search_default():
@@ -77,6 +87,18 @@ def test_tightened_deep_limits_preserve_explicit_mode_semantics():
     assert operation_limit(result) == 2
     assert run_source_limit(result) == 1
     assert not is_run_quick(SimpleNamespace(mode="deep", original_question="What is gravity?"))
+
+
+def test_deep_output_override_can_only_tighten_new_policy():
+    request = CreateResearchRunRequest.model_validate(
+        {
+            "question": "Compare two approaches",
+            "mode": "deep",
+            "budgetOverrides": {"maxOutputTokens": 32_000},
+        }
+    )
+
+    assert _budget_from_request(request).max_output_tokens == 32_000
 
 
 def test_legacy_conversion_and_helper_fallback_are_unchanged():
