@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from typing import Literal
 
-from sqlalchemy import exists, select
+from sqlalchemy import exists, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from research_api.billing.ledger import settle_units
 from research_api.db.models import (
+    BillingCreditEntry,
     BillingUnitEntry,
     ProviderCall,
     ProviderCallReservation,
@@ -45,7 +46,18 @@ async def settle_terminal_run(session: AsyncSession, run: ResearchRun) -> bool:
             BillingUnitEntry.entry_type == "reservation",
         )
     )
-    if reservation is None:
+    credit_reservation = None
+    if await session.scalar(
+        text("SELECT to_regclass('public.billing_credit_entries') IS NOT NULL")
+    ):
+        credit_reservation = await session.scalar(
+            select(BillingCreditEntry.id).where(
+                BillingCreditEntry.tenant_id == run.tenant_id,
+                BillingCreditEntry.run_id == run.id,
+                BillingCreditEntry.entry_type == "reservation",
+            )
+        )
+    if reservation is None and credit_reservation is None:
         return False
     unresolved = await session.scalar(
         select(
@@ -77,14 +89,25 @@ async def settle_terminal_run(session: AsyncSession, run: ResearchRun) -> bool:
     )
     if outcome is None:
         return False
-    await settle_units(
-        session,
-        tenant_id=run.tenant_id,
-        user_id=run.user_id,
-        run_id=run.id,
-        outcome=outcome,
-        idempotency_key=f"run-settlement-v1:{run.id}",
-    )
+    if reservation is not None:
+        await settle_units(
+            session,
+            tenant_id=run.tenant_id,
+            user_id=run.user_id,
+            run_id=run.id,
+            outcome=outcome,
+            idempotency_key=f"run-settlement-v1:{run.id}",
+        )
+    if credit_reservation is not None:
+        from research_api.billing.credits import settle_credits
+
+        await settle_credits(
+            session,
+            tenant_id=run.tenant_id,
+            user_id=run.user_id,
+            run_id=run.id,
+            outcome=outcome,
+        )
     return True
 
 
