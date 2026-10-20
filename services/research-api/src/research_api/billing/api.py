@@ -14,6 +14,13 @@ from sqlalchemy import func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 
 from research_api.auth import Caller, authenticated_caller
+from research_api.billing.credit_packs import configured_credit_packs, credit_topups_available
+from research_api.billing.credits import (
+    apply_credit_checkout,
+    apply_credit_reversal,
+    credit_balance,
+    wallet_frozen,
+)
 from research_api.billing.entitlements import read_entitlement
 from research_api.billing.ledger import (
     BillingAdjustmentConflict,
@@ -32,11 +39,15 @@ from research_api.billing.stripe import (
     safe_session_url,
     stripe_idempotency_key,
     stripe_request,
+    validate_credit_price,
     validate_monthly_price,
 )
 from research_api.billing.subscriptions import apply_checkout_event, apply_subscription_event
 from research_api.config import Settings, get_settings
 from research_api.db.models import (
+    BillingAccount,
+    BillingCreditEntry,
+    BillingCreditPurchase,
     StripeCheckoutAttempt,
     StripeCustomerLink,
     StripeSubscription,
@@ -67,6 +78,12 @@ class CheckoutRequest(BaseModel):
     interval: Literal["monthly"] = "monthly"
 
 
+class CreditCheckoutRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, populate_by_name=True)
+
+    package_key: str = Field(alias="packageKey", min_length=1, max_length=64)
+
+
 @router.get("/checkout-availability")
 async def checkout_availability() -> dict[str, object]:
     """Expose only purchase availability and plan keys; never expose Stripe secrets."""
@@ -86,6 +103,96 @@ async def checkout_availability() -> dict[str, object]:
     except StripeUnavailable:
         return {"enabled": False, "plans": []}
     return {"enabled": bool(settings.STRIPE_SECRET_KEY), "plans": plans}
+
+
+@router.get("/credit-packs")
+async def list_credit_packs(caller: CallerDep) -> dict[str, object]:
+    """List authenticated, server-configured packs without exposing Stripe Price IDs."""
+    settings = get_settings()
+    enabled = credit_topups_available(settings)
+    if enabled:
+        async with tenant_session(str(caller.tenant_id)) as session:
+            enabled = bool(
+                await session.scalar(
+                    text("SELECT to_regclass('public.billing_credit_purchases') IS NOT NULL")
+                )
+            )
+    packs = configured_credit_packs(settings) if enabled else {}
+    return {
+        "enabled": enabled,
+        "currency": "usd",
+        "packs": [
+            {
+                "key": item.key,
+                "amountMinor": item.amount_minor,
+                "units": item.units,
+                "expiryDays": item.expiry_days,
+            }
+            for item in packs.values()
+        ],
+    }
+
+
+@router.get("/credit-balance")
+async def read_credit_balance(caller: CallerDep) -> dict[str, object]:
+    """Owner-scoped purchased balance; never conflated with monthly entitlement."""
+    async with tenant_session(str(caller.tenant_id)) as session:
+        schema_ready = await session.scalar(
+            text("SELECT to_regclass('public.billing_credit_entries') IS NOT NULL")
+        )
+        if not schema_ready:
+            return {"enabled": False}
+        await session.execute(
+            text("SELECT set_config('app.user_id', :id, true)"),
+            {"id": str(caller.user_id)},
+        )
+        account_id = await session.scalar(
+            select(BillingAccount.id).where(
+                BillingAccount.tenant_id == caller.tenant_id,
+                BillingAccount.user_id == caller.user_id,
+            )
+        )
+        if account_id is None:
+            return {
+                "enabled": True,
+                "availableUnits": 0,
+                "reservedUnits": 0,
+                "frozen": False,
+            }
+        available, reserved = await credit_balance(
+            session, tenant_id=caller.tenant_id, account_id=account_id
+        )
+        frozen = await wallet_frozen(session, tenant_id=caller.tenant_id, account_id=account_id)
+        return {
+            "enabled": True,
+            "availableUnits": available,
+            "reservedUnits": reserved,
+            "frozen": frozen,
+        }
+
+
+@router.get("/credit-purchases/{session_id}")
+async def read_credit_purchase(session_id: str, caller: CallerDep) -> dict[str, str]:
+    """Check the owner-scoped fulfillment state; the redirect is never authoritative."""
+    if not session_id.startswith("cs_") or STRIPE_ID_PATTERN.fullmatch(session_id) is None:
+        raise HTTPException(404, "Credit purchase not found")
+    async with tenant_session(str(caller.tenant_id)) as session:
+        await session.execute(
+            text("SELECT set_config('app.user_id', :id, true)"),
+            {"id": str(caller.user_id)},
+        )
+        purchase = await session.scalar(
+            select(BillingCreditPurchase)
+            .join(BillingAccount, BillingAccount.id == BillingCreditPurchase.billing_account_id)
+            .where(
+                BillingCreditPurchase.tenant_id == caller.tenant_id,
+                BillingCreditPurchase.stripe_checkout_session_id == session_id,
+                BillingAccount.user_id == caller.user_id,
+            )
+        )
+        if purchase is None:
+            raise HTTPException(404, "Credit purchase not found")
+        return {"status": purchase.state}
 
 
 async def _stripe_customer_for(caller: Caller, settings: Settings) -> str:
@@ -147,6 +254,261 @@ async def _stripe_customer_for(caller: Caller, settings: Settings) -> str:
         return saved.stripe_customer_id
 
 
+async def _begin_credit_purchase(
+    caller: Caller,
+    *,
+    pack_key: str,
+    request_key: str,
+    amount_minor: int,
+    price_id: str,
+    units: int,
+    currency: str,
+    terms_version: str,
+    max_wallet_units: int,
+) -> BillingCreditPurchase:
+    """Persist immutable purchase terms before Stripe; retries reuse the same order."""
+    key_hash = hashlib.sha256(request_key.encode("utf-8")).hexdigest()
+    stable_key = stripe_idempotency_key(
+        "credit-checkout", f"{caller.tenant_id}:{caller.user_id}:{request_key}"
+    )
+    async with tenant_session(str(caller.tenant_id)) as session:
+        await session.execute(
+            text("SELECT set_config('app.user_id', :id, true)"),
+            {"id": str(caller.user_id)},
+        )
+        await ensure_default_free_period(
+            session, tenant_id=caller.tenant_id, user_id=caller.user_id
+        )
+        account = await session.scalar(
+            select(BillingAccount).where(
+                BillingAccount.tenant_id == caller.tenant_id,
+                BillingAccount.user_id == caller.user_id,
+            )
+        )
+        if account is None:
+            raise HTTPException(503, "Credit checkout is temporarily unavailable")
+        lock_name = f"billing-credit-checkout-v1:{caller.tenant_id}:{account.id}"
+        await session.execute(
+            select(func.pg_advisory_xact_lock(func.hashtextextended(lock_name, 0)))
+        )
+        purchase = await session.scalar(
+            select(BillingCreditPurchase).where(
+                BillingCreditPurchase.tenant_id == caller.tenant_id,
+                BillingCreditPurchase.billing_account_id == account.id,
+                BillingCreditPurchase.request_key_hash == key_hash,
+            )
+        )
+        if purchase is None:
+            if units > max_wallet_units:
+                raise HTTPException(422, "This pack exceeds the configured wallet limit")
+            recent_count = await session.scalar(
+                select(func.count(BillingCreditPurchase.id)).where(
+                    BillingCreditPurchase.tenant_id == caller.tenant_id,
+                    BillingCreditPurchase.billing_account_id == account.id,
+                    BillingCreditPurchase.created_at >= datetime.now(UTC) - timedelta(days=1),
+                )
+            )
+            if int(recent_count or 0) >= 5:
+                raise HTTPException(429, "Daily research-credit purchase limit reached")
+            wallet_balance = await session.scalar(
+                select(
+                    func.coalesce(
+                        func.sum(
+                            # Available plus reserved equals the unspent wallet balance.
+                            # Both deltas are append-only; the ledger remains the authority.
+                            func.coalesce(BillingCreditEntry.available_delta, 0)
+                            + func.coalesce(BillingCreditEntry.reserved_delta, 0)
+                        ),
+                        0,
+                    )
+                ).where(
+                    BillingCreditEntry.tenant_id == caller.tenant_id,
+                    BillingCreditEntry.billing_account_id == account.id,
+                )
+            )
+            pending_units = await session.scalar(
+                select(func.coalesce(func.sum(BillingCreditPurchase.unit_grant), 0)).where(
+                    BillingCreditPurchase.tenant_id == caller.tenant_id,
+                    BillingCreditPurchase.billing_account_id == account.id,
+                    BillingCreditPurchase.state == "pending",
+                )
+            )
+            pending_count = await session.scalar(
+                select(func.count(BillingCreditPurchase.id)).where(
+                    BillingCreditPurchase.tenant_id == caller.tenant_id,
+                    BillingCreditPurchase.billing_account_id == account.id,
+                    BillingCreditPurchase.state == "pending",
+                )
+            )
+            if int(pending_count or 0) >= 2:
+                raise HTTPException(
+                    429, "Finish an existing credit checkout before starting another"
+                )
+            if int(wallet_balance or 0) + int(pending_units or 0) + units > max_wallet_units:
+                raise HTTPException(
+                    409,
+                    "The configured research-credit wallet limit would be exceeded",
+                )
+            purchase_id = uuid.uuid4()
+            await session.execute(
+                insert(BillingCreditPurchase)
+                .values(
+                    id=purchase_id,
+                    tenant_id=caller.tenant_id,
+                    billing_account_id=account.id,
+                    user_id=caller.user_id,
+                    package_key=pack_key,
+                    stripe_price_id=price_id,
+                    request_key_hash=key_hash,
+                    stripe_idempotency_key=stable_key,
+                    terms_version=terms_version,
+                    amount_minor=amount_minor,
+                    currency=currency.upper(),
+                    unit_grant=units,
+                    state="pending",
+                )
+                .on_conflict_do_nothing(constraint="uq_billing_credit_purchase_request_key")
+            )
+            purchase = await session.scalar(
+                select(BillingCreditPurchase).where(
+                    BillingCreditPurchase.tenant_id == caller.tenant_id,
+                    BillingCreditPurchase.billing_account_id == account.id,
+                    BillingCreditPurchase.request_key_hash == key_hash,
+                )
+            )
+        if purchase is None:
+            raise HTTPException(503, "Credit checkout is temporarily unavailable")
+        if (
+            purchase.user_id != caller.user_id
+            or purchase.billing_account_id != account.id
+            or purchase.package_key != pack_key
+            or purchase.stripe_price_id != price_id
+            or purchase.amount_minor != amount_minor
+            or purchase.currency != currency.upper()
+            or purchase.unit_grant != units
+            or purchase.terms_version != terms_version
+        ):
+            raise HTTPException(409, "Checkout idempotency key was used for different terms")
+        if purchase.state != "pending":
+            raise HTTPException(409, "This credit purchase is no longer payable")
+        if purchase.stripe_idempotency_key != stable_key:
+            raise HTTPException(409, "Credit checkout idempotency record is inconsistent")
+        return purchase
+
+
+@router.post("/credit-checkout")
+async def create_credit_checkout_session(
+    payload: CreditCheckoutRequest,
+    caller: CallerDep,
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=8, max_length=200)],
+) -> dict[str, str]:
+    """Create a one-time Checkout Session from an immutable server-side pack."""
+    settings = get_settings()
+    if not credit_topups_available(settings):
+        raise HTTPException(503, "Research-credit purchases are not available")
+    async with tenant_session(str(caller.tenant_id)) as session:
+        schema_ready = await session.scalar(
+            text("SELECT to_regclass('public.billing_credit_purchases') IS NOT NULL")
+        )
+    if not schema_ready:
+        raise HTTPException(503, "Research-credit purchases are not available")
+    if idempotency_key.strip() != idempotency_key or any(
+        ord(character) < 32 for character in idempotency_key
+    ):
+        raise HTTPException(422, "Invalid checkout idempotency key")
+    packs = configured_credit_packs(settings)
+    pack = packs.get(payload.package_key)
+    if pack is None:
+        raise HTTPException(422, "Unknown research-credit package")
+    try:
+        await validate_credit_price(
+            settings,
+            price_id=pack.price_id,
+            amount_minor=pack.amount_minor,
+            currency=pack.currency,
+        )
+        base_url = app_base_url(settings)
+        purchase = await _begin_credit_purchase(
+            caller,
+            pack_key=pack.key,
+            request_key=idempotency_key,
+            amount_minor=pack.amount_minor,
+            price_id=pack.price_id,
+            units=pack.units,
+            currency=pack.currency,
+            terms_version=settings.BILLING_CREDIT_TERMS_VERSION or "",
+            max_wallet_units=settings.BILLING_CREDIT_MAX_WALLET_UNITS,
+        )
+        customer_id = await _stripe_customer_for(caller, settings)
+        if purchase.stripe_checkout_session_id:
+            result = await stripe_request(
+                settings,
+                "GET",
+                f"/checkout/sessions/{purchase.stripe_checkout_session_id}",
+            )
+            if result.get("status") == "complete":
+                raise HTTPException(
+                    409,
+                    "Payment was received; credit delivery is being verified",
+                )
+            if result.get("status") != "open":
+                raise HTTPException(
+                    409,
+                    "This Checkout Session is no longer open; start a new request",
+                )
+        else:
+            result = await stripe_request(
+                settings,
+                "POST",
+                "/checkout/sessions",
+                form={
+                    "mode": "payment",
+                    "customer": customer_id,
+                    "client_reference_id": str(purchase.id),
+                    "line_items[0][price]": pack.price_id,
+                    "line_items[0][quantity]": "1",
+                    "success_url": (
+                        f"{base_url}/research?credits=success&session_id={{CHECKOUT_SESSION_ID}}"
+                    ),
+                    "cancel_url": f"{base_url}/pricing?credits=cancelled",
+                    "metadata[purchase_id]": str(purchase.id),
+                    "metadata[tenant_id]": str(caller.tenant_id),
+                    "metadata[user_id]": str(caller.user_id),
+                    "payment_intent_data[metadata][purchase_id]": str(purchase.id),
+                },
+                idempotency_key=purchase.stripe_idempotency_key,
+            )
+        session_id = result.get("id")
+        if (
+            not isinstance(session_id, str)
+            or not session_id.startswith("cs_")
+            or STRIPE_ID_PATTERN.fullmatch(session_id) is None
+        ):
+            raise StripeUnavailable("Stripe returned an invalid Checkout Session")
+        if purchase.stripe_checkout_session_id is None:
+            async with tenant_session(str(caller.tenant_id)) as session:
+                await session.execute(
+                    text("SELECT set_config('app.user_id', :id, true)"),
+                    {"id": str(caller.user_id)},
+                )
+                await session.execute(
+                    update(BillingCreditPurchase)
+                    .where(
+                        BillingCreditPurchase.id == purchase.id,
+                        BillingCreditPurchase.state == "pending",
+                        BillingCreditPurchase.stripe_checkout_session_id.is_(None),
+                    )
+                    .values(stripe_checkout_session_id=session_id)
+                )
+        return {
+            "purchaseId": str(purchase.id),
+            "sessionId": session_id,
+            "url": safe_session_url(result),
+        }
+    except StripeUnavailable as exc:
+        raise HTTPException(503, "Research-credit checkout is temporarily unavailable") from exc
+
+
 async def _begin_checkout_attempt(
     caller: Caller, *, plan_key: str, request_key: str
 ) -> StripeCheckoutAttempt:
@@ -197,7 +559,16 @@ async def _begin_checkout_attempt(
         )
         if open_attempt is not None:
             if open_attempt.expires_at > now:
-                raise HTTPException(409, "A secure checkout is already open for this account")
+                if open_attempt.plan_key != plan_key:
+                    raise HTTPException(
+                        409,
+                        "A checkout for a different plan is already open for this account",
+                    )
+                # A browser retry gets a fresh request idempotency key. Reuse the
+                # persisted attempt and its Stripe idempotency key so it resumes
+                # the same hosted session instead of dead-ending with a 409 or
+                # creating a duplicate subscription session.
+                return open_attempt
             open_attempt.state = "expired"
         attempt = StripeCheckoutAttempt(
             tenant_id=caller.tenant_id,
@@ -265,6 +636,32 @@ async def create_checkout_session(
                 "GET",
                 f"/checkout/sessions/{attempt.stripe_session_id}",
             )
+            session_status = result.get("status")
+            if session_status == "complete":
+                raise HTTPException(
+                    409,
+                    "Checkout has completed; wait for your plan activation before trying again",
+                )
+            if session_status == "expired":
+                async with tenant_session(str(caller.tenant_id)) as session:
+                    await session.execute(
+                        text("SELECT set_config('app.user_id', :id, true)"),
+                        {"id": str(caller.user_id)},
+                    )
+                    await session.execute(
+                        update(StripeCheckoutAttempt)
+                        .where(
+                            StripeCheckoutAttempt.id == attempt.id,
+                            StripeCheckoutAttempt.state == "open",
+                        )
+                        .values(state="expired")
+                    )
+                raise HTTPException(
+                    409,
+                    "The previous checkout expired. Choose the plan again to start a new checkout",
+                )
+            if session_status != "open":
+                raise StripeUnavailable("Stripe returned an invalid Checkout Session status")
         else:
             result = await stripe_request(
                 settings,
@@ -527,6 +924,12 @@ async def receive_stripe_webhook(request: Request) -> dict[str, object] | JSONRe
     relevant = event_type in subscription_events or event_type in {
         "checkout.session.completed",
         "checkout.session.expired",
+        "checkout.session.async_payment_succeeded",
+        "checkout.session.async_payment_failed",
+        "refund.created",
+        "refund.updated",
+        "charge.dispute.created",
+        "charge.dispute.closed",
     }
     needs_reconciliation = False
     duplicate_event = False
@@ -557,6 +960,22 @@ async def receive_stripe_webhook(request: Request) -> dict[str, object] | JSONRe
             inserted is not None or prior_status in {"received", "reconciliation_required"}
         )
         if should_process:
+            credit_schema_ready = False
+            if event_type not in subscription_events and (
+                event_type
+                in {
+                    "refund.created",
+                    "refund.updated",
+                    "charge.dispute.created",
+                    "charge.dispute.closed",
+                }
+                or data_object.get("mode") == "payment"
+            ):
+                credit_schema_ready = bool(
+                    await session.scalar(
+                        text("SELECT to_regclass('public.billing_credit_purchases') IS NOT NULL")
+                    )
+                )
             if event.get("api_version") != settings.STRIPE_API_VERSION:
                 processing_status = "reconciliation_required"
             elif not settings.BILLING_STRIPE_ENABLED:
@@ -579,6 +998,51 @@ async def receive_stripe_webhook(request: Request) -> dict[str, object] | JSONRe
                             obj=data_object,
                             settings=settings,
                         )
+                    elif (
+                        event_type.startswith("checkout.session.")
+                        and data_object.get("mode") == "payment"
+                    ):
+                        if (
+                            not credit_schema_ready
+                            or not settings.BILLING_CREDIT_FULFILLMENT_ENABLED
+                        ):
+                            raise HTTPException(503, "Research-credit fulfillment is unavailable")
+                        processing_status = await apply_credit_checkout(
+                            session,
+                            event_type=event_type,
+                            obj=data_object,
+                            livemode=event["livemode"],
+                            expected_livemode=settings.STRIPE_LIVEMODE,
+                        )
+                    elif event_type in {"refund.created", "refund.updated"}:
+                        if not credit_schema_ready or data_object.get("status") != "succeeded":
+                            processing_status = "processed"
+                        else:
+                            processing_status = await apply_credit_reversal(
+                                session,
+                                event_type=event_type,
+                                obj=data_object,
+                                livemode=event["livemode"],
+                                expected_livemode=settings.STRIPE_LIVEMODE,
+                                settings=settings,
+                            )
+                    elif event_type in {"charge.dispute.created", "charge.dispute.closed"}:
+                        if credit_schema_ready:
+                            processing_status = await apply_credit_reversal(
+                                session,
+                                event_type=event_type,
+                                obj=data_object,
+                                livemode=event["livemode"],
+                                expected_livemode=settings.STRIPE_LIVEMODE,
+                                settings=settings,
+                            )
+                        else:
+                            processing_status = "ignored"
+                    elif event_type in {
+                        "checkout.session.async_payment_succeeded",
+                        "checkout.session.async_payment_failed",
+                    }:
+                        processing_status = "ignored"
                     else:
                         processing_status = await apply_checkout_event(
                             session, event_type=event_type, obj=data_object
