@@ -358,17 +358,39 @@ def replay(cases, fixture_dir=FIXTURES):
     receipts = load_json(fixture_dir / "synthetic-receipts.json")
     if set(receipts) != {case.id for case in cases}:
         raise ValueError("synthetic receipt IDs must match cases")
-    # This is the only runtime policy import; it has no service/network side effects.
-    from research_api.reports import report_policy
-
-    policy_hash = sha256(ROOT / "src/research_api/reports.py")
+    # The v1 baseline records the legacy policy as it was evaluated. Importing
+    # current runtime policy here would silently re-interpret frozen receipts.
+    policies = load_json(fixture_dir / "legacy-policy.json")
+    if not isinstance(policies, dict) or set(policies) != {
+        "6",
+        "12",
+        "20",
+        "source_reports_py_sha256",
+    }:
+        raise ValueError("invalid archived legacy policy modes")
+    original_hash = policies.pop("source_reports_py_sha256")
+    if (
+        not isinstance(original_hash, str)
+        or len(original_hash) != 64
+        or any(character not in "0123456789abcdef" for character in original_hash)
+    ):
+        raise ValueError("invalid archived source policy fingerprint")
+    for calls, mode in ((6, "focused"), (12, "balanced"), (20, "deep")):
+        policy = policies[str(calls)]
+        if not isinstance(policy, dict) or set(policy) != {"mode", "limits"}:
+            raise ValueError("invalid archived legacy policy fields")
+        limits = Limits.model_validate(policy["limits"])
+        if policy["mode"] != mode or limits.provider_operations != calls:
+            raise ValueError("archived legacy policy mode/operation mismatch")
+        policies[str(calls)] = {"mode": mode, "limits": limits}
+    policy_hash = sha256(fixture_dir / "legacy-policy.json")
     snapshot = {
         "model": "not_invoked",
         "provider": "authored_synthetic_receipts_v1",
         "prompt": "not_invoked",
         "schema": "modes-observation-v1",
         "graph": "not_executed",
-        "policy": "legacy_reports_py_sha256:" + policy_hash,
+        "policy": "archived_legacy_policy_sha256:" + policy_hash,
     }
     rows = []
     for case in cases:
@@ -382,25 +404,19 @@ def replay(cases, fixture_dir=FIXTURES):
         exact = bool(receipt["quote"]) and receipt["quote"] in receipt["text"]
         admitted = exact and receipt["semantic_label"] == "supported"
         for calls in (6, 12, 20):
-            policy = report_policy(calls)
+            policy = policies[str(calls)]
+            limits = policy["limits"]
             rows.append(
                 {
                     "version": "modes-observation-v1",
                     "case_id": case.id,
-                    "mode": policy.mode,
+                    "mode": policy["mode"],
                     "requested_mode": None,
                     "policy_origin": "legacy-inferred",
                     "evidence_kind": "synthetic",
                     "snapshot": snapshot,
                     "receipt_sha256": hashlib.sha256(canonical(receipt).encode()).hexdigest(),
-                    "limits": {
-                        "provider_operations": calls,
-                        "sources": policy.source_count,
-                        "candidate_findings": policy.candidate_count,
-                        "context_chars": policy.context_chars,
-                        "output_tokens": policy.output_tokens,
-                        "plan_questions": policy.question_count,
-                    },
+                    "limits": limits.model_dump(),
                     "usage": {
                         "operations": {"search": 1, "extract": 1},
                         "sources": 1,
@@ -451,7 +467,13 @@ def baseline(fixture_dir=FIXTURES):
         "scope": "synthetic_offline_harness_only",
         "inputs_sha256": {
             name: sha256(fixture_dir / name)
-            for name in ("cases.jsonl", "synthetic-receipts.json", "rubric.md", "schema.json")
+            for name in (
+                "cases.jsonl",
+                "synthetic-receipts.json",
+                "legacy-policy.json",
+                "rubric.md",
+                "schema.json",
+            )
         },
         "observations": [row.model_dump() for row in rows],
         "summary": aggregate(rows, cases),
@@ -494,6 +516,7 @@ def main():
                     if name not in {
                         "cases.jsonl",
                         "synthetic-receipts.json",
+                        "legacy-policy.json",
                         "rubric.md",
                         "schema.json",
                         "baseline.json",
@@ -501,7 +524,7 @@ def main():
                         raise ValueError("unexpected manifest path")
                     if sha256(args.fixtures / name) != digest:
                         raise ValueError(f"artifact hash mismatch: {name}")
-                if len(manifest) != 5:
+                if len(manifest) != 6:
                     raise ValueError("incomplete manifest")
                 result = {"reproducible": True, "summary": result["summary"]}
         print(canonical(result), end="")
