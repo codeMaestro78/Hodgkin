@@ -8,6 +8,7 @@ import {
   ReportDocumentV3Schema,
   ReportDocumentV4Schema,
   ReportDocumentV5Schema,
+  ReportDocumentV6Schema,
 } from "@research/contracts";
 import {
   hasNumericalFinding,
@@ -227,36 +228,182 @@ it("renders a V5 literal technical result with a source inspection action", () =
     ...base,
     version: 5,
     assessmentVersion: "technical-results-v1",
-    technicalResults: [{
-      kind: "theorem",
-      title: "Theorem 2",
-      claimId: finding.id,
-      citationIds: finding.citationIds.slice(0, 1),
-      sourceIds: finding.sourceIds.slice(0, 1),
-      sourceArtifactHash: "a".repeat(64),
-      assumptions: ["reversible chains"],
-      notation: [],
-      sourceLocation: "Theorem 2",
-      expression: {
-        sourceText: "t_mix <= log(1/pi_min)/lambda",
-        representation: "plain_text",
-        transformation: "none",
+    technicalResults: [
+      {
+        kind: "theorem",
+        title: "Theorem 2",
+        claimId: finding.id,
+        citationIds: finding.citationIds.slice(0, 1),
+        sourceIds: finding.sourceIds.slice(0, 1),
+        sourceArtifactHash: "a".repeat(64),
+        assumptions: ["reversible chains"],
+        notation: [],
+        sourceLocation: "Theorem 2",
+        expression: {
+          sourceText: "t_mix <= log(1/pi_min)/lambda",
+          representation: "plain_text",
+          transformation: "none",
+        },
+        verification: "exact_passage_and_scoped_semantic_claim_review_v2",
       },
-      verification: "exact_passage_and_scoped_semantic_claim_review_v2",
-    }],
+    ],
   });
-  const html = renderToStaticMarkup(createElement(TechnicalResults, {
-    document,
-    sourceTitles: new Map([[finding.sourceIds[0]!, "Primary paper"]]),
-    onOpenSource: () => {},
-  }));
+  const html = renderToStaticMarkup(
+    createElement(TechnicalResults, {
+      document,
+      sourceTitles: new Map([[finding.sourceIds[0]!, "Primary paper"]]),
+      onOpenSource: () => {},
+    }),
+  );
   expect(html).toContain("Source-stated technical results");
   expect(html).toContain("t_mix &lt;= log(1/pi_min)/lambda");
   expect(html).toContain("Inspect Primary paper");
-  expect(reportDisplayMarkdown(
-    "Before\n<!-- technical-results-v1:start -->\n## Source-stated technical results\n<!-- technical-results-v1:end -->\nAfter",
-    true,
-  )).not.toContain("Source-stated technical results");
+  expect(
+    reportDisplayMarkdown(
+      "Before\n<!-- technical-results-v1:start -->\n## Source-stated technical results\n<!-- technical-results-v1:end -->\nAfter",
+      true,
+    ),
+  ).not.toContain("Source-stated technical results");
+});
+
+it("renders only contract-admitted V6 measurements and server-approved charts", () => {
+  const base = ReportDocumentV5Schema.parse({
+    ...narrativeReport(),
+    version: 5,
+    assessmentVersion: "technical-results-v1",
+    technicalResults: [],
+  });
+  const finding = base.findings[0]!;
+  const measurement = (id: string, subject: string, value: string) => ({
+    id,
+    title: `Outcome for ${subject}`,
+    claimId: finding.id,
+    citationId: finding.citationIds[0],
+    sourceId: finding.sourceIds[0],
+    sourceArtifactHash: "a".repeat(64),
+    subject,
+    metric: "response rate",
+    value,
+    unit: "%",
+    population: "adults",
+    period: "2024",
+    method: "randomized trial",
+    definition: "participants with response",
+    sourcePassage: `Outcome for ${subject}: response rate ${value}% in adults in 2024.`,
+    sourceLocation: "Table 2",
+    plotValue: value,
+    verification: "exact_passage_and_scoped_semantic_claim_review_v1" as const,
+  });
+  const rows = [
+    measurement("measurement-1", "Group A", "47.2"),
+    measurement("measurement-2", "Group B", "51.0"),
+  ];
+  const document = ReportDocumentV6Schema.parse({
+    ...base,
+    version: 6,
+    assessmentVersion: "typed-measurements-v1",
+    measurements: rows,
+    measurementComparisons: [
+      {
+        id: "measurement-comparison-1",
+        metric: "response rate",
+        measurementIds: rows.map((row) => row.id),
+        status: "comparable",
+        basis: "exact_scope_match_v1",
+      },
+    ],
+    measurementCharts: [
+      {
+        id: "chart-1",
+        title: "response rate by subject",
+        metric: "response rate",
+        unit: "%",
+        population: "adults",
+        period: "2024",
+        method: "randomized trial",
+        definition: "participants with response",
+        measurementIds: rows.map((row) => row.id),
+        basis: "identical_metric_unit_population_period_method_definition_v1",
+      },
+    ],
+  });
+  expect(() =>
+    ReportDocumentV6Schema.parse({ ...document, measurementComparisons: [] }),
+  ).toThrow();
+  const html = renderToStaticMarkup(
+    createElement(TechnicalResults, {
+      document,
+      sourceTitles: new Map([[finding.sourceIds[0]!, "Study"]]),
+      onOpenSource: () => {},
+    }),
+  );
+  expect(html).toContain("Source-stated measurements");
+  expect(html).toContain("47.2");
+  expect(html).toContain("response rate by subject");
+  expect(html).toContain("Comparable within recorded scope");
+  expect(html).toContain("exact cited passage");
+});
+
+it("rejects a V6 chart when population differs between measurement records", () => {
+  const base = ReportDocumentV5Schema.parse({
+    ...narrativeReport(),
+    version: 5,
+    assessmentVersion: "technical-results-v1",
+    technicalResults: [],
+  });
+  const finding = base.findings[0]!;
+  const row = (id: string, population: string) => ({
+    id,
+    title: "Outcome",
+    claimId: finding.id,
+    citationId: finding.citationIds[0],
+    sourceId: finding.sourceIds[0],
+    sourceArtifactHash: "a".repeat(64),
+    subject: id,
+    metric: "rate",
+    value: "2",
+    unit: "%",
+    population,
+    period: "2024",
+    method: "trial",
+    definition: "response",
+    sourcePassage: "rate 2%",
+    sourceLocation: null,
+    plotValue: "2",
+    verification: "exact_passage_and_scoped_semantic_claim_review_v1" as const,
+  });
+  const rows = [row("m1", "adults"), row("m2", "children")];
+  expect(() =>
+    ReportDocumentV6Schema.parse({
+      ...base,
+      version: 6,
+      assessmentVersion: "typed-measurements-v1",
+      measurements: rows,
+      measurementComparisons: [
+        {
+          id: "measurement-comparison-1",
+          metric: "rate",
+          measurementIds: ["m1", "m2"],
+          status: "not_established",
+          basis: "missing_or_incompatible_scope_v1",
+        },
+      ],
+      measurementCharts: [
+        {
+          id: "chart",
+          title: "rate",
+          metric: "rate",
+          unit: "%",
+          population: "adults",
+          period: "2024",
+          method: "trial",
+          definition: "response",
+          measurementIds: ["m1", "m2"],
+          basis: "identical_metric_unit_population_period_method_definition_v1",
+        },
+      ],
+    }),
+  ).toThrow();
 });
 
 it("explains when a V5 report has no admitted technical results", () => {
@@ -266,13 +413,17 @@ it("explains when a V5 report has no admitted technical results", () => {
     assessmentVersion: "technical-results-v1",
     technicalResults: [],
   });
-  const html = renderToStaticMarkup(createElement(TechnicalResults, {
-    document,
-    sourceTitles: new Map(),
-    onOpenSource: () => {},
-  }));
+  const html = renderToStaticMarkup(
+    createElement(TechnicalResults, {
+      document,
+      sourceTitles: new Map(),
+      onOpenSource: () => {},
+    }),
+  );
   expect(html).toContain("Source-stated technical results");
-  expect(html).toContain("No source-located technical results passed this report’s evidence checks.");
+  expect(html).toContain(
+    "No source-located technical results passed this report’s evidence checks.",
+  );
   expect(html).not.toContain("technical-results-list");
 });
 
@@ -283,29 +434,33 @@ it("renders source-literal LaTeX without trusting embedded links", () => {
     ...base,
     version: 5,
     assessmentVersion: "technical-results-v1",
-    technicalResults: [{
-      kind: "bound",
-      title: "Recorded bound",
-      claimId: finding.id,
-      citationIds: finding.citationIds.slice(0, 1),
-      sourceIds: finding.sourceIds.slice(0, 1),
-      sourceArtifactHash: "a".repeat(64),
-      assumptions: [],
-      notation: [],
-      sourceLocation: null,
-      expression: {
-        sourceText: String.raw`\lambda \le 1 \href{javascript:alert(1)}{unsafe}`,
-        representation: "latex",
-        transformation: "none",
+    technicalResults: [
+      {
+        kind: "bound",
+        title: "Recorded bound",
+        claimId: finding.id,
+        citationIds: finding.citationIds.slice(0, 1),
+        sourceIds: finding.sourceIds.slice(0, 1),
+        sourceArtifactHash: "a".repeat(64),
+        assumptions: [],
+        notation: [],
+        sourceLocation: null,
+        expression: {
+          sourceText: String.raw`\lambda \le 1 \href{javascript:alert(1)}{unsafe}`,
+          representation: "latex",
+          transformation: "none",
+        },
+        verification: "exact_passage_and_scoped_semantic_claim_review_v2",
       },
-      verification: "exact_passage_and_scoped_semantic_claim_review_v2",
-    }],
+    ],
   });
-  const html = renderToStaticMarkup(createElement(TechnicalResults, {
-    document,
-    sourceTitles: new Map(),
-    onOpenSource: () => {},
-  }));
+  const html = renderToStaticMarkup(
+    createElement(TechnicalResults, {
+      document,
+      sourceTitles: new Map(),
+      onOpenSource: () => {},
+    }),
+  );
   expect(html).toContain("katex");
   expect(html).not.toContain('href="javascript:');
 });

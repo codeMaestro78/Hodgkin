@@ -8,7 +8,7 @@ import pytest
 
 from research_api.config import Settings
 from research_api.db.models import Budget, ResearchRun, SubQuestion
-from research_api.graph import builder
+from research_api.graph import builder, collection
 
 
 @pytest.mark.asyncio
@@ -80,11 +80,11 @@ async def test_real_worker_bounds_sources_and_concurrency(
             active -= 1
             return [uuid.uuid4() for _ in range(kwargs["max_results"])]
 
-    monkeypatch.setattr(builder, "tenant_session", session)
-    monkeypatch.setattr(builder, "TavilyEvidenceIngestor", Ingestor)
-    monkeypatch.setattr(builder, "S3ArtifactStore", lambda **_kwargs: object())
+    monkeypatch.setattr(collection, "tenant_session", session)
+    monkeypatch.setattr(collection, "TavilyEvidenceIngestor", Ingestor)
+    monkeypatch.setattr(collection, "S3ArtifactStore", lambda **_kwargs: object())
     monkeypatch.setattr(
-        builder, "TavilyAdapter", lambda **_kwargs: SimpleNamespace(aclose=AsyncMock())
+        collection, "TavilyAdapter", lambda **_kwargs: SimpleNamespace(aclose=AsyncMock())
     )
 
     def discovery(**_kwargs):
@@ -92,12 +92,14 @@ async def test_real_worker_bounds_sources_and_concurrency(
         discovery_instances.append(instance)
         return instance
 
-    monkeypatch.setattr(builder, "SerperAdapter", discovery)
-    monkeypatch.setattr(builder, "_cancel_if_requested", AsyncMock(return_value=False))
-    monkeypatch.setattr(builder, "_transition", AsyncMock())
+    monkeypatch.setattr(collection, "SerperAdapter", discovery)
+    monkeypatch.setattr(collection, "_cancel_if_requested", AsyncMock(return_value=False))
+    monkeypatch.setattr(collection, "_transition", AsyncMock())
     monkeypatch.setattr(builder, "start_node", AsyncMock(return_value=uuid.uuid4()))
     monkeypatch.setattr(builder, "finish_node", AsyncMock())
-    monkeypatch.setattr(builder, "EventOutbox", lambda *_args: SimpleNamespace(append=AsyncMock()))
+    monkeypatch.setattr(
+        collection, "EventOutbox", lambda *_args: SimpleNamespace(append=AsyncMock())
+    )
     worker = (
         builder.build_graph(
             Settings(

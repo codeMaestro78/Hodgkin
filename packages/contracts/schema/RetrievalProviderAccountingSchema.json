@@ -1,5 +1,5 @@
 {
-  "$id": "https://schemas.research.local/1.6/RetrievalProviderAccountingSchema.json",
+  "$id": "https://schemas.research.local/1.7/RetrievalProviderAccountingSchema.json",
   "title": "RetrievalProviderAccountingSchema",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",

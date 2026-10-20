@@ -26,7 +26,7 @@ from research_api.config import Settings
 from research_api.db import models
 from research_api.db.session import tenant_session
 from research_api.events.outbox import EventOutbox
-from research_api.graph import builder
+from research_api.graph import builder, collection
 from research_api.report_document import validate_report_document
 from tests.integration.test_reliability_runtime import seed
 
@@ -103,7 +103,7 @@ async def report_harness(monkeypatch):
                     await session.flush()
                     return [source.id]
 
-        monkeypatch.setattr(builder, "TavilyEvidenceIngestor", Ingestor)
+        monkeypatch.setattr(collection, "TavilyEvidenceIngestor", Ingestor)
 
         async def context(_settings, *, sources, **_):
             return [
@@ -138,7 +138,7 @@ async def report_harness(monkeypatch):
         audit = AsyncMock(side_effect=AssertionError("Structured writer must not re-audit prose"))
         monkeypatch.setattr(builder, "_report_assertions", audit)
 
-        async def reviews(_settings, *, claims):
+        async def reviews(_settings, *, claims, **_kwargs):
             return [
                 builder.SemanticReview(
                     claim_index=index,

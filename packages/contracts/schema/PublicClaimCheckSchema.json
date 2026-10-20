@@ -1,5 +1,5 @@
 {
-  "$id": "https://schemas.research.local/1.6/PublicClaimCheckSchema.json",
+  "$id": "https://schemas.research.local/1.7/PublicClaimCheckSchema.json",
   "title": "PublicClaimCheckSchema",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",

@@ -182,6 +182,12 @@ class SerperAdapter:
                     await before_attempt()
                 started = monotonic()
                 in_flight = True
+                dependency_event(
+                    provider="serper",
+                    operation="search",
+                    outcome="started",
+                    attempt=attempt,
+                )
                 try:
                     response = await self._client.post(
                         "https://google.serper.dev/search",

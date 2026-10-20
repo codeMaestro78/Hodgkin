@@ -29,7 +29,7 @@ from research_api.db.models import (
 )
 from research_api.db.session import tenant_session
 from research_api.events.outbox import EventOutbox
-from research_api.graph import builder
+from research_api.graph import builder, collection, node_runtime
 from research_api.lifecycle import lock_run
 from research_api.mode_policy import MODE_POLICY_VERSION, resolve_mode_budget
 from research_api.repositories.runs import RunRepository
@@ -102,6 +102,7 @@ async def harness(monkeypatch):
             return bodies[artifact_ref]
 
     monkeypatch.setattr(builder, "S3ArtifactStore", Store)
+    monkeypatch.setattr(collection, "S3ArtifactStore", Store)
     controls = {
         "repair_body": "repair",
         "repair_writer_error": None,
@@ -148,7 +149,7 @@ async def harness(monkeypatch):
                 await release.wait()
             return [source_id]
 
-    monkeypatch.setattr(builder, "TavilyEvidenceIngestor", Ingestor)
+    monkeypatch.setattr(collection, "TavilyEvidenceIngestor", Ingestor)
     dispatches = []
     criterion_inputs = []
 
@@ -507,16 +508,16 @@ async def test_crash_replays_repair_without_duplicate_plan_or_paid_dispatch(
     if node == "delta_review":
         original = builder.exact_reviews
 
-        async def reviews(settings, claims, materials):
+        async def reviews(settings, claims, materials, **kwargs):
             nonlocal crashed
             if not crashed and any(claim.claim == REPAIR_CLAIM for claim in claims):
                 crashed = True
                 raise asyncio.CancelledError
-            return await original(settings, claims, materials)
+            return await original(settings, claims, materials, **kwargs)
 
         monkeypatch.setattr(builder, "exact_reviews", reviews)
     else:
-        original_event = builder.operation_event
+        original_event = node_runtime.operation_event
 
         def event(name, **kwargs):
             nonlocal crashed
@@ -525,7 +526,7 @@ async def test_crash_replays_repair_without_duplicate_plan_or_paid_dispatch(
                 raise asyncio.CancelledError
             return original_event(name, **kwargs)
 
-        monkeypatch.setattr(builder, "operation_event", event)
+        monkeypatch.setattr(node_runtime, "operation_event", event)
     with pytest.raises(asyncio.CancelledError):
         await harness.execute()
     await harness.execute()

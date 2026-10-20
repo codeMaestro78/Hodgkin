@@ -1,5 +1,5 @@
 {
-  "$id": "https://schemas.research.local/1.6/ComparedFindingSchema.json",
+  "$id": "https://schemas.research.local/1.7/ComparedFindingSchema.json",
   "title": "ComparedFindingSchema",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",

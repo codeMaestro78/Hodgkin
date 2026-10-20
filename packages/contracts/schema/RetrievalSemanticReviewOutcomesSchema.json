@@ -1,5 +1,5 @@
 {
-  "$id": "https://schemas.research.local/1.6/RetrievalSemanticReviewOutcomesSchema.json",
+  "$id": "https://schemas.research.local/1.7/RetrievalSemanticReviewOutcomesSchema.json",
   "title": "RetrievalSemanticReviewOutcomesSchema",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",

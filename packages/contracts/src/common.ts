@@ -1,13 +1,14 @@
 import { z } from "zod";
 
-export const SCHEMA_VERSION = "1.6" as const;
-// Persisted 1.1–1.5 snapshots remain readable; report provenance emits 1.6.
+export const SCHEMA_VERSION = "1.7" as const;
+// Persisted 1.1–1.6 snapshots remain readable; typed report contracts emit 1.7.
 export const SchemaVersionSchema = z.enum([
   "1.1",
   "1.2",
   "1.3",
   "1.4",
   "1.5",
+  "1.6",
   SCHEMA_VERSION,
 ]);
 export const UuidSchema = z.uuid();

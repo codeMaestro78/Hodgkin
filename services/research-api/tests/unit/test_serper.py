@@ -104,6 +104,8 @@ async def test_success_filters_deduplicates_and_never_exposes_snippets_as_eviden
         await adapter.aclose()
         assert not client.is_closed
     assert all(e["provider"] == "serper" and e["operation"] == "search" for e in events)
+    assert events[0]["outcome"] == "started"
+    assert events[-1]["outcome"] == "succeeded"
     assert "secret" not in repr(events) and "private prompt" not in repr(events)
 
 

@@ -14,7 +14,7 @@ from research_api.db.models import Budget, PlanApproval, ResearchRun, RuntimeJob
 from research_api.db.session import tenant_session
 from research_api.graph.builder import run_graph
 from research_api.runtime_context import JobFence, LeaseLostError, current_job
-from research_api.telemetry import dependency_run, operation_event
+from research_api.telemetry import dependency_run, dispatcher_slot_event, operation_event
 
 
 async def execute(fence: JobFence, settings: Settings, pool: Any) -> None:
@@ -120,6 +120,31 @@ async def execute(fence: JobFence, settings: Settings, pool: Any) -> None:
 async def dispatch_loop(settings: Settings, pool: Any) -> None:
     owner = uuid.uuid4()
     tasks: set[asyncio.Task[None]] = set()
+    active_tasks: set[asyncio.Task[None]] = set()
+
+    async def execute_tracked(fence: JobFence) -> None:
+        task = asyncio.current_task()
+        assert task is not None
+        active_tasks.add(task)
+        dispatcher_slot_event(
+            worker_instance_id=owner,
+            run_id=fence.run_id,
+            phase="acquired",
+            active_workers=len(active_tasks),
+            concurrency_limit=settings.WORKER_CONCURRENCY,
+        )
+        try:
+            await execute(fence, settings, pool)
+        finally:
+            active_tasks.discard(task)
+            dispatcher_slot_event(
+                worker_instance_id=owner,
+                run_id=fence.run_id,
+                phase="released",
+                active_workers=len(active_tasks),
+                concurrency_limit=settings.WORKER_CONCURRENCY,
+            )
+
     try:
         while True:
             # Retrieve exceptions, including cancellations, instead of discarding tasks.
@@ -136,7 +161,7 @@ async def dispatch_loop(settings: Settings, pool: Any) -> None:
                             break
                         fence = await jobs.claim(tenant, owner, settings)
                         if fence:
-                            tasks.add(asyncio.create_task(execute(fence, settings, pool)))
+                            tasks.add(asyncio.create_task(execute_tracked(fence)))
                 except Exception as exc:
                     operation_event(
                         "dispatcher.poll", started=poll_started, outcome="failed", error=exc

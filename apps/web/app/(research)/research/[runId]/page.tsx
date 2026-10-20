@@ -1801,11 +1801,15 @@ export default function LiveRunWorkspace() {
               {settledInsights && (
                 <details className="report-orchestration">
                   <summary>
-                    <OrchestrationSummary insights={settledInsights} />
+                    <OrchestrationSummary
+                      insights={settledInsights}
+                      runStatus={run.status}
+                    />
                   </summary>
                   <h2 className="sr-only">Live orchestration</h2>
                   <ExecutionView
                     insights={settledInsights}
+                    runStatus={run.status}
                     inspectSource={(id) => {
                       setEvidenceVisible(true);
                       setMobileView("evidence");
@@ -1898,7 +1902,8 @@ export default function LiveRunWorkspace() {
                   ) : (
                     <>
                       {reportBody}
-                      {reportDocument?.version === 5 && (
+                      {reportDocument &&
+                        (reportDocument.version === 5 || reportDocument.version === 6) && (
                         <TechnicalResults
                           document={reportDocument}
                           sourceTitles={new Map(
@@ -2533,6 +2538,7 @@ export default function LiveRunWorkspace() {
                     {settledInsights && (
                       <ExecutionView
                         insights={settledInsights}
+                        runStatus={run.status}
                         inspectSource={(id) => {
                           setActiveSource(id);
                           changeTab("sources");

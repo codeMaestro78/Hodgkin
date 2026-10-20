@@ -82,6 +82,10 @@ TECHNICAL_MODE_OPENALEX_SERPER_GRAPH_VERSION = (
 TECHNICAL_MODE_GRAPH_VERSION = "research-v17-technical-results-protected-tail"
 TECHNICAL_MODE_SERPER_GRAPH_VERSION = "research-v17-technical-results-protected-tail-serper"
 TECHNICAL_MODE_OPENALEX_GRAPH_VERSION = "research-v17-technical-results-protected-tail-openalex"
+MEASUREMENT_MODE_GRAPH_VERSION = "research-v18-typed-measurements"
+MEASUREMENT_MODE_SERPER_GRAPH_VERSION = "research-v18-typed-measurements-serper"
+MEASUREMENT_MODE_OPENALEX_GRAPH_VERSION = "research-v18-typed-measurements-openalex"
+MEASUREMENT_MODE_OPENALEX_SERPER_GRAPH_VERSION = "research-v18-typed-measurements-openalex-serper"
 PROTECTED_MODE_GRAPH_VERSION = "research-v16-protected-assessment-tail"
 PROTECTED_MODE_SERPER_GRAPH_VERSION = "research-v16-protected-assessment-tail-serper"
 PROTECTED_MODE_OPENALEX_GRAPH_VERSION = "research-v16-protected-assessment-tail-openalex"
@@ -103,6 +107,20 @@ def graph_version_for(settings: Settings, *, explicit_mode: bool) -> str:
     if explicit_mode:
         repair_versions = settings.BOUNDED_GAP_REPAIR_ENABLED
         discovery_key = (settings.OPENALEX_DISCOVERY_ENABLED, settings.SERPER_DISCOVERY_ENABLED)
+        if settings.SOURCE_MEASUREMENTS_ENABLED and (
+            not settings.TECHNICAL_RESULTS_ENABLED or repair_versions
+        ):
+            raise ValueError(
+                "SOURCE_MEASUREMENTS_ENABLED requires TECHNICAL_RESULTS_ENABLED=true "
+                "and BOUNDED_GAP_REPAIR_ENABLED=false"
+            )
+        if settings.SOURCE_MEASUREMENTS_ENABLED:
+            return {
+                (False, False): MEASUREMENT_MODE_GRAPH_VERSION,
+                (False, True): MEASUREMENT_MODE_SERPER_GRAPH_VERSION,
+                (True, False): MEASUREMENT_MODE_OPENALEX_GRAPH_VERSION,
+                (True, True): MEASUREMENT_MODE_OPENALEX_SERPER_GRAPH_VERSION,
+            }[discovery_key]
         if settings.TECHNICAL_RESULTS_ENABLED and not repair_versions:
             return {
                 (False, False): TECHNICAL_MODE_GRAPH_VERSION,
@@ -413,6 +431,10 @@ async def claim(tenant: uuid.UUID, owner: uuid.UUID, settings: Settings) -> JobF
                 TECHNICAL_MODE_SERPER_GRAPH_VERSION,
                 TECHNICAL_MODE_OPENALEX_GRAPH_VERSION,
                 TECHNICAL_MODE_OPENALEX_SERPER_GRAPH_VERSION,
+                MEASUREMENT_MODE_GRAPH_VERSION,
+                MEASUREMENT_MODE_SERPER_GRAPH_VERSION,
+                MEASUREMENT_MODE_OPENALEX_GRAPH_VERSION,
+                MEASUREMENT_MODE_OPENALEX_SERPER_GRAPH_VERSION,
                 PROTECTED_MODE_GRAPH_VERSION,
                 PROTECTED_MODE_SERPER_GRAPH_VERSION,
                 PROTECTED_MODE_OPENALEX_GRAPH_VERSION,

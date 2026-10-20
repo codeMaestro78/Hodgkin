@@ -1,5 +1,5 @@
 {
-  "$id": "https://schemas.research.local/1.6/BillingEntitlementSchema.json",
+  "$id": "https://schemas.research.local/1.7/BillingEntitlementSchema.json",
   "title": "BillingEntitlementSchema",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",

@@ -10,7 +10,13 @@ import pytest
 from research_api import jobs
 from research_api.config import Settings
 from research_api.graph import builder
-from research_api.graph.builder import _assessment_assertions
+from research_api.graph.builder import _assessment_assertions, _restore_assessment_assertion_payload
+from research_api.measurements import (
+    MeasurementProposal,
+    compatible_measurement_charts,
+    measurement_comparisons,
+    review_measurements,
+)
 from research_api.technical_results import TechnicalResultProposal, review_technical_results
 
 
@@ -33,6 +39,162 @@ QUOTE = (
     "Theorem 2. For reversible continuous-time chains, lambda is the spectral gap "
     "and t_mix <= log(1/pi_min)/lambda."
 )
+
+
+def measurement(**changes):
+    return MeasurementProposal.model_validate(
+        {
+            "subject": "Group A",
+            "metric": "response rate",
+            "value": "47.2",
+            "unit": "%",
+            "population": "adults",
+            "period": "2024",
+            "method": "randomized trial",
+            "definition": "participants with response",
+            "source_location": "Table 2",
+            "claim_index": 0,
+            "citation_index": 0,
+        }
+        | changes
+    )
+
+
+def measurement_audit(quote, claim=None):
+    return [
+        {
+            "claim": claim or "Group A had a 47.2% response rate in adults in 2024.",
+            "status": "supported",
+            "claim_id": "claim-1",
+            "citations": [
+                {
+                    "quote": quote,
+                    "source_id": "source-1",
+                    "source_hash": "a" * 64,
+                    "citation_id": "citation-1",
+                }
+            ],
+        }
+    ]
+
+
+def test_measurement_preserves_exact_source_value_and_admits_only_supported_literals():
+    quote = (
+        "Table 2: Treatment response for Group A: response rate was 47.2% in adults during 2024, "
+        "measured in a randomized trial; response means participants with response."
+    )
+    rows = review_measurements([measurement()], measurement_audit(quote))
+    assert rows[0]["status"] == "supported"
+    assert rows[0]["result"]["value"] == "47.2"
+    assert rows[0]["result"]["unit"] == "%"
+    assert rows[0]["result"]["sourcePassage"] == quote
+    assert rows[0]["result"]["plotValue"] == "47.2"
+
+    rejected = review_measurements([measurement(value="48")], measurement_audit(quote))
+    assert rejected[0]["status"] == "not_assessed"
+    assert "value_not_in_exact_passage" in rejected[0]["reasons"]
+
+
+def test_missing_scope_stays_unknown_and_ranges_are_not_plotted():
+    quote = "Treatment response: Group A response rate was 47.2%."
+    row = review_measurements(
+        [
+            measurement(
+                population=None, period=None, method=None, definition=None, source_location=None
+            )
+        ],
+        measurement_audit(quote),
+    )[0]
+    assert row["status"] == "supported"
+    assert row["result"]["population"] is None
+    assert row["result"]["plotValue"] == "47.2"
+    range_quote = "Table 2 Treatment response: Group A response rate was 47.2–51.0%."
+    range_row = review_measurements(
+        [
+            measurement(
+                value="47.2–51.0",
+                unit="%",
+                population=None,
+                period=None,
+                method=None,
+                definition=None,
+            )
+        ],
+        measurement_audit(range_quote, "Group A response rate was 47.2–51.0%."),
+    )[0]
+    assert range_row["status"] == "supported"
+    assert range_row["result"]["plotValue"] is None
+
+
+def test_measurement_unit_must_be_adjacent_to_value_in_exact_passage():
+    quote = "Group A response rate was 47.2; the report also lists percent elsewhere."
+    row = review_measurements([measurement()], measurement_audit(quote))[0]
+    assert row["status"] == "not_assessed"
+    assert "value_unit_not_adjacent_in_exact_passage" in row["reasons"]
+
+    larger_number = "Group A response rate was 147.2%."
+    row = review_measurements([measurement()], measurement_audit(larger_number))[0]
+    assert row["status"] == "not_assessed"
+    assert "value_not_in_exact_passage" in row["reasons"]
+
+    range_passage = "Group A response rate ranged from 47.2–51.0%."
+    row = review_measurements([measurement()], measurement_audit(range_passage))[0]
+    assert row["status"] == "not_assessed"
+    assert "value_not_in_exact_passage" in row["reasons"]
+
+
+def test_chart_requires_exactly_compatible_measurement_definitions_and_unique_subjects():
+    base = {
+        "metric": "response rate",
+        "unit": "%",
+        "population": "adults",
+        "period": "2024",
+        "method": "randomized trial",
+        "definition": "participants with response",
+        "plotValue": "47.2",
+    }
+    rows = [
+        base | {"id": "m1", "subject": "Group A"},
+        base | {"id": "m2", "subject": "Group B", "plotValue": "51.0"},
+    ]
+    charts = compatible_measurement_charts(rows)
+    assert len(charts) == 1
+    assert charts[0]["measurementIds"] == ["m1", "m2"]
+    assert compatible_measurement_charts(rows[:1]) == []
+    assert compatible_measurement_charts([rows[0], rows[1] | {"population": "children"}]) == []
+    assert compatible_measurement_charts([rows[0], rows[1] | {"subject": "Group A"}]) == []
+
+
+def test_measurement_comparisons_preserve_unknown_or_incompatible_scope():
+    rows = [
+        {
+            "id": "m1",
+            "metric": "response rate",
+            "subject": "Group A",
+            "unit": "%",
+            "population": "adults",
+            "period": "2024",
+            "method": "trial",
+            "definition": "response",
+        },
+        {
+            "id": "m2",
+            "metric": "response rate",
+            "subject": "Group B",
+            "unit": "%",
+            "population": "children",
+            "period": "2024",
+            "method": "trial",
+            "definition": "response",
+        },
+    ]
+    compared = measurement_comparisons(rows)
+    assert compared[0]["status"] == "not_established"
+    assert compared[0]["basis"] == "missing_or_incompatible_scope_v1"
+    assert compared[0]["measurementIds"] == ["m1", "m2"]
+    rows[1]["population"] = "adults"
+    assert measurement_comparisons(rows)[0]["status"] == "comparable"
+    assert measurement_comparisons(rows[:1]) == []
 
 
 def test_admits_only_exact_fields_with_a_supported_parent_claim():
@@ -131,6 +293,55 @@ def test_technical_request_is_pinned_to_a_new_graph_and_schema():
     assert jobs.graph_version_for(Settings(_env_file=None), explicit_mode=True) == (
         jobs.PROTECTED_MODE_GRAPH_VERSION
     )
+
+
+def test_measurement_requests_have_a_new_opt_in_graph_and_structured_schema():
+    settings = Settings(
+        _env_file=None,
+        TECHNICAL_RESULTS_ENABLED=True,
+        SOURCE_MEASUREMENTS_ENABLED=True,
+        BOUNDED_GAP_REPAIR_ENABLED=False,
+    )
+    assert (
+        jobs.graph_version_for(settings, explicit_mode=True) == jobs.MEASUREMENT_MODE_GRAPH_VERSION
+    )
+    schema = _assessment_assertions("balanced", [], technical=True, measurements=True)
+    assert schema.model_fields["measurements"].annotation
+    replayed = schema.model_validate({"claims": [], "technical_results": [], "measurements": []})
+    assert replayed.measurements == []
+    with pytest.raises(ValueError, match="requires TECHNICAL_RESULTS_ENABLED"):
+        jobs.graph_version_for(
+            settings.model_copy(update={"TECHNICAL_RESULTS_ENABLED": False}), explicit_mode=True
+        )
+    with pytest.raises(ValueError, match="BOUNDED_GAP_REPAIR_ENABLED=false"):
+        jobs.graph_version_for(
+            settings.model_copy(update={"BOUNDED_GAP_REPAIR_ENABLED": True}), explicit_mode=True
+        )
+
+
+def test_v6_assessment_rebuilds_writer_assertions_from_review_receipts():
+    result = {
+        "report_version": 6,
+        "assertions": {"claims": []},
+        "technical_results": [{"proposal": proposal().model_dump(mode="json")}],
+        "measurements": [{"proposal": measurement().model_dump(mode="json")}],
+    }
+
+    restored = _restore_assessment_assertion_payload(result)
+    parsed = _assessment_assertions(
+        "balanced", [], technical=True, measurements=True
+    ).model_validate(restored)
+
+    assert parsed.technical_results[0].title == "Theorem 2"
+    assert parsed.measurements[0].value == "47.2"
+
+
+def test_v4_assessment_does_not_require_typed_proposal_receipts():
+    restored = _restore_assessment_assertion_payload(
+        {"report_version": 4, "assertions": {"claims": []}}
+    )
+    assert "technical_results" not in restored
+    assert "measurements" not in restored
 
 
 @pytest.mark.parametrize("mode,limit", [("focused", 2), ("balanced", 4), ("deep", 6)])
@@ -260,11 +471,11 @@ def test_explicit_assessment_reserves_reviewer_and_publication_but_not_another_w
         PROVIDER_TIMEOUT_SECONDS=30,
     )
     assert builder._criterion_review_reserve_seconds(settings) == 90
-    assert builder._criterion_review_reserve_seconds(settings, protected=True) == 50
-    assert builder._explicit_assessment_tail_seconds(settings, "focused") == 115
-    assert builder._explicit_assessment_tail_seconds(settings, "balanced") == 135
-    assert builder._post_writer_review_tail_seconds(settings, "focused") == 70
-    assert builder._post_writer_review_tail_seconds(settings, "balanced") == 90
+    assert builder._criterion_review_reserve_seconds(settings, protected=True) == 60
+    assert builder._explicit_assessment_tail_seconds(settings, "focused") == 135
+    assert builder._explicit_assessment_tail_seconds(settings, "balanced") == 165
+    assert builder._post_writer_review_tail_seconds(settings, "focused") == 90
+    assert builder._post_writer_review_tail_seconds(settings, "balanced") == 120
 
 
 @pytest.mark.asyncio

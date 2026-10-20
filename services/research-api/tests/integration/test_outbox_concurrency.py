@@ -22,7 +22,7 @@ from research_api.db.models import (
 )
 from research_api.db.session import tenant_session
 from research_api.events.outbox import EventOutbox
-from research_api.graph import builder
+from research_api.graph import builder, collection
 from research_api.repositories.runs import RunRepository
 
 
@@ -124,11 +124,15 @@ async def test_real_worker_starts_parallel_attempts_with_local_db(monkeypatch):
                 )
             )
     ingest = AsyncMock(return_value=[])
-    monkeypatch.setattr(builder, "S3ArtifactStore", lambda **_kwargs: object())
+    monkeypatch.setattr(collection, "S3ArtifactStore", lambda **_kwargs: object())
     close = AsyncMock()
-    monkeypatch.setattr(builder, "TavilyAdapter", lambda **_kwargs: SimpleNamespace(aclose=close))
     monkeypatch.setattr(
-        builder, "TavilyEvidenceIngestor", lambda **_kwargs: SimpleNamespace(ingest=ingest)
+        collection,
+        "TavilyAdapter",
+        lambda **_kwargs: SimpleNamespace(aclose=close),
+    )
+    monkeypatch.setattr(
+        collection, "TavilyEvidenceIngestor", lambda **_kwargs: SimpleNamespace(ingest=ingest)
     )
     worker = (
         builder.build_graph(Settings(TAVILY_API_KEY="fixture")).nodes["research_worker"].bound.afunc

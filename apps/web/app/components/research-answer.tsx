@@ -1,7 +1,6 @@
 "use client";
 import {
   useEffect,
-  useId,
   useMemo,
   useRef,
   useState,
@@ -21,13 +20,9 @@ import {
 } from "../../lib/citation-format";
 import { methodSummary } from "../../lib/research-method";
 import {
-  chartDomain,
-  chartSeries,
-  formatValue,
   tableRows,
   toCsv,
   toTsv,
-  type ChartSeries,
   type HastLike,
 } from "../../lib/report-table";
 import { Icon } from "./ui";
@@ -252,81 +247,6 @@ function downloadText(text: string, name: string, type: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function ReportChart({
-  series,
-  caption,
-}: {
-  series: ChartSeries[];
-  caption: string;
-}) {
-  const [index, setIndex] = useState(0);
-  const active = series[Math.min(index, series.length - 1)];
-  if (!active) return null;
-  const { min, max } = chartDomain(active.points.map((point) => point.value));
-  const span = max - min;
-  const zero = (-min / span) * 100;
-  return (
-    <div className="report-chart">
-      <div className="report-chart-head">
-        <p id={`${caption}-title`}>
-          {active.name}
-          {active.unit && active.unit !== "%" ? ` (${active.unit})` : ""}
-        </p>
-        {series.length > 1 && (
-          <label className="answer-select">
-            <span className="sr-only">Chart metric</span>
-            <select
-              value={index}
-              onChange={(event) => setIndex(Number(event.target.value))}
-            >
-              {series.map((item, i) => (
-                <option key={item.name + i} value={i}>
-                  {item.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-      </div>
-      <ol
-        key={index}
-        className="report-chart-bars"
-        aria-labelledby={`${caption}-title`}
-        style={{ "--zero": `${zero}%` } as CSSProperties}
-      >
-        {active.points.map((point, i) => {
-          const size = (Math.abs(point.value) / span) * 100;
-          const negative = point.value < 0;
-          return (
-            <li
-              key={point.label + i}
-              style={{ "--i": i } as CSSProperties}
-              data-negative={negative || undefined}
-            >
-              <span className="report-chart-label">{point.label}</span>
-              <span className="report-chart-track" aria-hidden="true">
-                <span
-                  className="report-chart-bar"
-                  style={{
-                    left: `${negative ? zero - size : zero}%`,
-                    width: `${Math.max(size, 0.4)}%`,
-                  }}
-                />
-              </span>
-              <span className="report-chart-value">
-                {formatValue(point.value, active.unit)}
-              </span>
-            </li>
-          );
-        })}
-      </ol>
-      <p className="report-chart-note">
-        Values as reported in the table. Bars start at zero.
-      </p>
-    </div>
-  );
-}
-
 export function ReportTable({
   children,
   node,
@@ -336,12 +256,9 @@ export function ReportTable({
 }) {
   const table = useRef<HTMLTableElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
-  const id = useId();
   const [state, copy] = useCopied();
-  const [view, setView] = useState<"table" | "chart">("table");
   const [expanded, setExpanded] = useState(false);
   const rows = useMemo(() => tableRows(node), [node]);
-  const series = useMemo(() => chartSeries(tableRows(node, false)), [node]);
   useEffect(() => {
     const element = dialog.current;
     if (!element) return;
@@ -371,28 +288,9 @@ export function ReportTable({
     </div>
   );
   return (
-    <figure className="report-table" data-view={view}>
+    <figure className="report-table">
       <div className="report-table-bar">
-        {series.length ? (
-          <div
-            className="report-table-switch"
-            role="group"
-            aria-label="Table view"
-          >
-            {(["table", "chart"] as const).map((item) => (
-              <button
-                key={item}
-                type="button"
-                aria-pressed={view === item}
-                onClick={() => setView(item)}
-              >
-                {item === "table" ? "Table" : "Chart"}
-              </button>
-            ))}
-          </div>
-        ) : (
-          <span>Table</span>
-        )}
+        <span>Table</span>
         <div className="report-table-tools">
           <button
             type="button"
@@ -435,11 +333,7 @@ export function ReportTable({
           </button>
         </div>
       </div>
-      {view === "chart" && series.length ? (
-        <ReportChart series={series} caption={id} />
-      ) : (
-        body
-      )}
+      {body}
       <dialog
         ref={dialog}
         className="report-table-dialog"
@@ -470,9 +364,6 @@ export function ReportTable({
             <div className="report-table-wrap" tabIndex={0}>
               <table>{children}</table>
             </div>
-            {series.length > 0 && (
-              <ReportChart series={series} caption={`${id}-expanded`} />
-            )}
           </div>
         )}
       </dialog>

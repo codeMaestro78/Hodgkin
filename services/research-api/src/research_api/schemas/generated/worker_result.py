@@ -16,6 +16,7 @@ class SchemaVersion(StrEnum):
     field_1_4 = "1.4"
     field_1_5 = "1.5"
     field_1_6 = "1.6"
+    field_1_7 = "1.7"
 
 
 class SourceId(RootModel[UUID]):
