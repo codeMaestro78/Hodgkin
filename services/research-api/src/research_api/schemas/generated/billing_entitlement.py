@@ -13,6 +13,12 @@ class Status(StrEnum):
     active = "active"
 
 
+class AllowedMode(StrEnum):
+    focused = "focused"
+    balanced = "balanced"
+    deep = "deep"
+
+
 class PlanKey(StrEnum):
     free = "free"
     scholar = "scholar"
@@ -25,6 +31,7 @@ class BillingEntitlement(BaseModel):
         populate_by_name=True,
     )
     status: Status
+    allowed_modes: list[AllowedMode] | None = Field(None, alias="allowedModes", max_length=3)
     plan_key: PlanKey | None = Field(None, alias="planKey")
     catalog_version: constr(min_length=1, max_length=64) | None = Field(
         None, alias="catalogVersion"
