@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from collections.abc import Mapping
 
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -206,7 +207,9 @@ async def apply_credit_checkout(
         return "reconciliation_required"
     session_id = obj.get("id")
     metadata = obj.get("metadata")
-    purchase_id = metadata.get("purchase_id") if isinstance(metadata, dict) else None
+    if not isinstance(metadata, Mapping):
+        return "reconciliation_required"
+    purchase_id = metadata.get("purchase_id")
     try:
         parsed_id = uuid.UUID(str(purchase_id))
     except (ValueError, TypeError):
