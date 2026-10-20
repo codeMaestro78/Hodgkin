@@ -1,0 +1,36 @@
+{
+  "source_reports_py_sha256": "cc27fd886fc96bf45e78f4a8fd3779639f927df7c6e2ca556ae525c56598a8f9",
+  "6": {
+    "mode": "focused",
+    "limits": {
+      "provider_operations": 6,
+      "sources": 6,
+      "candidate_findings": 12,
+      "context_chars": 12000,
+      "output_tokens": 4096,
+      "plan_questions": 3
+    }
+  },
+  "12": {
+    "mode": "balanced",
+    "limits": {
+      "provider_operations": 12,
+      "sources": 12,
+      "candidate_findings": 24,
+      "context_chars": 18000,
+      "output_tokens": 6144,
+      "plan_questions": 4
+    }
+  },
+  "20": {
+    "mode": "deep",
+    "limits": {
+      "provider_operations": 20,
+      "sources": 20,
+      "candidate_findings": 40,
+      "context_chars": 24000,
+      "output_tokens": 8192,
+      "plan_questions": 6
+    }
+  }
+}
