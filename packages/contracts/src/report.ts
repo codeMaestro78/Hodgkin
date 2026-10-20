@@ -685,13 +685,75 @@ export const ReportDocumentV4Schema = z
       fail("Rejected narrative count must match proposed and published counts");
   });
 
+const technicalResult = z
+  .object({
+    kind: z.enum([
+      "definition", "theorem", "bound", "algorithm", "comparison",
+      "open_problem", "method", "measurement",
+    ]),
+    title: z.string().min(1).max(160),
+    claimId: UuidSchema,
+    citationIds: z.array(UuidSchema).length(1),
+    sourceIds: z.array(UuidSchema).length(1),
+    sourceArtifactHash: z.string().regex(/^[0-9a-f]{64}$/),
+    assumptions: z.array(z.string().min(1).max(300)).max(8),
+    notation: z.array(z.string().min(1).max(300)).max(8),
+    sourceLocation: z.string().min(1).max(120).nullable(),
+    expression: z
+      .object({
+        sourceText: z.string().min(1).max(500),
+        representation: z.enum(["plain_text", "latex"]),
+        transformation: z.literal("none"),
+      })
+      .strict()
+      .nullable(),
+    verification: z.literal("exact_passage_and_scoped_semantic_claim_review_v2"),
+  })
+  .strict();
+
+/** V5 adds literal, scoped technical results; it does not infer formulas or theorem truth. */
+export const ReportDocumentV5Schema = z
+  .object({
+    ...ReportDocumentV4Schema.shape,
+    version: z.literal(5),
+    assessmentVersion: z.literal("technical-results-v1"),
+    technicalResults: z.array(technicalResult).max(12),
+  })
+  .strict()
+  .superRefine((doc, ctx) => {
+    const v4 = {
+      ...doc,
+      version: 4,
+      assessmentVersion: "evidence-narrative-v1",
+    };
+    delete (v4 as Partial<typeof doc>).technicalResults;
+    const checked = ReportDocumentV4Schema.safeParse(v4);
+    if (!checked.success)
+      for (const issue of checked.error.issues)
+        ctx.addIssue({ code: "custom", path: issue.path, message: issue.message });
+    const findings = new Map(doc.findings.map((finding) => [finding.id, finding]));
+    for (const result of doc.technicalResults) {
+      const finding = findings.get(result.claimId);
+      if (!finding) {
+        ctx.addIssue({ code: "custom", message: "Unknown technical claim" });
+        continue;
+      }
+      if (!result.citationIds.every((id) => finding.citationIds.includes(id)))
+        ctx.addIssue({ code: "custom", message: "Technical citation is not verified" });
+      if (!result.sourceIds.every((id) => finding.sourceIds.includes(id)))
+        ctx.addIssue({ code: "custom", message: "Technical source is not verified" });
+    }
+  });
+
 export const ReportDocumentSchema = z.union([
   ReportDocumentV1Schema,
   ReportDocumentV2Schema,
   ReportDocumentV3Schema,
   ReportDocumentV4Schema,
+  ReportDocumentV5Schema,
 ]);
 export type ReportDocumentV2 = z.infer<typeof ReportDocumentV2Schema>;
 export type ReportDocumentV3 = z.infer<typeof ReportDocumentV3Schema>;
 export type ReportDocumentV4 = z.infer<typeof ReportDocumentV4Schema>;
+export type ReportDocumentV5 = z.infer<typeof ReportDocumentV5Schema>;
 export type ReportDocument = z.infer<typeof ReportDocumentSchema>;
