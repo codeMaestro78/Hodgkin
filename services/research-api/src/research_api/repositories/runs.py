@@ -231,6 +231,7 @@ class RunRepository:
             run_id=run.id,
             mode=cast(Literal["focused", "balanced", "deep"], run.mode),
             idempotency_key=idempotency_key or f"run:{run.id}",
+            allow_wallet=settings.BILLING_CREDIT_SPENDING_ENABLED,
         )
 
     async def get(self, run_id: uuid.UUID) -> ResearchRun | None:
