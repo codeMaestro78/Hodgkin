@@ -40,6 +40,7 @@ def test_mode_budget_uses_server_ceiling_and_allows_tightening_overrides():
         )
     )
     assert deep.max_provider_operations == deep.max_sources == 20
+    assert deep.max_output_tokens == 40_000
     assert focused_tightened.max_provider_operations == 4
     assert focused_tightened.max_sources == 3
 
