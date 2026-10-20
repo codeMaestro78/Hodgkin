@@ -45,11 +45,11 @@ const QUESTIONS: [string, string][] = [
   ],
   [
     "Do deeper runs cost more?",
-    "The proposal charges 1 unit for Focused, 2 for Balanced, and 4 for Deep. Monthly allowances remain provisional pending cost validation. Paid plans are not available for purchase yet.",
+    "The current proposal allocates 1 unit for Focused, 2 for Balanced, and 4 for Deep. Monthly allowances remain provisional pending cost validation.",
   ],
   [
     "Are paid plans available now?",
-    "Not yet. These are proposed prices and limits while we finish cost validation and billing. Existing reports and sources remain available regardless of future plan changes.",
+    "The paid-plan buttons show whether checkout is currently available. When enabled, checkout requires signing in and completes securely through Stripe. Prices and unit allowances remain proposals until cost validation is complete. Existing reports and sources remain available regardless of future plan changes.",
   ],
   [
     "Can I switch between monthly and yearly?",
@@ -103,8 +103,8 @@ export default function PricingPage() {
               cites its sources.
             </p>
             <p className="pr-lead lp-enter" role="status">
-              Pricing preview: paid plans are not available for purchase yet.
-              Unit allowances are provisional pending cost validation.
+              Pricing preview: paid-plan checkout availability is checked live
+              below. Unit allowances are provisional pending cost validation.
             </p>
           </div>
           <div className="pr-stage lp-enter">
