@@ -15,11 +15,38 @@ async (page) => {
     }
     return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ runs: [] }) });
   });
+  await page.addInitScript(() => {
+    window.__deskRiseStarts = 0;
+    document.addEventListener("animationstart", (event) => {
+      if (event.animationName === "desk-rise") window.__deskRiseStarts += 1;
+    });
+  });
+  await page.emulateMedia({ reducedMotion: "no-preference" });
   await page.goto("http://127.0.0.1:3102/automation.html?view=composer");
   const question = page.getByLabel("What do you need to understand?");
   const requirements = page.getByLabel("Report requirements", { exact: true });
-  await question.fill("Compare two evidence methods");
-  await requirements.fill("Compare costs\nExplain limitations");
+  await page.waitForFunction(() =>
+    document
+      .getAnimations()
+      .filter((animation) => animation.animationName === "desk-rise")
+      .every((animation) => animation.playState === "finished"),
+  );
+  assert(
+    (await page.evaluate(() => window.__deskRiseStarts)) > 0,
+    "Expected the one-time page entrance animation to run initially",
+  );
+  await question.click();
+  await page.keyboard.type("Compare two evidence methods");
+  const entranceCountBeforeBlur = await page.evaluate(
+    () => window.__deskRiseStarts,
+  );
+  await requirements.click();
+  assert(
+    (await page.evaluate(() => window.__deskRiseStarts)) ===
+      entranceCountBeforeBlur,
+    "Clicking another field replayed the page entrance animation",
+  );
+  await page.keyboard.type("Compare costs\nExplain limitations");
   await page.waitForFunction((key) => {
     const saved = JSON.parse(sessionStorage.getItem(key) ?? "null");
     return saved?.draft.question === "Compare two evidence methods" && saved?.draft.requirementsText === "Compare costs\nExplain limitations";
@@ -34,6 +61,13 @@ async (page) => {
   assert(await page.evaluate(() => window.__composerQuestion === document.querySelector("#question")), "Question field was remounted after blur");
   assert(await page.evaluate(() => window.__composerTimeOrigin === performance.timeOrigin), "Composer caused a full document navigation");
   assert(new URL(page.url()).pathname === "/automation.html", "Blur unexpectedly navigated away from the composer");
+  assert(
+    await page.evaluate(
+      (expected) => window.__deskRiseStarts === expected,
+      entranceCountBeforeBlur,
+    ),
+    "Clicking elsewhere replayed the page entrance animation",
+  );
   await page.locator(".desk-toggle-item").nth(2).click();
   assert(await question.inputValue() === "Compare two evidence methods", "Question changed after an unrelated form update");
   assert(await requirements.inputValue() === "Compare costs\nExplain limitations", "Requirements changed after an unrelated form update");
