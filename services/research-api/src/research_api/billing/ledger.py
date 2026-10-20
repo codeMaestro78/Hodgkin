@@ -6,6 +6,7 @@ never commit, call providers, or decide how a run outcome should be charged.
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime
@@ -25,6 +26,7 @@ from research_api.billing.catalog import (
 from research_api.billing.catalog import PlanKey as CatalogPlanKey
 from research_api.db.models import (
     BillingAccount,
+    BillingCreditEntry,
     BillingPeriod,
     BillingUnitEntry,
     ResearchRun,
@@ -434,7 +436,8 @@ async def reserve_units(
     idempotency_key: str,
     now: datetime | None = None,
     approved_catalogs: Mapping[str, BillingCatalog] = APPROVED_CATALOGS,
-) -> BillingUnitEntry:
+    allow_wallet: bool = False,
+) -> BillingUnitEntry | BillingCreditEntry:
     """Reserve the approved mode price while serializing on the owner account.
 
     Invoke inside the same transaction as the newly accepted run/job/outbox
@@ -473,10 +476,29 @@ async def reserve_units(
             BillingUnitEntry.entry_type == "reservation",
         )
     )
-    if by_key is not None or by_run is not None:
+    # Detect an existing wallet reservation even if spending was disabled
+    # after this run was admitted. Otherwise a retry could reserve monthly
+    # units for a run whose purchased units are already held.
+    credit_table_ready = allow_wallet or bool(
+        await session.scalar(
+            text("SELECT to_regclass('public.billing_credit_entries') IS NOT NULL")
+        )
+    )
+    credit_by_run = (
+        await session.scalar(
+            select(BillingCreditEntry).where(
+                BillingCreditEntry.tenant_id == tenant_id,
+                BillingCreditEntry.billing_account_id == account.id,
+                BillingCreditEntry.run_id == run_id,
+                BillingCreditEntry.entry_type == "reservation",
+            )
+        )
+        if credit_table_ready
+        else None
+    )
+    if by_key is not None or by_run is not None or credit_by_run is not None:
         prior = by_key or by_run
-        assert prior is not None
-        if (
+        if prior is not None and (
             prior.run_id == run_id
             and prior.entry_type == "reservation"
             and prior.reserved_delta > 0
@@ -485,6 +507,16 @@ async def reserve_units(
             and (by_run is None or by_run.id == prior.id)
         ):
             return prior
+        wallet_key_prefix = (
+            f"credit-reserve:{hashlib.sha256(idempotency_key.encode()).hexdigest()}:"
+        )
+        if (
+            credit_by_run is not None
+            and by_key is None
+            and by_run is None
+            and credit_by_run.idempotency_key.startswith(wallet_key_prefix)
+        ):
+            return credit_by_run
         raise BillingReservationConflict("reservation replay conflicts with stored request")
 
     await ensure_default_free_period(
@@ -508,25 +540,51 @@ async def reserve_units(
         period_id=period.id,
     )
     available = period.allowance_units - consumed - reserved
-    if available < required_units:
+    monthly_units = min(max(available, 0), required_units) if allow_wallet else required_units
+    wallet_units = required_units - monthly_units
+    if wallet_units:
+        from research_api.billing.credits import credit_balance, wallet_frozen
+
+        credit_available, _ = await credit_balance(
+            session, tenant_id=tenant_id, account_id=account.id
+        )
+        if await wallet_frozen(session, tenant_id=tenant_id, account_id=account.id):
+            credit_available = 0
+    else:
+        credit_available = 0
+    if max(available, 0) + credit_available < required_units:
         raise BillingUnitsExhausted(
             required_units=required_units,
-            available_units=max(available, 0),
+            available_units=max(available, 0) + credit_available,
             period_end=period.ends_at,
         )
+    entry = None
+    if monthly_units:
+        entry = BillingUnitEntry(
+            tenant_id=tenant_id,
+            billing_account_id=account.id,
+            billing_period_id=period.id,
+            run_id=run_id,
+            entry_type="reservation",
+            consumed_delta=0,
+            reserved_delta=monthly_units,
+            idempotency_key=idempotency_key,
+        )
+        session.add(entry)
+    if wallet_units:
+        from research_api.billing.credits import reserve_credits
 
-    entry = BillingUnitEntry(
-        tenant_id=tenant_id,
-        billing_account_id=account.id,
-        billing_period_id=period.id,
-        run_id=run_id,
-        entry_type="reservation",
-        consumed_delta=0,
-        reserved_delta=required_units,
-        idempotency_key=idempotency_key,
-    )
-    session.add(entry)
+        credit_entry = await reserve_credits(
+            session,
+            tenant_id=tenant_id,
+            account_id=account.id,
+            run_id=run_id,
+            units=wallet_units,
+            request_key=idempotency_key,
+        )
+        entry = entry or credit_entry
     await session.flush()
+    assert entry is not None
     return entry
 
 
