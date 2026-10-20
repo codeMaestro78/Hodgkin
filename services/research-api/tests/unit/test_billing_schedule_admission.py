@@ -27,6 +27,11 @@ async def test_quota_blocked_schedule_rolls_back_partial_run_admission(monkeypat
     class Session:
         def __init__(self):
             self.partial_admissions = []
+            self.owner_user_id = None
+
+        async def execute(self, statement, parameters):
+            if "app.user_id" in str(statement):
+                self.owner_user_id = uuid.UUID(parameters["user_id"])
 
         async def scalars(self, _statement):
             return [schedule]
@@ -47,7 +52,7 @@ async def test_quota_blocked_schedule_rolls_back_partial_run_admission(monkeypat
 
     class Repository:
         def __init__(self, _session, _tenant):
-            pass
+            assert _session.owner_user_id == schedule.user_id
 
         async def create_once(self, **_kwargs):
             session.partial_admissions.append("run-and-budget")
