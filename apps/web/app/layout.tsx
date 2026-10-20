@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import localFont from "next/font/local";
+import { appOrigin } from "../lib/auth/config";
 import "./styles.css";
 import "./onboarding.css";
 
@@ -22,6 +23,7 @@ const outfit = localFont({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(appOrigin()),
   title: "HogsKin · Research with a trail",
   description:
     "Turn a question into a considered answer with sources and a research trail close at hand.",
