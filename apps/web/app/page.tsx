@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Fragment, type CSSProperties } from "react";
-import { Icon } from "./components/ui";
+import { ActionLink, Icon } from "./components/ui";
 import { LandingMotion } from "./components/landing-motion";
 import { EvidenceField } from "./components/landing/evidence-field";
 import { HeroConsole } from "./components/landing/hero-console";
@@ -384,6 +384,7 @@ export default function HomePage() {
                 Each report keeps a panel you can widen, narrow, or hide. Three
                 views, all built from what the run actually recorded.
               </p>
+              <ActionLink href="/dossier">See a sample dossier</ActionLink>
             </header>
             <EvidenceTour />
           </section>
