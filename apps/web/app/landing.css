@@ -2740,8 +2740,8 @@ html.lenis body {
 }
 .lp-footer {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) repeat(2, minmax(0, 1fr));
-  gap: 32px;
+  grid-template-columns: minmax(0, 2fr) repeat(4, minmax(0, 1fr));
+  gap: 32px 28px;
   max-width: var(--lp-width);
   margin: 0 auto;
   padding: 72px 24px 64px;
