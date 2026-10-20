@@ -1,0 +1,188 @@
+/* Animated 404 — "This trail ends here."
+   The lens critter stands in for the zero, a dashed trail draws itself to a
+   dead end, and the copy offers the way back. All motion is CSS; the crew's
+   own hop loop (crew.css) keeps the critter restless. */
+
+.nf-main {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 8px;
+  min-height: calc(100svh - 220px);
+  padding: 48px 24px 64px;
+  text-align: center;
+  position: relative;
+}
+
+.nf-stage {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: clamp(4px, 1.4vw, 18px);
+  line-height: 0.8;
+}
+.nf-digit {
+  font-size: clamp(110px, 20vw, 200px);
+  font-weight: 400;
+  letter-spacing: -0.06em;
+  color: var(--lp-ink);
+}
+.nf-zero {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 clamp(2px, 0.8vw, 10px);
+  transform: translateY(4%);
+}
+
+/* The dashed trail that led here — and its dead end. */
+.nf-trail {
+  position: absolute;
+  left: 50%;
+  bottom: 58%;
+  width: min(1100px, 92vw);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+.nf-trail-path {
+  stroke: var(--lp-line-strong);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+.nf-trail-end {
+  stroke: var(--lp-cite);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+/* Copy. */
+.nf-copy {
+  max-width: 520px;
+  margin-top: 20px;
+}
+.nf-title {
+  margin: 0;
+  font-size: clamp(28px, 4.4vw, 40px);
+  font-weight: 400;
+  letter-spacing: -0.045em;
+  line-height: 1.1;
+}
+.nf-copy p {
+  margin: 14px 0 0;
+  color: var(--lp-muted);
+  font-size: 15.5px;
+  line-height: 1.6;
+}
+.nf-actions {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  margin-top: 24px;
+}
+
+/* Motion — entrance choreography, then idle life. */
+@media (prefers-reduced-motion: no-preference) {
+  .nf-digit {
+    animation:
+      nf-drop 700ms var(--lp-out) var(--d, 0ms) both,
+      nf-bob 3.8s var(--lp-inout) calc(var(--d, 0ms) + 1100ms) infinite alternate;
+  }
+  .nf-zero .critter {
+    animation: nf-pop 620ms var(--lp-bounce) 420ms both;
+  }
+  /* The trail reveals left to right, then the dead end pops in. */
+  .nf-trail {
+    animation: nf-reveal 1.6s var(--lp-inout) 240ms both;
+  }
+  .nf-trail-end {
+    transform-box: fill-box;
+    transform-origin: 55% 55%;
+    animation: nf-pop 420ms var(--lp-bounce) 1720ms both;
+  }
+  .nf-title {
+    animation: nf-rise 700ms var(--lp-out) 640ms both;
+  }
+  .nf-copy p {
+    animation: nf-rise 700ms var(--lp-out) 780ms both;
+  }
+  .nf-actions {
+    animation: nf-rise 700ms var(--lp-out) 920ms both;
+  }
+}
+
+@keyframes nf-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-0.35em);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes nf-bob {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-0.045em);
+  }
+}
+@keyframes nf-pop {
+  from {
+    opacity: 0;
+    scale: 0.4;
+  }
+  70% {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+  }
+}
+@keyframes nf-reveal {
+  from {
+    clip-path: inset(-12% 100% -12% 0);
+  }
+  to {
+    clip-path: inset(-12% 0% -12% 0);
+  }
+}
+@keyframes nf-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Reduced motion: everything lands in its final, readable state. */
+@media (prefers-reduced-motion: reduce) {
+  .nf-digit,
+  .nf-zero .critter,
+  .nf-trail,
+  .nf-trail-path,
+  .nf-trail-end,
+  .nf-title,
+  .nf-copy p,
+  .nf-actions {
+    animation: none !important;
+    opacity: 1;
+    transform: none;
+  }
+  .nf-trail {
+    clip-path: none;
+  }
+}
+
+/* Small screens: the lens critter is the star, but shouldn't crowd the digits. */
+@media (max-width: 480px) {
+  .nf-zero {
+    scale: 0.78;
+  }
+}
