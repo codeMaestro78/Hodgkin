@@ -282,6 +282,43 @@ describe("account flows", () => {
 });
 
 describe("research BFF identity", () => {
+  it("normalizes a plain-text upstream 500 into safe JSON for the client", async () => {
+    auth.getUser.mockResolvedValue({
+      data: { user: { id: "verified", email_confirmed_at: "2026-01-01" } },
+      error: null,
+    });
+    auth.getSession.mockResolvedValue({
+      data: {
+        session: { user: { id: "verified" }, access_token: "fixture-access" },
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response("Internal Server Error", {
+          status: 500,
+          headers: { "content-type": "text/plain" },
+        }),
+      ),
+    );
+
+    const response = await forwardResearch(
+      new NextRequest("http://localhost:3000/api/research/runs", {
+        method: "POST",
+        headers: { origin: "http://localhost:3000" },
+        body: JSON.stringify({ question: "A test question" }),
+      }),
+      "/research/runs",
+      "POST",
+    );
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get("content-type")).toContain("application/json");
+    await expect(response.json()).resolves.toEqual({
+      error: "Research service encountered an internal error. Please try again.",
+    });
+  });
+
   it("rejects an account-switched submission before upstream dispatch", async () => {
     auth.getUser.mockResolvedValue({
       data: { user: { id: "verified", email_confirmed_at: "2026-01-01" } },
