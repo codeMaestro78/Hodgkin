@@ -12,7 +12,14 @@ import {
   SheetClose,
   Skeleton,
 } from "./workbench-ui";
-import { useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { ReactNode } from "react";
 import { Brand, dateLabel, Icon } from "./ui";
 import { useEntrance } from "./workspace-motion";
@@ -23,6 +30,8 @@ import {
   subscribeResearchHistorySnapshots,
   type ResearchHistorySnapshot,
 } from "../../lib/research-history-events";
+import { waitForPaidPlanActivation } from "../../lib/billing-pricing";
+import { ResearchCreditTopUp } from "./research-credit-topup";
 
 export type HistoryRun = {
   runId: string;
@@ -35,6 +44,7 @@ export type HistoryRun = {
 
 type BillingEntitlement = {
   status: "not_configured" | "active";
+  allowedModes?: ("focused" | "balanced" | "deep")[];
   planKey?: "free" | "scholar" | "investigator";
   periodEnd?: string;
   allowanceUnits?: number;
@@ -42,6 +52,15 @@ type BillingEntitlement = {
   reservedUnits?: number;
   availableUnits?: number;
 };
+
+const WorkspaceEntitlementContext = createContext<{
+  entitlement: BillingEntitlement | null;
+  unavailable: boolean;
+}>({ entitlement: null, unavailable: false });
+
+export function useWorkspaceEntitlement() {
+  return useContext(WorkspaceEntitlementContext);
+}
 
 export function WorkspaceShell({
   children,
@@ -73,9 +92,17 @@ export function WorkspaceShell({
   );
   const [entitlementUnavailable, setEntitlementUnavailable] = useState(false);
   const [entitlementRevision, setEntitlementRevision] = useState(0);
+  const [checkoutReturnState, setCheckoutReturnState] = useState<
+    "checking" | "active" | "pending" | "cancelled" | null
+  >(null);
+  const checkoutActivationPending = useRef(false);
   const [portalBusy, setPortalBusy] = useState(false);
   const [portalError, setPortalError] = useState("");
   const content = useRef<HTMLElement>(null);
+  const entitlementContext = useMemo(
+    () => ({ entitlement, unavailable: entitlementUnavailable }),
+    [entitlement, entitlementUnavailable],
+  );
   useEntrance(
     content,
     activeRunId ?? "composer",
@@ -146,21 +173,64 @@ export function WorkspaceShell({
   useEffect(() => {
     const controller = new AbortController();
     setEntitlement(null);
-    fetch("/api/billing/entitlement", {
-      cache: "no-store",
-      signal: controller.signal,
-    })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("Budget unavailable");
-        const result = (await response.json()) as BillingEntitlement;
-        if (!controller.signal.aborted) {
-          setEntitlement(result);
-          setEntitlementUnavailable(false);
-        }
-      })
-      .catch((error) => {
-        if (error.name !== "AbortError") setEntitlementUnavailable(true);
+    setEntitlementUnavailable(false);
+    const returnUrl = new URL(window.location.href);
+    const returnState = returnUrl.searchParams.get("billing");
+    if (returnState === "success") {
+      checkoutActivationPending.current = true;
+      setCheckoutReturnState("checking");
+      returnUrl.searchParams.delete("billing");
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `${returnUrl.pathname}${returnUrl.search}${returnUrl.hash}`,
+      );
+    } else if (returnState === "cancelled") {
+      setCheckoutReturnState("cancelled");
+      returnUrl.searchParams.delete("billing");
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `${returnUrl.pathname}${returnUrl.search}${returnUrl.hash}`,
+      );
+    }
+
+    async function loadEntitlement(): Promise<BillingEntitlement> {
+      const response = await fetch("/api/billing/entitlement", {
+        cache: "no-store",
+        signal: controller.signal,
       });
+      if (!response.ok) {
+        if (!controller.signal.aborted) setEntitlementUnavailable(true);
+        throw new Error("Budget unavailable");
+      }
+      const result = (await response.json()) as BillingEntitlement;
+      if (!controller.signal.aborted) {
+        setEntitlement(result);
+        setEntitlementUnavailable(false);
+      }
+      return result;
+    }
+
+    async function refreshAfterCheckout() {
+      if (!checkoutActivationPending.current) {
+        try {
+          await loadEntitlement();
+        } catch {
+          if (!controller.signal.aborted) setEntitlementUnavailable(true);
+        }
+        return;
+      }
+
+      const activated = await waitForPaidPlanActivation(loadEntitlement, {
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted) return;
+      checkoutActivationPending.current = false;
+      setCheckoutReturnState(activated ? "active" : "pending");
+    }
+
+    void refreshAfterCheckout();
     return () => controller.abort();
   }, [activeRunId, entitlementRevision]);
 
@@ -374,9 +444,26 @@ export function WorkspaceShell({
             aria-label="Refresh research budget"
             onClick={() => setEntitlementRevision((revision) => revision + 1)}
           >
-            <Icon name="arrow" size={13} />
+            <Icon name="refresh" size={13} />
           </button>
         </div>
+        {checkoutReturnState === "checking" && (
+          <p role="status">Checkout completed. Confirming your plan…</p>
+        )}
+        {checkoutReturnState === "active" && (
+          <p role="status">Your paid plan is active.</p>
+        )}
+        {checkoutReturnState === "pending" && (
+          <p role="status">
+            Checkout returned, but plan activation is not confirmed yet. Refresh
+            this budget shortly; don’t start another purchase.
+          </p>
+        )}
+        {checkoutReturnState === "cancelled" && (
+          <p role="status">
+            Checkout was cancelled. No paid plan was activated.
+          </p>
+        )}
         {entitlementUnavailable ? (
           <p role="status">Budget temporarily unavailable.</p>
         ) : !entitlement ? (
@@ -385,25 +472,34 @@ export function WorkspaceShell({
           entitlement.availableUnits != null &&
           entitlement.allowanceUnits != null ? (
           <>
-            <p className="workspace-budget-plan">
-              {
-                {
-                  free: "Free",
-                  scholar: "Scholar",
-                  investigator: "Investigator",
-                }[entitlement.planKey ?? "free"]
-              }
-              {entitlement.periodEnd && (
-                <>
-                  {" "}
-                  · resets{" "}
-                  {new Intl.DateTimeFormat(undefined, {
-                    month: "short",
-                    day: "numeric",
-                  }).format(new Date(entitlement.periodEnd))}
-                </>
-              )}
-            </p>
+            <div className="workspace-budget-plan-row">
+              <div className="workspace-budget-plan-identity">
+                <span className="workspace-budget-plan-label">
+                  Current plan
+                </span>
+                <strong className="workspace-budget-plan-name">
+                  {
+                    {
+                      free: "Free",
+                      scholar: "Scholar",
+                      investigator: "Investigator",
+                    }[entitlement.planKey ?? "free"]
+                  }
+                </strong>
+              </div>
+              <span className="workspace-budget-active">
+                <span aria-hidden="true" /> Active
+              </span>
+            </div>
+            {entitlement.periodEnd && (
+              <p className="workspace-budget-plan">
+                Resets{" "}
+                {new Intl.DateTimeFormat(undefined, {
+                  month: "short",
+                  day: "numeric",
+                }).format(new Date(entitlement.periodEnd))}
+              </p>
+            )}
             <strong className="workspace-budget-balance">
               {entitlement.availableUnits} units left
             </strong>
@@ -438,6 +534,7 @@ export function WorkspaceShell({
           <p>Monthly allowance has not been activated yet.</p>
         )}
         {portalError && <p role="alert">{portalError}</p>}
+        <ResearchCreditTopUp revision={entitlementRevision} />
       </section>
       <div className="sidebar-bottom">
         <div className="local-avatar">
@@ -464,67 +561,69 @@ export function WorkspaceShell({
     </>
   );
   return (
-    <div
-      className={clsx(
-        "workspace-shell",
-        "evidence-desk",
-        collapsed && "sidebar-collapsed",
-      )}
-    >
-      <a className="skip-link" href="#workspace-content">
-        Skip to workspace
-      </a>
-      <aside className="workspace-sidebar" aria-label="Research history">
-        {sidebar}
-      </aside>
-      <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent>
-          <SheetTitle className="sr-only">Research history</SheetTitle>
-          <div className="desk-mobile-history">{sidebar}</div>
-          <SheetClose className="sr-only">Close history</SheetClose>
-        </SheetContent>
-        <div className="workspace-body">
-          <header className="workspace-toolbar">
-            <div>
-              <SheetTrigger
-                className="icon-button mobile-only"
-                aria-label="Open research history"
-              >
-                <Icon name="menu" />
-              </SheetTrigger>
-              <button
-                className="icon-button desktop-only"
-                onClick={() => setCollapsed((value) => !value)}
-                aria-label={
-                  collapsed
-                    ? "Expand history sidebar"
-                    : "Collapse history sidebar"
-                }
-                aria-expanded={!collapsed}
-              >
-                <Icon name="menu" />
-              </button>
-              <Icon name="book" size={17} />
-              <span>{title}</span>
-            </div>
-            <div className="toolbar-actions">
-              {toolbar}
-              <Link className="toolbar-home" href="/">
-                Overview
-                <Icon name="external" size={13} />
-              </Link>
-            </div>
-          </header>
-          <main
-            ref={content}
-            id="workspace-content"
-            className="workspace-content"
-          >
-            {children}
-          </main>
-        </div>
-      </Sheet>
-      <CrewEyes />
-    </div>
+    <WorkspaceEntitlementContext.Provider value={entitlementContext}>
+      <div
+        className={clsx(
+          "workspace-shell",
+          "evidence-desk",
+          collapsed && "sidebar-collapsed",
+        )}
+      >
+        <a className="skip-link" href="#workspace-content">
+          Skip to workspace
+        </a>
+        <aside className="workspace-sidebar" aria-label="Research history">
+          {sidebar}
+        </aside>
+        <Sheet open={open} onOpenChange={setOpen}>
+          <SheetContent>
+            <SheetTitle className="sr-only">Research history</SheetTitle>
+            <div className="desk-mobile-history">{sidebar}</div>
+            <SheetClose className="sr-only">Close history</SheetClose>
+          </SheetContent>
+          <div className="workspace-body">
+            <header className="workspace-toolbar">
+              <div>
+                <SheetTrigger
+                  className="icon-button mobile-only"
+                  aria-label="Open research history"
+                >
+                  <Icon name="menu" />
+                </SheetTrigger>
+                <button
+                  className="icon-button desktop-only"
+                  onClick={() => setCollapsed((value) => !value)}
+                  aria-label={
+                    collapsed
+                      ? "Expand history sidebar"
+                      : "Collapse history sidebar"
+                  }
+                  aria-expanded={!collapsed}
+                >
+                  <Icon name="menu" />
+                </button>
+                <Icon name="book" size={17} />
+                <span>{title}</span>
+              </div>
+              <div className="toolbar-actions">
+                {toolbar}
+                <Link className="toolbar-home" href="/">
+                  Overview
+                  <Icon name="external" size={13} />
+                </Link>
+              </div>
+            </header>
+            <main
+              ref={content}
+              id="workspace-content"
+              className="workspace-content"
+            >
+              {children}
+            </main>
+          </div>
+        </Sheet>
+        <CrewEyes />
+      </div>
+    </WorkspaceEntitlementContext.Provider>
   );
 }
