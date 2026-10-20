@@ -2,8 +2,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { WorkspaceShell } from "../../components/workspace-shell";
+import Link from "next/link";
+import { Dialog } from "@base-ui/react/dialog";
+import {
+  WorkspaceShell,
+  useWorkspaceEntitlement,
+} from "../../components/workspace-shell";
 import { Icon } from "../../components/ui";
+import { ResearchCreditTopUp } from "../../components/research-credit-topup";
 import { Critter } from "../../components/crew/critter";
 import {
   ResearchQuestionField,
@@ -35,6 +41,12 @@ import {
   ToggleGroup,
   ToggleGroupItem,
 } from "../../components/workbench-ui";
+import {
+  modeAccessMessage,
+  researchBudgetFailure,
+  type ResearchBudgetFailure,
+  researchStartFailure,
+} from "../../../lib/run-status";
 
 const examples = [
   {
@@ -53,6 +65,8 @@ const examples = [
 ];
 
 function ResearchComposer() {
+  const { entitlement, unavailable: entitlementUnavailable } =
+    useWorkspaceEntitlement();
   const [draft, setDraft] = useState<ResearchDraft>(emptyResearchDraft);
   const { question, depth, requireApproval, requirementsText } = draft;
   const draftRef = useRef(draft);
@@ -62,6 +76,8 @@ function ResearchComposer() {
   const [draftReady, setDraftReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  const [budgetFailure, setBudgetFailure] =
+    useState<ResearchBudgetFailure | null>(null);
   const editedFields = useRef(new Set<keyof ResearchDraft>());
   const created = useRef(false);
   const persistDraftPatch = useCallback(
@@ -206,6 +222,11 @@ function ResearchComposer() {
   }, []);
   const scope =
     researchModes.find((item) => item.mode === depth) ?? researchModes[1];
+  const allowedModes =
+    !entitlementUnavailable && entitlement?.status === "active"
+      ? entitlement.allowedModes
+      : undefined;
+  const selectedModeNotice = modeAccessMessage(depth, allowedModes);
 
   async function start(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -219,6 +240,11 @@ function ResearchComposer() {
       return;
     }
     const currentDraft = draftRef.current;
+    const accessNotice = modeAccessMessage(currentDraft.depth, allowedModes);
+    if (accessNotice) {
+      setNotice(accessNotice);
+      return;
+    }
     if (currentDraft.question.trim().length < 5) {
       setNotice(
         "Add a little more detail—your question needs at least five characters.",
@@ -263,13 +289,27 @@ function ResearchComposer() {
       // A previous account's request must never mutate a newly hydrated composer.
       if (submissionGeneration !== accountGeneration.current) return;
       if (response.status === 409) window.dispatchEvent(new Event("focus"));
-      if (!response.ok || !body.runId)
+      if (!response.ok || !body.runId) {
+        const exhausted = researchBudgetFailure(response.status, body.detail);
+        if (exhausted) {
+          submitting.current = false;
+          setBusy(false);
+          setBudgetFailure(exhausted);
+          return;
+        }
         throw new Error(
-          body.error ??
+          researchStartFailure(
+            response.status,
+            body.detail,
+            currentDraft.depth,
+            allowedModes,
+          ) ??
+            body.error ??
             (typeof body.detail === "string"
               ? body.detail
               : "The research couldn’t be started. Please try again."),
         );
+      }
       created.current = true;
       if (submissionAccountId) clearResearchDraft(submissionAccountId);
       router.push(`/research/${body.runId}`);
@@ -286,6 +326,7 @@ function ResearchComposer() {
   }
 
   return (
+    <>
     <div className="desk-composer-scroll">
       <header className="desk-composer-heading">
         <h1>Start a research brief.</h1>
@@ -333,9 +374,20 @@ function ResearchComposer() {
                   label="Research depth"
                 >
                   {researchModes.map((item) => (
-                    <ToggleGroupItem key={item.mode} value={item.mode}>
+                    <ToggleGroupItem
+                      key={item.mode}
+                      value={item.mode}
+                      disabled={Boolean(
+                        modeAccessMessage(item.mode, allowedModes),
+                      )}
+                    >
                       <span className="depth-title">
                         {item.name}
+                        {modeAccessMessage(item.mode, allowedModes) && (
+                          <span className="depth-access-badge">
+                            {item.mode === "deep" ? "Investigator" : "Upgrade"}
+                          </span>
+                        )}
                         <Icon
                           name={item.name === "Deep" ? "layers" : "search"}
                           size={17}
@@ -351,6 +403,17 @@ function ResearchComposer() {
                     </ToggleGroupItem>
                   ))}
                 </ToggleGroup>
+                {selectedModeNotice && (
+                  <p className="desk-help" role="status">
+                    {selectedModeNotice} <Link href="/pricing">View plans</Link>
+                  </p>
+                )}
+                {entitlementUnavailable && (
+                  <p className="desk-help" role="status">
+                    Plan access could not be checked right now. Your plan will
+                    be verified securely before a run starts.
+                  </p>
+                )}
                 <p id="scope-note" className="desk-help">
                   Planning, collection and verification share this active-time
                   limit; waiting for approval does not count. Limits are
@@ -461,6 +524,103 @@ function ResearchComposer() {
         </aside>
       </div>
     </div>
+    <Dialog.Root
+      open={budgetFailure !== null}
+      onOpenChange={(open) => {
+        if (!open) setBudgetFailure(null);
+      }}
+    >
+      <Dialog.Portal>
+        <Dialog.Backdrop className="research-budget-backdrop" />
+        <Dialog.Popup
+          className="research-budget-dialog"
+          aria-describedby="research-budget-description"
+        >
+          <div className="research-budget-mark" aria-hidden="true">
+            <Icon name="layers" size={22} />
+          </div>
+          <Dialog.Title className="research-budget-title">
+            {budgetFailure?.availableUnits === 0
+              ? "Your research units are used up"
+              : "Not enough units for this run"}
+          </Dialog.Title>
+          <Dialog.Description
+            id="research-budget-description"
+            className="research-budget-description"
+          >
+            {budgetFailure &&
+              `This ${depth} run needs ${budgetFailure.requiredUnits} ${budgetFailure.requiredUnits === 1 ? "unit" : "units"}. You have ${budgetFailure.availableUnits} ${budgetFailure.availableUnits === 1 ? "unit" : "units"} available to start a new run.`}
+          </Dialog.Description>
+          <section className="research-budget-breakdown" aria-label="Research unit balance">
+            <div className="research-budget-balance-row">
+              <span>{entitlement?.planKey === "free"
+                ? "Free monthly allowance"
+                : entitlement?.planKey === "scholar"
+                  ? "Scholar monthly allowance"
+                  : entitlement?.planKey === "investigator"
+                    ? "Investigator monthly allowance"
+                    : "Monthly plan allowance"}</span>
+              <strong>
+                {typeof entitlement?.availableUnits === "number"
+                  ? `${entitlement.availableUnits} left`
+                  : "Balance unavailable"}
+              </strong>
+            </div>
+            {typeof entitlement?.allowanceUnits === "number" ? (
+              <p>
+                {Math.max(0, entitlement.consumedUnits ?? 0)} of {entitlement.allowanceUnits} monthly units used
+              </p>
+            ) : null}
+            {entitlement?.planKey === "free" ? (
+              <p className="research-budget-plan-note">
+                Upgrade your plan for a larger monthly allowance and access to the modes included with that plan.
+              </p>
+            ) : entitlement?.planKey === "scholar" || entitlement?.planKey === "investigator" ? (
+              <p className="research-budget-plan-note">
+                Add purchased credits for eligible runs. Credits are separate from your monthly allowance and do not unlock modes excluded from your plan.
+              </p>
+            ) : (
+              <p className="research-budget-plan-note">
+                Purchased credits are separate from your monthly allowance; plan access still determines which research modes you can use.
+              </p>
+            )}
+          </section>
+          {entitlement?.reservedUnits ? (
+            <p className="research-budget-reserved">
+              {entitlement.reservedUnits} {entitlement.reservedUnits === 1 ? "unit is" : "units are"} reserved for other research runs and are not available for a new run.
+            </p>
+          ) : null}
+          {(budgetFailure?.periodEnd || entitlement?.periodEnd) &&
+          Number.isFinite(
+            Date.parse(budgetFailure?.periodEnd ?? entitlement?.periodEnd ?? ""),
+          ) ? (
+            <p className="research-budget-reset">
+              Allowance resets {new Intl.DateTimeFormat(undefined, {
+                dateStyle: "medium",
+                timeZone: "UTC",
+              }).format(
+                new Date(budgetFailure?.periodEnd ?? entitlement?.periodEnd ?? ""),
+              )}.
+            </p>
+          ) : null}
+          <ResearchCreditTopUp
+            revision={0}
+            expanded
+            summaryLabel="Add purchased credits"
+          />
+          <div className="research-budget-actions">
+            <Dialog.Close className="desk-button desk-button-outline">
+              Keep editing
+            </Dialog.Close>
+            <Link className="desk-button desk-button-primary" href="/pricing">
+              {entitlement?.planKey === "free" ? "Explore plans" : "Plan details"}
+              <Icon name="arrow" size={16} />
+            </Link>
+          </div>
+        </Dialog.Popup>
+      </Dialog.Portal>
+    </Dialog.Root>
+    </>
   );
 }
 
