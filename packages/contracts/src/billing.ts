@@ -1,8 +1,10 @@
 import { z } from "zod";
+import { ResearchModeSchema } from "./mode";
 
 export const BillingEntitlementSchema = z
   .object({
     status: z.enum(["not_configured", "active"]),
+    allowedModes: z.array(ResearchModeSchema).max(3).optional(),
     planKey: z.enum(["free", "scholar", "investigator"]).nullable().optional(),
     catalogVersion: z.string().min(1).max(64).nullable().optional(),
     periodStart: z.iso.datetime({ offset: true }).nullable().optional(),
@@ -25,13 +27,25 @@ export const BillingEntitlementSchema = z
       entitlement.availableUnits,
     ];
     if (entitlement.status === "not_configured") {
-      if (projectionFields.some((value) => value != null)) {
+      if (
+        projectionFields.some((value) => value != null) ||
+        entitlement.allowedModes !== undefined
+      ) {
         context.addIssue({
           code: "custom",
           message: "Unconfigured entitlements cannot contain balances",
         });
       }
       return;
+    }
+    if (
+      entitlement.allowedModes !== undefined &&
+      new Set(entitlement.allowedModes).size !== entitlement.allowedModes.length
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Allowed modes must be unique",
+      });
     }
     if (projectionFields.some((value) => value == null)) {
       context.addIssue({
