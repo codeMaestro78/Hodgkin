@@ -43,7 +43,7 @@ async def test_small_explicit_deep_budget_keeps_deep_writer_schema(monkeypatch):
     )
     request = response.call_args.kwargs
     assert request["text"]["format"]["name"] == "deep_claim_draft"
-    assert request["max_output_tokens"] == 8192
+    assert request["max_output_tokens"] == 16384
 
 
 def test_small_explicit_deep_budget_keeps_document_mode_and_honest_quality():
