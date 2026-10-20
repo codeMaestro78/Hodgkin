@@ -35,6 +35,8 @@ def test_readiness_requires_current_schema_and_model_routing(
             State.queries.append(query)
             if "to_regclass('public.alembic_version')" in query:
                 return True
+            if "has_table_privilege" in query:
+                return True
             if "version_num >= :revision" in query:
                 return True
             return False
@@ -97,6 +99,39 @@ def test_readiness_succeeds_when_current_schema_is_present(
     )
 
 
+def test_readiness_uses_schema_capabilities_when_runtime_cannot_read_alembic_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    queries: list[str] = []
+
+    class Connection:
+        async def scalar(self, statement: object, params: dict[str, object] | None = None) -> bool:
+            query = str(statement)
+            queries.append(query)
+            if "to_regclass('public.alembic_version')" in query:
+                return True
+            if "has_table_privilege" in query:
+                return False
+            if "version_num >= :revision" in query:
+                raise AssertionError("runtime role must not read Alembic history without grant")
+            return True
+
+    class Engine:
+        @asynccontextmanager
+        async def connect(self):
+            yield Connection()
+
+    async def validate_role(_engine: object) -> None:
+        return None
+
+    monkeypatch.setattr(main, "engine", Engine())
+    monkeypatch.setattr(main, "validate_runtime_role", validate_role)
+
+    assert asyncio.run(main.readiness()) == {"status": "ok", "environment": "test"}
+    assert any("has_table_privilege" in query for query in queries)
+    assert not any("version_num >= :revision" in query for query in queries)
+
+
 def test_stripe_readiness_requires_period_transition_migration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -143,7 +178,7 @@ def test_readiness_rejects_a_database_without_alembic_history(
 ) -> None:
     class Connection:
         async def scalar(self, statement: object, params: dict[str, object] | None = None) -> bool:
-            return "to_regclass('public.alembic_version')" in str(statement)
+            return False
 
     class Engine:
         @asynccontextmanager
@@ -160,7 +195,7 @@ def test_readiness_rejects_a_database_without_alembic_history(
         asyncio.run(main.readiness())
 
     assert error.value.status_code == 503
-    assert "0022" in error.value.detail
+    assert "migrations through 0022" in error.value.detail
 
 
 def test_readiness_rejects_a_database_behind_the_required_revision(
@@ -170,6 +205,8 @@ def test_readiness_rejects_a_database_behind_the_required_revision(
         async def scalar(self, statement: object, params: dict[str, object] | None = None) -> bool:
             query = str(statement)
             if "to_regclass('public.alembic_version')" in query:
+                return True
+            if "has_table_privilege" in query:
                 return True
             if "version_num >= :revision" in query:
                 return False
