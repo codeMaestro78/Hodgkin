@@ -28,6 +28,7 @@ contracts=(
   "ReportDocumentV2Schema:report_document_v2:ReportDocumentV2"
   "ReportDocumentV3Schema:report_document_v3:ReportDocumentV3"
   "ReportDocumentV4Schema:report_document_v4:ReportDocumentV4"
+  "ReportDocumentV5Schema:report_document_v5:ReportDocumentV5"
   "ReportDocumentSchema:report_document:ReportDocument"
   "ApprovalRequestSchema:approval_request:ApprovalRequest"
   "BatchRequestSchema:batch_request:BatchRequest"
