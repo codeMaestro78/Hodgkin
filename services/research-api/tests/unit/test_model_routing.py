@@ -34,6 +34,23 @@ def test_role_overrides_can_route_to_openrouter_without_changing_workers():
     assert settings.model_route("claim_review") == ModelRoute("openai", "gpt-4o-mini")
 
 
+def test_writer_can_use_gpt_6_luna_on_openai_independently():
+    settings = Settings(
+        _env_file=None,
+        OPENAI_API_KEY="openai-fixture",
+        OPENROUTER_API_KEY="openrouter-fixture",
+        LLM_PROVIDER="openrouter",
+        LLM_MODEL_NAME="deepseek/deepseek-v4.1-flash",
+        LLM_WRITER_PROVIDER="openai",
+        LLM_WRITER_MODEL_NAME="gpt-6-luna",
+    )
+
+    assert settings.model_route("writer") == ModelRoute("openai", "gpt-6-luna")
+    assert settings.model_route("planner") == ModelRoute(
+        "openrouter", "deepseek/deepseek-v4.1-flash"
+    )
+
+
 def test_saved_routing_accepts_legacy_partial_snapshots():
     legacy: dict[str, object] = {"provider": "openai", "model": "gpt-4o-mini"}
     routes = normalize_routing({"planner": legacy})
