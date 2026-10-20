@@ -67,6 +67,10 @@ class _Input(BaseModel):
 
 
 def validate_report_document(document: dict[str, Any]) -> dict[str, Any]:
+    if document.get("version") == 5:
+        from research_api.report_document_v5 import validate_report_document_v5
+
+        return validate_report_document_v5(document)
     if document.get("version") == 4:
         from research_api.report_document_v4 import validate_report_document_v4
 
@@ -120,6 +124,11 @@ def report_diagnostics(document: dict[str, Any]) -> dict[str, Any]:
             "publishedSentences": doc["narrative"]["publishedSentenceCount"],
         }
         if doc["version"] >= 4
+        else None,
+        "technicalResults": {
+            "published": len(doc["technicalResults"]),
+        }
+        if doc["version"] >= 5
         else None,
         "independenceAssessed": False,
         "humanQualityAssessed": False,
