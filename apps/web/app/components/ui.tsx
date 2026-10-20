@@ -7,6 +7,7 @@ export function Icon({
 }: {
   name:
     | "arrow"
+    | "refresh"
     | "plus"
     | "search"
     | "book"
@@ -33,6 +34,8 @@ export function Icon({
 }) {
   const paths = {
     arrow: "M4 12h16m-6-6 6 6-6 6",
+    refresh:
+      "M20 11a8 8 0 0 0-14.9-4M4 4v4h4M4 13a8 8 0 0 0 14.9 4M20 20v-4h-4",
     plus: "M12 5v14M5 12h14",
     search: "m16 16 4 4M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0",
     book: "M4 4h6l2 2 2-2h6v16h-6l-2 2-2-2H4V4Zm8 2v16",
