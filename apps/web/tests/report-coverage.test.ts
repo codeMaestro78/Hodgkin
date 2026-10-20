@@ -7,6 +7,7 @@ import {
   ReportDocumentV2Schema,
   ReportDocumentV3Schema,
   ReportDocumentV4Schema,
+  ReportDocumentV5Schema,
 } from "@research/contracts";
 import {
   hasNumericalFinding,
@@ -41,6 +42,8 @@ it("flags source-reported percentages without treating citations as independent 
   ).toBe(true);
 });
 import { ReportCoverage } from "../app/components/report-coverage";
+import { TechnicalResults } from "../app/components/technical-results";
+import { reportDisplayMarkdown } from "../lib/report-presentation";
 
 const legacy = ReportDocumentV1Schema.parse(
   JSON.parse(
@@ -216,6 +219,96 @@ function narrativeReport(composed = true) {
         },
   });
 }
+
+it("renders a V5 literal technical result with a source inspection action", () => {
+  const base = narrativeReport();
+  const finding = base.findings[0]!;
+  const document = ReportDocumentV5Schema.parse({
+    ...base,
+    version: 5,
+    assessmentVersion: "technical-results-v1",
+    technicalResults: [{
+      kind: "theorem",
+      title: "Theorem 2",
+      claimId: finding.id,
+      citationIds: finding.citationIds.slice(0, 1),
+      sourceIds: finding.sourceIds.slice(0, 1),
+      sourceArtifactHash: "a".repeat(64),
+      assumptions: ["reversible chains"],
+      notation: [],
+      sourceLocation: "Theorem 2",
+      expression: {
+        sourceText: "t_mix <= log(1/pi_min)/lambda",
+        representation: "plain_text",
+        transformation: "none",
+      },
+      verification: "exact_passage_and_scoped_semantic_claim_review_v2",
+    }],
+  });
+  const html = renderToStaticMarkup(createElement(TechnicalResults, {
+    document,
+    sourceTitles: new Map([[finding.sourceIds[0]!, "Primary paper"]]),
+    onOpenSource: () => {},
+  }));
+  expect(html).toContain("Source-stated technical results");
+  expect(html).toContain("t_mix &lt;= log(1/pi_min)/lambda");
+  expect(html).toContain("Inspect Primary paper");
+  expect(reportDisplayMarkdown(
+    "Before\n<!-- technical-results-v1:start -->\n## Source-stated technical results\n<!-- technical-results-v1:end -->\nAfter",
+    true,
+  )).not.toContain("Source-stated technical results");
+});
+
+it("explains when a V5 report has no admitted technical results", () => {
+  const document = ReportDocumentV5Schema.parse({
+    ...narrativeReport(),
+    version: 5,
+    assessmentVersion: "technical-results-v1",
+    technicalResults: [],
+  });
+  const html = renderToStaticMarkup(createElement(TechnicalResults, {
+    document,
+    sourceTitles: new Map(),
+    onOpenSource: () => {},
+  }));
+  expect(html).toContain("Source-stated technical results");
+  expect(html).toContain("No source-located technical results passed this report’s evidence checks.");
+  expect(html).not.toContain("technical-results-list");
+});
+
+it("renders source-literal LaTeX without trusting embedded links", () => {
+  const base = narrativeReport();
+  const finding = base.findings[0]!;
+  const document = ReportDocumentV5Schema.parse({
+    ...base,
+    version: 5,
+    assessmentVersion: "technical-results-v1",
+    technicalResults: [{
+      kind: "bound",
+      title: "Recorded bound",
+      claimId: finding.id,
+      citationIds: finding.citationIds.slice(0, 1),
+      sourceIds: finding.sourceIds.slice(0, 1),
+      sourceArtifactHash: "a".repeat(64),
+      assumptions: [],
+      notation: [],
+      sourceLocation: null,
+      expression: {
+        sourceText: String.raw`\lambda \le 1 \href{javascript:alert(1)}{unsafe}`,
+        representation: "latex",
+        transformation: "none",
+      },
+      verification: "exact_passage_and_scoped_semantic_claim_review_v2",
+    }],
+  });
+  const html = renderToStaticMarkup(createElement(TechnicalResults, {
+    document,
+    sourceTitles: new Map(),
+    onOpenSource: () => {},
+  }));
+  expect(html).toContain("katex");
+  expect(html).not.toContain('href="javascript:');
+});
 
 function render(value: unknown, sources: { id: string; title: string }[] = []) {
   const document = parseReportDocument(value);
