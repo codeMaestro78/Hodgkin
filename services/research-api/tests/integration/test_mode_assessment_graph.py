@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from research_api import jobs
 from research_api.config import Settings
@@ -178,7 +179,22 @@ async def harness(monkeypatch):
                     }
                 ]
             }
-        elif name == "citation_semantic_reviews_batched_v1":
+            if "technical_results" in request["text"]["format"]["schema"]["properties"]:
+                result["technical_results"] = [{
+                    "kind": "method",
+                    "title": "workflow state",
+                    "claim_index": 0,
+                    "citation_index": 0,
+                    "assumptions": [],
+                    "notation": [],
+                    "source_expression": None,
+                    "representation": None,
+                    "source_location": None,
+                }]
+        elif name in {
+            "citation_semantic_reviews_batched_v1",
+            "citation_semantic_reviews_scoped_v2",
+        }:
             inputs = json.loads(request["input"])
             result = {
                 "reviews": [
@@ -273,6 +289,72 @@ async def harness(monkeypatch):
         checkpointer=checkpointer,
         controls=controls,
     )
+
+
+async def test_opt_in_technical_ledger_publishes_v5_without_changing_v4_runs(harness):
+    harness.settings.TECHNICAL_RESULTS_ENABLED = True
+    await harness.execute()
+    run, report, assessment, _usage, _calls = await harness.snapshot()
+    assert run.status == "completed", run.error_code
+    assert report.document["version"] == 5
+    assert len(report.document["technicalResults"]) == 1
+    assert report.document["technicalResults"][0]["claimId"] == report.document["findings"][0]["id"]
+    assert assessment.result["technical_results"][0]["status"] == "supported"
+    assert "citation_semantic_reviews_scoped_v2" in harness.dispatches
+
+
+async def test_technical_writer_receipt_replays_without_paid_redispatch(harness, monkeypatch):
+    harness.settings.TECHNICAL_RESULTS_ENABLED = True
+    original = builder.exact_reviews
+    crashed = False
+
+    async def interrupt_once(*args, **kwargs):
+        nonlocal crashed
+        if not crashed:
+            crashed = True
+            raise asyncio.CancelledError
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(builder, "exact_reviews", interrupt_once)
+    with pytest.raises(asyncio.CancelledError):
+        await harness.execute()
+    before = list(harness.dispatches)
+    await harness.execute()
+    run, report, assessment, _usage, _calls = await harness.snapshot()
+    assert run.status == "completed", run.error_code
+    assert report.document["version"] == 5
+    assert assessment.result["technical_results"][0]["status"] == "supported"
+    assert harness.dispatches.count("focused_claim_draft_passages_v2") == 1
+    assert len(harness.dispatches) > len(before)
+
+
+async def test_completed_technical_receipt_is_write_once_and_replays(harness, monkeypatch):
+    harness.settings.TECHNICAL_RESULTS_ENABLED = True
+    original_event = builder.operation_event
+    interrupted = False
+
+    def interrupt_after_assessment(name, **kwargs):
+        nonlocal interrupted
+        if name == "node.assess_evidence" and not interrupted:
+            interrupted = True
+            raise asyncio.CancelledError
+        return original_event(name, **kwargs)
+
+    monkeypatch.setattr(builder, "operation_event", interrupt_after_assessment)
+    with pytest.raises(asyncio.CancelledError):
+        await harness.execute()
+    with pytest.raises(IntegrityError, match="write-once"):
+        async with tenant_session(str(harness.tenant)) as session:
+            assessment = await session.scalar(select(ResearchAssessment).where(
+                ResearchAssessment.run_id == harness.run_id
+            ))
+            changed = copy.deepcopy(assessment.result)
+            changed["technical_results"][0]["result"]["title"] = "Fabricated title"
+            assessment.result = changed
+    await harness.execute()
+    run, report, _assessment, _usage, _calls = await harness.snapshot()
+    assert run.status == "completed", run.error_code
+    assert report.document["technicalResults"][0]["title"] == "workflow state"
 
 
 async def test_complete_assessment_publishes_matching_ids_without_another_writer(harness):
@@ -405,7 +487,11 @@ async def test_crash_replays_receipts_or_committed_assessment_without_added_disp
 
 @pytest.mark.parametrize(
     "failure",
-    [RuntimeError("private upstream detail"), BudgetExceededError("private budget detail")],
+    [
+        RuntimeError("private upstream detail"),
+        BudgetExceededError("private budget detail"),
+        TimeoutError("private provider timeout"),
+    ],
 )
 async def test_optional_criterion_failure_keeps_exact_findings_and_unknown_coverage(
     harness, failure
@@ -439,6 +525,28 @@ async def test_optional_criterion_failure_keeps_exact_findings_and_unknown_cover
             )
         )
     assert sum(row.state == "uncertain" for row in reservations) == 1
+
+
+async def test_near_deadline_publishes_verified_report_without_optional_criterion_call(harness):
+    await builder.run_graph(
+        harness.settings,
+        tenant_id=harness.tenant,
+        user_id=harness.user,
+        run_id=harness.run_id,
+        question="Explain workflow state preservation",
+        checkpointer=harness.checkpointer,
+        remaining_ms=60_000,
+    )
+    run, report, assessment, _, calls = await harness.snapshot()
+    assert run.status == "completed", run.error_code
+    assert report is not None and CLAIM in report.markdown
+    assert assessment.result["criterion_review_failure"] == "insufficient_time"
+    assert "criterion_review_v2" not in harness.dispatches
+    assert all(call.outcome != "uncertain" for call in calls)
+    coverage = CoverageResult.model_validate(assessment.result["coverage"])
+    assert all(
+        criterion.outcome == "unknown" for row in coverage.dimensions for criterion in row.criteria
+    )
 
 
 @pytest.mark.parametrize("failure", [asyncio.CancelledError(), LeaseLostError("stale owner")])
