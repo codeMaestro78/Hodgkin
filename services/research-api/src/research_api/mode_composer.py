@@ -5,6 +5,7 @@ labelled scope inputs. Factual paragraphs and cells are exact finding copies.
 New explanatory assertions must pass the normal writer/evidence gate first.
 """
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -62,8 +63,8 @@ def validate_alignment(document: dict[str, Any], blocks: list[FactualBlock]) -> 
 
 def compose_report(document: dict[str, Any], *, sources: list[tuple[str, str, str]]) -> str:
     doc = validate_report_document(document)
-    if doc["version"] not in {2, 3, 4}:
-        raise ValueError("Explicit report composition requires report document V2, V3 or V4")
+    if doc["version"] not in {2, 3, 4, 5}:
+        raise ValueError("Explicit report composition requires report document V2-V5")
     claims = {f["id"]: f for f in doc["findings"]}
     source_numbers = {source_id: index + 1 for index, (source_id, _, _) in enumerate(sources)}
     if len(source_numbers) != len(sources):
@@ -169,6 +170,30 @@ def compose_report(document: dict[str, Any], *, sources: list[tuple[str, str, st
                     published.add(key)
     if published != set(claims):
         raise ValueError("Every verified finding must appear in the report")
+    if doc["version"] >= 5 and doc["technicalResults"]:
+        lines += ["<!-- technical-results-v1:start -->", "## Source-stated technical results", ""]
+        lines += [
+            "Expressions below are literal excerpts checked against the cited passage; "
+            "they are not independently proven or symbolically re-derived.",
+            "",
+        ]
+        for result in doc["technicalResults"]:
+            lines += [f"### {scope(result['title'])}", "", fact(result["claimId"]), ""]
+            if result["sourceLocation"]:
+                lines += ["Source location: " + scope(result["sourceLocation"]), ""]
+            for assumption in result["assumptions"]:
+                lines += ["- Source-stated condition: " + scope(assumption)]
+            for notation in result["notation"]:
+                lines += ["- Source notation: " + scope(notation)]
+            if result["assumptions"] or result["notation"]:
+                lines += [""]
+            if expression := result["expression"]:
+                source_text = expression["sourceText"]
+                fence = "`" * max(
+                    3, max((len(part) for part in re.findall(r"`+", source_text)), default=0) + 1
+                )
+                lines += ["Literal source expression:", "", fence, source_text, fence, ""]
+        lines += ["<!-- technical-results-v1:end -->", ""]
     for comparison in doc["comparisons"]:
         dimension = next(d for d in doc["dimensions"] if d["id"] == comparison["dimensionId"])
         lines += [
