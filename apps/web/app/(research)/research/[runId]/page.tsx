@@ -29,6 +29,7 @@ import {
   parseReportDocument,
 } from "../../../../lib/report-document";
 import { ReportCoverage } from "../../../components/report-coverage";
+import { TechnicalResults } from "../../../components/technical-results";
 import { RetrievalAccountingPanel } from "../../../components/retrieval-accounting";
 import { RepairOutcome } from "../../../components/repair-outcome";
 import { publishResearchHistory } from "../../../../lib/research-history-events";
@@ -38,6 +39,9 @@ import {
   runStage,
   runFailure,
   snapshotRefreshDelay,
+  isTransientSnapshotFailure,
+  snapshotRetryDelay,
+  SNAPSHOT_RECONNECTING_MESSAGE,
   statusForNodeStart,
   createSnapshotRefresh,
   runPhaseIndex,
@@ -311,6 +315,7 @@ export default function LiveRunWorkspace() {
   const router = useRouter();
   const [run, setRun] = useState<Run | null>(null);
   const [error, setError] = useState("");
+  const [snapshotNotice, setSnapshotNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const approving = useRef(false);
   const [approvalDecision, setApprovalDecision] = useState<
@@ -483,6 +488,7 @@ export default function LiveRunWorkspace() {
     let pending = false;
     let pendingUrgent = false;
     let terminalRetries = 0;
+    let transientRetries = 0;
     let lastSnapshotFinishedAt = 0;
     let refresh: ReturnType<typeof createSnapshotRefresh>;
     const scheduleRefresh = (delay: number) => {
@@ -497,6 +503,7 @@ export default function LiveRunWorkspace() {
       loadedRunId.current = runId;
     }
     setError("");
+    setSnapshotNotice("");
     const load = async (urgent = false) => {
       if (fetching) {
         pending = true;
@@ -506,6 +513,7 @@ export default function LiveRunWorkspace() {
       fetching = true;
       setSnapshotRefreshing(true);
       let retryTerminalSnapshot = false;
+      let responseStatus: number | undefined;
       try {
         const response = await fetch(
           `/api/research/runs/${runId}${reportVersion ? `?reportVersion=${reportVersion}` : ""}`,
@@ -517,10 +525,26 @@ export default function LiveRunWorkspace() {
             ]),
           },
         );
-        const body = (await response.json()) as Run & { error?: string };
+        responseStatus = response.status;
+        const responseText = await response.text();
+        let body: (Run & { error?: string; detail?: string }) | null = null;
+        try {
+          body = JSON.parse(responseText) as Run & {
+            error?: string;
+            detail?: string;
+          };
+        } catch {
+          // Reverse proxies may return plain text or HTML during an outage.
+        }
         if (!active) return;
-        if (!response.ok)
-          throw new Error(body.error ?? "This research couldn’t be opened.");
+        if (!response.ok) {
+          if (isTransientSnapshotFailure(response.status))
+            throw new Error("Temporary snapshot service outage");
+          throw new Error(
+            body?.error ?? body?.detail ?? "This research couldn’t be opened.",
+          );
+        }
+        if (!body) throw new Error("The research response was not valid JSON.");
         if (body.runId !== runId)
           throw new Error("The recorded state did not match this research.");
         if (
@@ -546,6 +570,8 @@ export default function LiveRunWorkspace() {
             : body,
         );
         setError("");
+        setSnapshotNotice("");
+        transientRetries = 0;
         terminalRetries = 0;
         if (terminal.includes(body.status))
           terminalSnapshot.current = { runId, status: body.status };
@@ -675,12 +701,22 @@ export default function LiveRunWorkspace() {
         if (terminal.includes(body.status)) stream?.close();
       } catch (cause) {
         if (active) {
-          retryTerminalSnapshot = terminalSnapshot.current?.runId === runId;
-          setError(
-            cause instanceof Error
-              ? cause.message
-              : "The research service is unavailable.",
-          );
+          if (isTransientSnapshotFailure(responseStatus)) {
+            setError("");
+            setSnapshotNotice(SNAPSHOT_RECONNECTING_MESSAGE);
+            retryTerminalSnapshot = terminalSnapshot.current?.runId === runId;
+            if (!retryTerminalSnapshot && transientRetries < 6) {
+              transientRetries++;
+              scheduleRefresh(snapshotRetryDelay(transientRetries));
+            }
+          } else {
+            setSnapshotNotice("");
+            setError(
+              cause instanceof Error
+                ? cause.message
+                : "This research couldn’t be opened.",
+            );
+          }
         }
       } finally {
         fetching = false;
@@ -691,14 +727,13 @@ export default function LiveRunWorkspace() {
           const shouldLoadImmediately = pendingUrgent;
           pendingUrgent = false;
           if (shouldLoadImmediately) void load(true);
-          else scheduleRefresh(
-            snapshotRefreshDelay(undefined, lastSnapshotFinishedAt),
-          );
+          else
+            scheduleRefresh(
+              snapshotRefreshDelay(undefined, lastSnapshotFinishedAt),
+            );
         } else if (active && retryTerminalSnapshot && terminalRetries < 3) {
           terminalRetries++;
-          scheduleRefresh(
-            Math.min(1000 * 2 ** (terminalRetries - 1), 5000),
-          );
+          scheduleRefresh(Math.min(1000 * 2 ** (terminalRetries - 1), 5000));
         }
       }
     };
@@ -921,6 +956,7 @@ export default function LiveRunWorkspace() {
   }
   const markdown = reportDisplayMarkdown(
     run?.report?.markdown.split(/^## Sources\s*$/im)[0] ?? "",
+    run?.report?.document?.version === 5,
   );
   const sections = useMemo(() => reportSections(markdown), [markdown]);
   const refs = useMemo(
@@ -1040,12 +1076,7 @@ export default function LiveRunWorkspace() {
     expectedPlanVersion: run?.planVersion ?? 0,
     questions: draftQuestions,
   }).success;
-  function selectCitation(number: number, origin: HTMLButtonElement) {
-    const source = refs.get(number);
-    if (!source) {
-      setFeedback("Source details for this reference are unavailable.");
-      return;
-    }
+  function selectSource(source: Source, origin: HTMLButtonElement) {
     citationOrigin.current = origin;
     citationIndex.current = Array.from(
       document.querySelectorAll(".citation-chip"),
@@ -1060,6 +1091,14 @@ export default function LiveRunWorkspace() {
         ?.querySelector<HTMLElement>(".selected-source")
         ?.focus({ preventScroll: true }),
     );
+  }
+  function selectCitation(number: number, origin: HTMLButtonElement) {
+    const source = refs.get(number);
+    if (!source) {
+      setFeedback("Source details for this reference are unavailable.");
+      return;
+    }
+    selectSource(source, origin);
   }
   const selectCitationRef = useRef(selectCitation);
   useEffect(() => {
@@ -1296,12 +1335,21 @@ export default function LiveRunWorkspace() {
                               : "Your report and recorded evidence are ready."
                           : "Progress and sources below reflect recorded activity, not estimated completion."}
               </p>
+              {snapshotNotice ? (
+                <p className="run-status-notice" role="status">
+                  {snapshotNotice}
+                </p>
+              ) : null}
             </div>
-            {error ? (
+            {error || snapshotNotice ? (
               <Button
                 variant="outline"
                 disabled={snapshotRefreshing}
-                onClick={() => setReload((value) => value + 1)}
+                onClick={() => {
+                  setError("");
+                  setSnapshotNotice("");
+                  setReload((value) => value + 1);
+                }}
               >
                 {snapshotRefreshing
                   ? "Refreshing recorded state…"
@@ -1850,6 +1898,19 @@ export default function LiveRunWorkspace() {
                   ) : (
                     <>
                       {reportBody}
+                      {reportDocument?.version === 5 && (
+                        <TechnicalResults
+                          document={reportDocument}
+                          sourceTitles={new Map(
+                            run.sources.map(({ id, title }) => [id, title]),
+                          )}
+                          onOpenSource={(sourceId, origin) => {
+                            const source = run.sources.find((item) => item.id === sourceId);
+                            if (source) selectSource(source, origin);
+                            else setFeedback("Source details are unavailable.");
+                          }}
+                        />
+                      )}
                       <ReferenceList
                         references={references}
                         onOpen={selectCitation}
@@ -2520,8 +2581,24 @@ export default function LiveRunWorkspace() {
           ) : (
             <>
               <div className="opening-placeholder" aria-hidden="true" />
-              <h1 role="status">Opening your research…</h1>
-              <p>Finding the question, sources, and research trail.</p>
+              <h1 role="status">
+                {snapshotNotice
+                  ? "Reconnecting to your research…"
+                  : "Opening your research…"}
+              </h1>
+              <p>
+                {snapshotNotice ??
+                  "Finding the question, sources, and research trail."}
+              </p>
+              {snapshotNotice ? (
+                <button
+                  className="action"
+                  onClick={() => setReload((value) => value + 1)}
+                >
+                  Try again
+                  <Icon name="arrow" size={18} />
+                </button>
+              ) : null}
             </>
           )}
         </div>
