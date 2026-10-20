@@ -3,6 +3,7 @@
 import copy
 import importlib.util
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -164,3 +165,22 @@ def test_cli_validates_and_release_gate_fails_closed(tmp_path):
     )
     assert rejected.returncode == 1
     assert "duplicate JSON key" in rejected.stderr
+
+
+def test_cli_rejects_tampered_archived_legacy_policy(tmp_path):
+    frozen = tmp_path / "modes-v1"
+    shutil.copytree(evaluation.FIXTURES, frozen)
+    policy_path = frozen / "legacy-policy.json"
+    policy = json.loads(policy_path.read_text())
+    policy["20"]["limits"]["output_tokens"] = 16_384
+    policy_path.write_text(evaluation.canonical(policy))
+
+    checked = subprocess.run(  # noqa: S603
+        [sys.executable, str(SCRIPT), "check", "--fixtures", str(frozen)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert checked.returncode == 1
+    assert "baseline differs" in checked.stderr
