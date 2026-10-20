@@ -101,12 +101,14 @@ export function ToggleGroup({
 export function ToggleGroupItem({
   children,
   value,
+  disabled = false,
 }: {
   children: ReactNode;
   value: string;
+  disabled?: boolean;
 }) {
   return (
-    <Toggle className="desk-toggle-item" value={value}>
+    <Toggle className="desk-toggle-item" value={value} disabled={disabled}>
       {children}
     </Toggle>
   );
