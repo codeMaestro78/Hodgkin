@@ -99,13 +99,13 @@ async def test_explicit_admission_projection_and_job(identity, mode, operations,
     response = await submit(mode)
     run_id = uuid.UUID(response["runId"])
     assert response["mode"] == mode
-    assert response["modePolicyVersion"] == "research-mode-policy-v1"
+    assert response["modePolicyVersion"] == mode_policy.MODE_POLICY_VERSION
     assert response["budget"]["maxProviderOperations"] == operations
     async with tenant_session(str(tenant)) as session:
         run = await session.get(ResearchRun, run_id)
         budget = await session.scalar(select(Budget).where(Budget.run_id == run_id))
         job = await session.get(RuntimeJob, run_id)
-        assert (run.mode, run.mode_policy_version) == (mode, "research-mode-policy-v1")
+        assert (run.mode, run.mode_policy_version) == (mode, mode_policy.MODE_POLICY_VERSION)
         assert (
             budget.max_search_calls,
             budget.max_provider_operations,
@@ -322,7 +322,7 @@ async def test_retry_inherits_frozen_snapshot(identity):
     response = await api.retry_research_run(run_id, SimpleNamespace())
     projection = await api.get_research_run(uuid.UUID(response["runId"]))
     assert projection["mode"] == "deep"
-    assert projection["modePolicyVersion"] == "research-mode-policy-v1"
+    assert projection["modePolicyVersion"] == mode_policy.MODE_POLICY_VERSION
     assert projection["budget"]["maxProviderOperations"] == 2
     assert projection["sourceLimit"] == 1
 
@@ -390,7 +390,7 @@ async def test_repository_resolves_absent_explicit_budget(identity):
             mode="deep",
         )
         budget = await session.scalar(select(Budget).where(Budget.run_id == run.id))
-        assert run.mode_policy_version == "research-mode-policy-v1"
+        assert run.mode_policy_version == mode_policy.MODE_POLICY_VERSION
         assert budget.max_sources == budget.max_provider_operations == budget.max_search_calls == 20
         assert budget.max_wall_clock_ms == 600_000
 
