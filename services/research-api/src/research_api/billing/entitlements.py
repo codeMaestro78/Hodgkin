@@ -57,6 +57,7 @@ def project_entitlement(
     return BillingEntitlement(
         status=Status.active,
         plan_key=PlanKey(period.plan_key),
+        allowed_modes=list(plan.allowed_modes),
         catalog_version=period.catalog_version,
         period_start=starts_at,
         period_end=ends_at,
