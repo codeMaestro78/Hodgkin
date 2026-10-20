@@ -162,8 +162,19 @@ export async function forwardResearch(
       });
     }
     const body = await response.text();
+    let responseBody = body;
+    try {
+      JSON.parse(body);
+    } catch {
+      responseBody = JSON.stringify({
+        error:
+          response.status >= 500
+            ? "Research service encountered an internal error. Please try again."
+            : "Research service returned an invalid response. Please try again.",
+      });
+    }
     timing("response", started, response.status);
-    return new Response(body, {
+    return new Response(responseBody, {
       status: response.status,
       headers: {
         "content-type": "application/json",
