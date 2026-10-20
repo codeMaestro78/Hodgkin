@@ -148,8 +148,10 @@ async def model_response(
     requested_output = request.get("max_output_tokens", 4096)
     if type(requested_output) is not int or requested_output <= 0:
         raise ValueError("model output allowance must be a positive integer")
-    # The caller can explicitly choose a depth allowance; run-level caps still gate admission.
-    output_bound = min(8192, requested_output)
+    # Deep writer requests may need a larger evidence schema; keep every other
+    # role at the existing ceiling and let the run-level token budget gate usage.
+    role_output_ceiling = 16384 if role == "writer" else 8192
+    output_bound = min(role_output_ceiling, requested_output)
     request = {**request, "max_output_tokens": output_bound}
     if identity is None:
         # Isolated callers have no run ledger. Production graph always sets it.
