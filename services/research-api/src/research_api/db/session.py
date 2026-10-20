@@ -170,6 +170,14 @@ async def tenant_session(tenant_id: str) -> AsyncIterator[AsyncSession]:
         operation_event("db.transaction", started=started, setupMs=setup_ms, acquireMs=acquire_ms)
 
 
+async def set_user_context(session: AsyncSession, user_id: str) -> None:
+    """Bind the authenticated owner for user-scoped RLS policies in this transaction."""
+    await session.execute(
+        text("SELECT set_config('app.user_id', :user_id, true)"),
+        {"user_id": user_id},
+    )
+
+
 @asynccontextmanager
 async def system_session() -> AsyncIterator[AsyncSession]:
     """Open a narrowly scoped transaction for system-owned, non-tenant records.
