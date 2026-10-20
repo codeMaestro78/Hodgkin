@@ -80,6 +80,7 @@ class Settings(BaseSettings):
     OPENALEX_API_KEY: SecretStr | None = None
     # New explicit-mode runs keep bounded repair off unless this is explicitly enabled.
     BOUNDED_GAP_REPAIR_ENABLED: bool = False
+    TECHNICAL_RESULTS_ENABLED: bool = False
     # Records mode-unit observations only; never reserves or rejects runs.
     BILLING_SHADOW_ACCOUNTING_ENABLED: bool = False
     # Fail-closed monthly unit admission; remains opt-in until migrations and rollout gates pass.
@@ -88,6 +89,14 @@ class Settings(BaseSettings):
     BILLING_OPERATOR_TOKENS: SecretStr | None = None
     # Paid subscription writes remain disabled until economics and hosted rollout gates pass.
     BILLING_STRIPE_ENABLED: bool = False
+    # One-time credit sales require explicit commercial, fulfillment, and spend gates.
+    BILLING_CREDIT_TOPUPS_ENABLED: bool = False
+    BILLING_CREDIT_TERMS_APPROVED: bool = False
+    BILLING_CREDIT_TERMS_VERSION: str | None = Field(default=None, min_length=1, max_length=64)
+    BILLING_CREDIT_FULFILLMENT_ENABLED: bool = False
+    BILLING_CREDIT_SPENDING_ENABLED: bool = False
+    BILLING_CREDIT_MAX_WALLET_UNITS: int = Field(default=0, ge=0, le=1_000_000)
+    BILLING_CREDIT_PACKS_JSON: str = Field(default="[]", max_length=20_000)
     STRIPE_SECRET_KEY: SecretStr | None = None
     STRIPE_WEBHOOK_SECRET: SecretStr | None = None
     STRIPE_API_VERSION: str | None = Field(default=None, min_length=1, max_length=64)
@@ -128,6 +137,7 @@ class Settings(BaseSettings):
         "STRIPE_PRICE_SCHOLAR_MONTHLY",
         "STRIPE_PRICE_INVESTIGATOR_MONTHLY",
         "STRIPE_PORTAL_CONFIGURATION_ID",
+        "BILLING_CREDIT_TERMS_VERSION",
         "BILLING_APP_BASE_URL",
         mode="before",
     )
