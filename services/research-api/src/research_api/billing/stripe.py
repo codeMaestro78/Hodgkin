@@ -149,6 +149,28 @@ async def validate_monthly_price(settings: Settings, *, plan_key: str, price_id:
         raise StripeUnavailable("configured Stripe Price does not match the published offer")
 
 
+async def validate_credit_price(
+    settings: Settings,
+    *,
+    price_id: str,
+    amount_minor: int,
+    currency: str,
+) -> None:
+    """Require an active Stripe one-time Price to match the server package snapshot."""
+    if not price_id.startswith("price_") or STRIPE_ID_PATTERN.fullmatch(price_id) is None:
+        raise StripeUnavailable("invalid one-time Stripe Price ID")
+    payload = await stripe_request(settings, "GET", f"/prices/{price_id}")
+    if (
+        payload.get("id") != price_id
+        or payload.get("active") is not True
+        or payload.get("currency") != currency
+        or payload.get("unit_amount") != amount_minor
+        or payload.get("recurring") is not None
+        or payload.get("type") not in (None, "one_time")
+    ):
+        raise StripeUnavailable("configured Stripe Price does not match the credit package")
+
+
 def safe_session_url(payload: Mapping[str, object], *, portal: bool = False) -> str:
     value = payload.get("url")
     if not isinstance(value, str):
