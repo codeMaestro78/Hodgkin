@@ -139,6 +139,7 @@ def task_projection(
     name: str | None = None,
     source_ids: list[str] | None = None,
     dependencies: list[str] | None = None,
+    error_code: str | None = None,
 ) -> dict[str, Any]:
     return {
         "id": str(row.id),
@@ -148,7 +149,7 @@ def task_projection(
         "attempt": row.attempt,
         "startedAt": row.started_at.isoformat() if row.started_at else None,
         "completedAt": row.completed_at.isoformat() if row.completed_at else None,
-        "errorCode": getattr(row, "error_code", None),
+        "errorCode": error_code or getattr(row, "error_code", None),
         "sourceIds": source_ids or [],
         "dependsOn": dependencies or [],
     }
