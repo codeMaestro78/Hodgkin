@@ -1,14 +1,16 @@
 import uuid
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from fastapi import FastAPI
+import pytest
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from research_api.auth import Caller
-from research_api.billing.api import caller_dependency, router
+from research_api.billing.api import _begin_checkout_attempt, caller_dependency, router
 from research_api.billing.stripe import StripeUnavailable
 from research_api.config import Settings
 
@@ -91,6 +93,166 @@ def test_checkout_uses_server_price_and_fixed_return_urls(monkeypatch):
     assert form["success_url"] == "http://localhost:3000/research?billing=success"
     assert "priceId" not in form
     assert stripe_request.await_args.kwargs["idempotency_key"] == "safe-idem-key"
+
+
+def test_checkout_reuses_existing_stripe_session_instead_of_creating_another(monkeypatch):
+    tenant_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    settings = _test_settings()
+    monkeypatch.setattr("research_api.billing.api.get_settings", lambda: settings)
+    session = AsyncMock()
+    session.scalar.return_value = None
+
+    @asynccontextmanager
+    async def fake_tenant_session(_tenant):
+        yield session
+
+    attempt = SimpleNamespace(
+        id=uuid.uuid4(),
+        stripe_session_id="cs_existing",
+        stripe_idempotency_key="original-idempotency-key",
+    )
+    stripe_request = AsyncMock(
+        return_value={
+            "id": "cs_existing",
+            "status": "open",
+            "url": "https://checkout.stripe.com/c/session",
+        }
+    )
+    monkeypatch.setattr("research_api.billing.api.tenant_session", fake_tenant_session)
+    monkeypatch.setattr(
+        "research_api.billing.api._begin_checkout_attempt",
+        AsyncMock(return_value=attempt),
+    )
+    monkeypatch.setattr(
+        "research_api.billing.api._stripe_customer_for",
+        AsyncMock(return_value="cus_test"),
+    )
+    monkeypatch.setattr(
+        "research_api.billing.api.validate_monthly_price", AsyncMock()
+    )
+    monkeypatch.setattr("research_api.billing.api.stripe_request", stripe_request)
+
+    response = _client(tenant_id, user_id).post(
+        "/billing/checkout",
+        headers={"Idempotency-Key": "new-browser-retry-key"},
+        json={"planKey": "scholar", "interval": "monthly"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["sessionId"] == "cs_existing"
+    stripe_request.assert_awaited_once_with(settings, "GET", "/checkout/sessions/cs_existing")
+
+
+def test_checkout_completed_attempt_does_not_create_a_second_session(monkeypatch):
+    tenant_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    settings = _test_settings()
+    monkeypatch.setattr("research_api.billing.api.get_settings", lambda: settings)
+    session = AsyncMock()
+    session.scalar.return_value = None
+
+    @asynccontextmanager
+    async def fake_tenant_session(_tenant):
+        yield session
+
+    attempt = SimpleNamespace(
+        id=uuid.uuid4(),
+        stripe_session_id="cs_completed",
+        stripe_idempotency_key="original-idempotency-key",
+    )
+    stripe_request = AsyncMock(
+        return_value={"id": "cs_completed", "status": "complete", "url": None}
+    )
+    monkeypatch.setattr("research_api.billing.api.tenant_session", fake_tenant_session)
+    monkeypatch.setattr(
+        "research_api.billing.api._begin_checkout_attempt",
+        AsyncMock(return_value=attempt),
+    )
+    monkeypatch.setattr(
+        "research_api.billing.api._stripe_customer_for",
+        AsyncMock(return_value="cus_test"),
+    )
+    monkeypatch.setattr(
+        "research_api.billing.api.validate_monthly_price", AsyncMock()
+    )
+    monkeypatch.setattr("research_api.billing.api.stripe_request", stripe_request)
+
+    response = _client(tenant_id, user_id).post(
+        "/billing/checkout",
+        headers={"Idempotency-Key": "new-browser-retry-key"},
+        json={"planKey": "scholar", "interval": "monthly"},
+    )
+
+    assert response.status_code == 409
+    assert "plan activation" in response.json()["detail"]
+    stripe_request.assert_awaited_once_with(settings, "GET", "/checkout/sessions/cs_completed")
+
+
+@pytest.mark.asyncio
+async def test_checkout_retry_reuses_existing_open_attempt_for_same_plan(monkeypatch):
+    tenant_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    now = datetime.now(UTC)
+    existing = SimpleNamespace(
+        id=uuid.uuid4(),
+        plan_key="scholar",
+        state="open",
+        expires_at=now + timedelta(hours=1),
+        stripe_session_id="cs_existing",
+        stripe_idempotency_key="original-stripe-idempotency-key",
+    )
+    session = AsyncMock()
+    session.scalar.side_effect = [None, existing]
+
+    @asynccontextmanager
+    async def fake_tenant_session(_tenant):
+        yield session
+
+    monkeypatch.setattr("research_api.billing.api.tenant_session", fake_tenant_session)
+
+    attempt = await _begin_checkout_attempt(
+        Caller(tenant_id=tenant_id, user_id=user_id),
+        plan_key="scholar",
+        request_key="new-browser-retry-key",
+    )
+
+    assert attempt is existing
+    session.add.assert_not_called()
+    session.flush.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_checkout_retry_rejects_different_plan_while_attempt_is_open(monkeypatch):
+    tenant_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    now = datetime.now(UTC)
+    existing = SimpleNamespace(
+        id=uuid.uuid4(),
+        plan_key="scholar",
+        state="open",
+        expires_at=now + timedelta(hours=1),
+        stripe_session_id="cs_existing",
+        stripe_idempotency_key="original-stripe-idempotency-key",
+    )
+    session = AsyncMock()
+    session.scalar.side_effect = [None, existing]
+
+    @asynccontextmanager
+    async def fake_tenant_session(_tenant):
+        yield session
+
+    monkeypatch.setattr("research_api.billing.api.tenant_session", fake_tenant_session)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _begin_checkout_attempt(
+            Caller(tenant_id=tenant_id, user_id=user_id),
+            plan_key="investigator",
+            request_key="new-browser-retry-key",
+        )
+
+    assert exc_info.value.status_code == 409
+    assert "already open" in exc_info.value.detail
 
 
 def test_checkout_rejects_mispriced_or_wrong_interval_stripe_price(monkeypatch):
