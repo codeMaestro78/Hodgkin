@@ -1,4 +1,5 @@
 import asyncio
+import os
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -20,7 +21,7 @@ from research_api.billing.stripe import (
 )
 from research_api.checkpointing import CheckpointPool
 from research_api.comparison_api import router as comparison_router
-from research_api.config import configuration_files, get_settings
+from research_api.config import Settings, configuration_files, get_settings
 from research_api.db.runtime_security import validate_runtime_role
 from research_api.db.session import engine
 from research_api.dispatcher import dispatch_loop
@@ -101,6 +102,15 @@ class RequestTiming:
             request_id.reset(token)
 
 
+def _should_start_embedded_dispatcher(settings: Settings) -> bool:
+    """Run the in-process worker locally, but use the Daemon on Vercel."""
+    return bool(
+        settings.DISPATCHER_ENABLED
+        and settings.APP_ENV != "test"
+        and not os.environ.get("VERCEL")
+    )
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     with dependency_logging():
@@ -133,7 +143,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             )
             if settings.APP_ENV != "test":
                 await validate_runtime_role(engine)
-            if settings.DISPATCHER_ENABLED and settings.APP_ENV != "test":
+            # Vercel Functions are request-driven and may be stopped between
+            # requests; the dedicated research-worker Daemon owns dispatch there.
+            if _should_start_embedded_dispatcher(settings):
                 async with CheckpointPool(settings) as pool:
                     dispatcher = asyncio.create_task(dispatch_loop(settings, pool))
                     try:
