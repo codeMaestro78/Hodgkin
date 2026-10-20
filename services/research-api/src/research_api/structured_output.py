@@ -18,9 +18,41 @@ _INCOMPLETE_REASONS = {"max_output_tokens", "content_filter"}
 class StructuredModelOutputError(ValueError):
     """A provider response was received but could not satisfy its output contract."""
 
-    def __init__(self, category: str) -> None:
+    def __init__(
+        self,
+        category: str,
+        *,
+        operation: str = "unknown",
+        incomplete_reason: str | None = None,
+    ) -> None:
         self.category = category
+        self.operation = operation
+        self.incomplete_reason = incomplete_reason
         super().__init__(f"structured model output rejected: {category}")
+
+
+def structured_output_failure_code(error: BaseException) -> str | None:
+    """Translate only known, sanitized failure facts into stable public codes."""
+    current: BaseException | None = error
+    seen: set[int] = set()
+    for _ in range(4):
+        if current is None or id(current) in seen:
+            break
+        seen.add(id(current))
+        if isinstance(current, StructuredModelOutputError):
+            if (
+                current.operation == "research.writer.structured_output"
+                and current.category == "provider_incomplete"
+                and current.incomplete_reason == "max_output_tokens"
+            ):
+                return "writer_output_limit_reached"
+            if current.category == "provider_incomplete":
+                return "model_output_incomplete"
+            if current.category == "refusal":
+                return "model_refused_output"
+            return "model_output_invalid"
+        current = current.__cause__ or current.__context__
+    return None
 
 
 def _refused(response: Any) -> bool:
@@ -118,4 +150,8 @@ def parse_structured_response[T: BaseModel](
         incompleteReason=incomplete_reason,
         parseCategory=category,
     )
-    raise StructuredModelOutputError(category or "unknown")
+    raise StructuredModelOutputError(
+        category or "unknown",
+        operation=operation,
+        incomplete_reason=incomplete_reason,
+    )
