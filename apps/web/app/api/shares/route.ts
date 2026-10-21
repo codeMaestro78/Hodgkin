@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { researchApiUrl } from "../../../lib/research-api-url";
 
 export const runtime = "nodejs";
 
@@ -18,7 +19,7 @@ export async function GET(request: NextRequest) {
       { status: 503 },
     );
   try {
-    const upstream = await fetch(`${apiUrl}/s`, {
+    const upstream = await fetch(researchApiUrl(apiUrl, "/s").toString(), {
       headers: {
         authorization: `ResearchShare ${match[1]}`,
         "x-internal-service-auth": serviceKey,

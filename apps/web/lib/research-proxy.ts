@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { createAuthClient } from "./auth/server";
 import { authConfigured } from "./auth/config";
 import { authJson, sameOrigin } from "./auth/http";
+import { researchApiUrl } from "./research-api-url";
 
 /** Every BFF route verifies the session; never forwards caller identity headers. */
 export async function forwardResearch(
@@ -124,7 +125,7 @@ export async function forwardResearch(
     }
     phase = "upstream";
     const upstreamStarted = performance.now();
-    const response = await fetch(`${apiUrl}${path}`, {
+    const response = await fetch(researchApiUrl(apiUrl, path).toString(), {
       method,
       headers,
       body: requestBody,
