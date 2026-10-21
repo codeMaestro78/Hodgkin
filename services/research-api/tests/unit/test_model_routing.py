@@ -100,7 +100,11 @@ def test_supported_provider_model_rates_are_explicitly_versioned():
 
 
 async def test_model_dispatch_uses_the_pinned_provider_and_model(monkeypatch):
-    settings = Settings(_env_file=None, OPENROUTER_API_KEY="fixture")
+    settings = Settings(
+        _env_file=None,
+        OPENROUTER_API_KEY="fixture",
+        MODEL_WRITER_TIMEOUT_SECONDS=60,
+    )
 
     class Client:
         timeout_options = []
@@ -125,7 +129,9 @@ async def test_model_dispatch_uses_the_pinned_provider_and_model(monkeypatch):
 
     monkeypatch.setattr(builder, "model_response", dispatch)
     token = builder.model_client.set(runtime)
-    timeout_token = builder.writer_timeout_override.set(17)
+    timeout_token = builder.writer_timeout_override.set(
+        builder._explicit_writer_timeout_seconds(settings, "focused")
+    )
     try:
         result = await builder._model_response(
             settings, role="writer", model="must-be-overridden", input="research"
@@ -138,4 +144,4 @@ async def test_model_dispatch_uses_the_pinned_provider_and_model(monkeypatch):
     assert seen["client"] is client
     assert seen["provider"] == "openrouter"
     assert seen["model"] == "deepseek/deepseek-v4.1-flash"
-    assert client.timeout_options == [{"timeout": 17}]
+    assert client.timeout_options == [{"timeout": 60}]

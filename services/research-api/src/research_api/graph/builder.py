@@ -1784,8 +1784,8 @@ def _criterion_review_reserve_seconds(settings: Settings, *, protected: bool = F
 
 
 def _explicit_writer_timeout_seconds(settings: Settings, mode: str | None = None) -> float:
-    """Keep a bounded writer window so Focused runs can collect evidence first."""
-    mode_cap = 30 if mode == "focused" else 60
+    """Use the configured bounded writer window for every explicit report mode."""
+    mode_cap = 60
     return min(settings.MODEL_WRITER_TIMEOUT_SECONDS, mode_cap)
 
 

@@ -464,7 +464,7 @@ async def test_invalid_empty_draft_retry_keeps_original_valid_empty_result(monke
     assert draft.assertions.claims == []
 
 
-def test_focused_budget_caps_writer_to_leave_time_for_collection_and_review():
+def test_focused_writer_gets_configured_window_and_preserves_review_reserve():
     settings = Settings(
         _env_file=None,
         MODEL_WRITER_TIMEOUT_SECONDS=45,
@@ -472,11 +472,19 @@ def test_focused_budget_caps_writer_to_leave_time_for_collection_and_review():
     )
     assert builder._criterion_review_reserve_seconds(settings) == 90
     assert builder._criterion_review_reserve_seconds(settings, protected=True) == 60
-    assert builder._explicit_writer_timeout_seconds(settings, "focused") == 30
-    assert builder._explicit_assessment_tail_seconds(settings, "focused") == 120
+    assert builder._explicit_writer_timeout_seconds(settings, "focused") == 45
+    assert builder._explicit_assessment_tail_seconds(settings, "focused") == 135
     assert builder._explicit_assessment_tail_seconds(settings, "balanced") == 165
     assert builder._post_writer_review_tail_seconds(settings, "focused") == 90
     assert builder._post_writer_review_tail_seconds(settings, "balanced") == 120
+
+    sixty_second_writer = Settings(
+        _env_file=None,
+        MODEL_WRITER_TIMEOUT_SECONDS=60,
+        PROVIDER_TIMEOUT_SECONDS=30,
+    )
+    assert builder._explicit_writer_timeout_seconds(sixty_second_writer, "focused") == 60
+    assert builder._explicit_assessment_tail_seconds(sixty_second_writer, "focused") == 150
 
 
 @pytest.mark.asyncio
