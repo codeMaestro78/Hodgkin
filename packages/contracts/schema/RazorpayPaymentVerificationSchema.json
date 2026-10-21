@@ -1,0 +1,26 @@
+{
+  "$id": "https://schemas.research.local/1.7/RazorpayPaymentVerificationSchema.json",
+  "title": "RazorpayPaymentVerificationSchema",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "razorpay_payment_id": {
+      "type": "string",
+      "pattern": "^pay_[A-Za-z0-9_]+$"
+    },
+    "razorpay_order_id": {
+      "type": "string",
+      "pattern": "^order_[A-Za-z0-9_]+$"
+    },
+    "razorpay_signature": {
+      "type": "string",
+      "pattern": "^[A-Fa-f0-9]{64}$"
+    }
+  },
+  "required": [
+    "razorpay_payment_id",
+    "razorpay_order_id",
+    "razorpay_signature"
+  ],
+  "additionalProperties": false
+}

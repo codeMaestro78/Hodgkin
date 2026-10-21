@@ -1,0 +1,38 @@
+{
+  "$id": "https://schemas.research.local/1.7/RazorpayCreditOrderSchema.json",
+  "title": "RazorpayCreditOrderSchema",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "purchaseId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "orderId": {
+      "type": "string",
+      "pattern": "^order_[A-Za-z0-9_]+$"
+    },
+    "amount": {
+      "type": "integer",
+      "minimum": 100,
+      "maximum": 9007199254740991
+    },
+    "currency": {
+      "type": "string",
+      "const": "INR"
+    },
+    "keyId": {
+      "type": "string",
+      "pattern": "^rzp_(test|live)_[A-Za-z0-9]+$"
+    }
+  },
+  "required": [
+    "purchaseId",
+    "orderId",
+    "amount",
+    "currency",
+    "keyId"
+  ],
+  "additionalProperties": false
+}

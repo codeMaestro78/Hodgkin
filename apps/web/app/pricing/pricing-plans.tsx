@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { Icon } from "../components/ui";
 import { Critter, type CritterKind } from "../components/crew/critter";
 import {
-  checkoutFailureMessage,
   parseCheckoutAvailability,
   type CheckoutAvailability,
   type PaidPlanKey,
@@ -247,46 +246,8 @@ export function PricingPlans() {
   }, [availabilityAttempt]);
 
   async function choosePlan(planKey: PaidPlanKey) {
-    if (busy) return;
-    setBusy(planKey);
-    setCheckoutError("");
-    setSignInRequiredPlan(null);
-    try {
-      const response = await fetch("/api/billing/checkout", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "idempotency-key": crypto.randomUUID(),
-        },
-        body: JSON.stringify({ planKey, interval: "monthly" }),
-      });
-      const result = (await response.json().catch(() => null)) as {
-        url?: string;
-        detail?: string;
-      } | null;
-      if (response.status === 401) {
-        setSignInRequiredPlan(planKey);
-        setBusy(null);
-        return;
-      }
-      if (!response.ok || !result?.url) {
-        throw new Error(checkoutFailureMessage(response.status, result?.detail));
-      }
-      const target = new URL(result.url);
-      if (
-        target.protocol !== "https:" ||
-        target.hostname !== "checkout.stripe.com"
-      )
-        throw new Error("The checkout destination could not be verified.");
-      window.location.assign(target.toString());
-    } catch (error) {
-      setCheckoutError(
-        error instanceof Error
-          ? error.message
-          : "Secure checkout could not be opened.",
-      );
-      setBusy(null);
-    }
+    void planKey;
+    setCheckoutError("Monthly subscription checkout is currently unavailable.");
   }
   return (
     <>

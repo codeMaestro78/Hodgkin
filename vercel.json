@@ -22,12 +22,6 @@
   },
   "rewrites": [
     {
-      "source": "/billing/webhooks/stripe",
-      "destination": {
-        "service": "research-api"
-      }
-    },
-    {
       "source": "/(.*)",
       "destination": {
         "service": "web"

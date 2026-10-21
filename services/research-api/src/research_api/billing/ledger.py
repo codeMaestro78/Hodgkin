@@ -30,7 +30,6 @@ from research_api.db.models import (
     BillingPeriod,
     BillingUnitEntry,
     ResearchRun,
-    StripeSubscription,
 )
 from research_api.mode_policy import ResearchMode
 
@@ -302,26 +301,9 @@ async def ensure_default_free_period(
         _approved_plan(approved_catalogs, current.catalog_version, current.plan_key)
         if current.plan_key == "free" or current.catalog_version not in APPROVED_CATALOGS:
             return current
-        subscription = await session.scalar(
-            select(StripeSubscription).where(
-                StripeSubscription.tenant_id == tenant_id,
-                StripeSubscription.user_id == user_id,
-                StripeSubscription.status == "active",
-                StripeSubscription.plan_key == current.plan_key,
-                StripeSubscription.current_period_start == current.starts_at,
-                StripeSubscription.current_period_end == current.ends_at,
-            )
-        )
-        if subscription is not None:
-            return current
-        await transition_period_state(
-            session,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            period=current,
-            next_state="suspended",
-            effective_at=instant,
-        )
+        # Paid periods are immutable grants. With subscription checkout removed,
+        # honor an already-recorded period through its end; renewal is not implied.
+        return current
 
     expired_periods = (
         await session.scalars(

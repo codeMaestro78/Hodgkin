@@ -49,7 +49,7 @@ const QUESTIONS: [string, string][] = [
   ],
   [
     "Are paid plans available now?",
-    "The paid-plan buttons show whether checkout is currently available. When enabled, checkout requires signing in and completes securely through Stripe. Prices and unit allowances remain proposals until cost validation is complete. Existing reports and sources remain available regardless of future plan changes.",
+    "Monthly subscription checkout is currently unavailable. Razorpay credit packs are a separate one-time option when enabled. Prices and unit allowances remain proposals until cost validation is complete. Existing reports and sources remain available regardless of future plan changes.",
   ],
   [
     "Can I switch between monthly and yearly?",

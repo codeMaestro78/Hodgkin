@@ -45,7 +45,7 @@ pytestmark = [
 SERVICE_ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_all_migrations_through_0032_and_credit_guards_on_disposable_postgres():
+def test_all_migrations_through_0033_and_credit_guards_on_disposable_postgres():
     admin_url = make_url(os.environ["TEST_DATABASE_ADMIN_URL"])
     app_url = make_url(os.environ["DATABASE_URL"])
     assert admin_url.host in {"localhost", "127.0.0.1", "::1"}
@@ -93,7 +93,7 @@ def test_all_migrations_through_0032_and_credit_guards_on_disposable_postgres():
         assert migration.returncode == 0, migration.stderr
 
         with owner.begin() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0032"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0033"
             history_columns = {
                 row[0]
                 for row in connection.execute(
@@ -110,6 +110,29 @@ def test_all_migrations_through_0032_and_credit_guards_on_disposable_postgres():
                     SELECT to_regclass('public.ix_research_runs_owner_pinned_created')
                     IS NOT NULL
                 """)
+            )
+            razorpay_columns = {
+                row[0]
+                for row in connection.execute(
+                    text("""
+                        SELECT column_name FROM information_schema.columns
+                        WHERE table_schema='public'
+                          AND table_name='billing_credit_purchases'
+                          AND column_name IN (
+                              'payment_provider', 'provider_order_state',
+                              'provider_order_id', 'provider_payment_id'
+                          )
+                    """)
+                )
+            }
+            assert razorpay_columns == {
+                "payment_provider",
+                "provider_order_state",
+                "provider_order_id",
+                "provider_payment_id",
+            }
+            assert connection.scalar(
+                text("SELECT to_regclass('public.razorpay_webhook_events') IS NOT NULL")
             )
             for table in ("billing_credit_purchases", "billing_credit_entries"):
                 assert connection.execute(
@@ -128,7 +151,17 @@ def test_all_migrations_through_0032_and_credit_guards_on_disposable_postgres():
                 ) AND NOT tgisinternal
             """)
             )
-            assert trigger_count == 2
+            assert trigger_count == 3
+            assert connection.scalar(
+                text("""
+                    SELECT EXISTS (
+                        SELECT 1 FROM pg_trigger
+                        WHERE tgrelid='public.billing_credit_purchases'::regclass
+                          AND tgname='razorpay_credit_purchase_immutable'
+                          AND NOT tgisinternal
+                    )
+                """)
+            )
             assert connection.scalar(
                 text("""
                 SELECT has_table_privilege(
@@ -564,31 +597,35 @@ def test_all_migrations_through_0032_and_credit_guards_on_disposable_postgres():
                         "payment_intent": "pi_credit_unspent",
                         "metadata": {**event["metadata"], "purchase_id": str(unspent_purchase)},
                     }
-                    assert await apply_credit_checkout(
-                        session,
-                        event_type="checkout.session.completed",
-                        obj=unspent_event,
-                        livemode=False,
-                        expected_livemode=False,
-                    ) == "processed"
-                    assert await apply_credit_reversal(
-                        session,
-                        event_type="refund.created",
-                        obj={
-                            "payment_intent": "pi_credit_unspent",
-                            "amount": 500,
-                            "currency": "usd",
-                        },
-                        livemode=False,
-                        expected_livemode=False,
-                    ) == "processed"
+                    assert (
+                        await apply_credit_checkout(
+                            session,
+                            event_type="checkout.session.completed",
+                            obj=unspent_event,
+                            livemode=False,
+                            expected_livemode=False,
+                        )
+                        == "processed"
+                    )
+                    assert (
+                        await apply_credit_reversal(
+                            session,
+                            event_type="refund.created",
+                            obj={
+                                "payment_intent": "pi_credit_unspent",
+                                "amount": 500,
+                                "currency": "usd",
+                            },
+                            livemode=False,
+                            expected_livemode=False,
+                        )
+                        == "processed"
+                    )
                     assert await credit_balance(session, tenant_id=tenant, account_id=account) == (
                         0,
                         20,
                     )
-                    assert not await wallet_frozen(
-                        session, tenant_id=tenant, account_id=account
-                    )
+                    assert not await wallet_frozen(session, tenant_id=tenant, account_id=account)
                 async with sessions.begin() as session:
                     await install_context(session, billing_system=True)
                     assert (

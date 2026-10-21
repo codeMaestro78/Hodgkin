@@ -107,8 +107,6 @@ export function WorkspaceShell({
   const historyMutationOverrides = useRef(
     new Map<string, { pinned?: boolean; deleted?: boolean }>(),
   );
-  const [portalBusy, setPortalBusy] = useState(false);
-  const [portalError, setPortalError] = useState("");
   const content = useRef<HTMLElement>(null);
   const entitlementContext = useMemo(
     () => ({ entitlement, unavailable: entitlementUnavailable }),
@@ -308,31 +306,6 @@ export function WorkspaceShell({
     } catch {
       setAccountError("Sign-out failed. Please try again.");
       setSigningOut(false);
-    }
-  }
-  async function manageSubscription() {
-    if (portalBusy) return;
-    setPortalBusy(true);
-    setPortalError("");
-    try {
-      const response = await fetch("/api/billing/portal", { method: "POST" });
-      const body = (await response.json()) as { url?: string };
-      if (!response.ok || !body.url)
-        throw new Error("Subscription management is unavailable.");
-      const destination = new URL(body.url);
-      if (
-        destination.protocol !== "https:" ||
-        destination.hostname !== "billing.stripe.com"
-      )
-        throw new Error(
-          "Could not verify the subscription-management destination.",
-        );
-      window.location.assign(destination.toString());
-    } catch (error) {
-      setPortalError(
-        error instanceof Error ? error.message : "Please try again later.",
-      );
-      setPortalBusy(false);
     }
   }
   const visible = history.filter((item) =>
@@ -671,22 +644,11 @@ export function WorkspaceShell({
                 ? ` · ${entitlement.reservedUnits} reserved`
                 : ""}
             </p>
-            {entitlement.planKey !== "free" ? (
-              <button
-                type="button"
-                onClick={() => void manageSubscription()}
-                disabled={portalBusy}
-              >
-                {portalBusy ? "Opening…" : "Manage plan"}
-              </button>
-            ) : (
-              <Link href="/pricing">Plan details</Link>
-            )}
+            <Link href="/pricing">Plan details</Link>
           </>
         ) : (
           <p>Monthly allowance has not been activated yet.</p>
         )}
-        {portalError && <p role="alert">{portalError}</p>}
         <ResearchCreditTopUp revision={entitlementRevision} />
       </section>
       <div className="sidebar-bottom">

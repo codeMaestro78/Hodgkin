@@ -33,9 +33,7 @@ from research_api.billing.ledger import (
     transition_period_state,
 )
 from research_api.billing.lifecycle import settle_terminal_run
-from research_api.billing.subscriptions import apply_subscription_event
-from research_api.config import Settings
-from research_api.db.models import BillingPeriod, BillingUnitEntry, StripeSubscription
+from research_api.db.models import BillingPeriod, BillingUnitEntry
 
 pytestmark = [
     pytest.mark.integration,
@@ -354,280 +352,24 @@ async def test_billing_ledger_serializes_last_unit_and_replays_terminal_work() -
                 == "processed"
             )
 
-        stripe_settings = Settings(
-            APP_ENV="test",
-            STRIPE_PRICE_SCHOLAR_MONTHLY="price_scholar_test",
-            STRIPE_PRICE_INVESTIGATOR_MONTHLY="price_investigator_test",
-        )
         now = datetime.now(UTC).replace(microsecond=0)
         async with session_factory() as session, session.begin():
             await set_identity(session, users[2])
-            free_period_before_upgrade = await ensure_default_free_period(
-                session, tenant_id=tenant, user_id=users[2], now=now
+            paid_period = await ensure_period_grant(
+                session,
+                tenant_id=tenant,
+                user_id=users[2],
+                plan_key="scholar",
+                catalog_version=BILLING_CATALOG.version,
+                starts_at=now - timedelta(days=1),
+                ends_at=now + timedelta(days=29),
             )
-
-        subscription_customer_id = "cus_subscription_" + uuid.uuid4().hex
-        with sync_app.begin() as connection:
-            connection.execute(text("SELECT set_config('app.billing_system', 'on', true)"))
-            connection.execute(
-                text("""
-                    INSERT INTO stripe_customer_links
-                        (stripe_customer_id, tenant_id, user_id)
-                    VALUES (:customer, :tenant, :user)
-                """),
-                {"customer": subscription_customer_id, "tenant": tenant, "user": users[2]},
-            )
-        stripe_start = now - timedelta(days=1)
-        stripe_end = now + timedelta(days=29)
-        subscription_payload = {
-            "id": "sub_disposable_" + uuid.uuid4().hex,
-            "customer": subscription_customer_id,
-            "status": "active",
-            "cancel_at_period_end": True,
-            "items": {
-                "data": [
-                    {
-                        "price": {
-                            "id": "price_scholar_test",
-                            "currency": "usd",
-                            "unit_amount": 599,
-                            "recurring": {"interval": "month", "interval_count": 1},
-                        },
-                        "current_period_start": int(stripe_start.timestamp()),
-                        "current_period_end": int(stripe_end.timestamp()),
-                    }
-                ]
-            },
-        }
-        subscription_event_time = now
-        async with session_factory() as session, session.begin():
-            await session.execute(text("SELECT set_config('app.billing_system', 'on', true)"))
-            assert (
-                await apply_subscription_event(
-                    session,
-                    event_id="evt_disposable_subscription_1",
-                    event_created_at=subscription_event_time,
-                    event_type="customer.subscription.created",
-                    livemode=False,
-                    obj=subscription_payload,
-                    settings=stripe_settings,
-                )
-                == "processed"
-            )
-
-        async with session_factory() as session, session.begin():
-            await session.execute(text("SELECT set_config('app.billing_system', 'on', true)"))
-            assert (
-                await apply_subscription_event(
-                    session,
-                    event_id="evt_disposable_subscription_1",
-                    event_created_at=subscription_event_time,
-                    event_type="customer.subscription.created",
-                    livemode=False,
-                    obj=subscription_payload,
-                    settings=stripe_settings,
-                )
-                == "processed"
-            )
-            await set_identity(session, users[2])
-            projection = await read_entitlement(
-                session, tenant_id=tenant, user_id=users[2], now=now
-            )
+            await session.flush()
+            projection = await read_entitlement(session, tenant_id=tenant, user_id=users[2], now=now)
             assert projection.plan_key == "scholar"
-            assert projection.allowance_units == 20
+            assert projection.period_start == paid_period.starts_at
+            assert projection.period_end == paid_period.ends_at
             assert projection.available_units == 20
-            assert projection.period_start == stripe_start
-            assert projection.period_end == stripe_end
-            stripe_account_id = await session.scalar(
-                select(BillingPeriod.billing_account_id).where(
-                    BillingPeriod.tenant_id == tenant,
-                    BillingPeriod.plan_key == "scholar",
-                    BillingPeriod.starts_at == stripe_start,
-                    BillingPeriod.state == "active",
-                )
-            )
-            period_count = await session.scalar(
-                select(func.count())
-                .select_from(BillingPeriod)
-                .where(
-                    BillingPeriod.tenant_id == tenant,
-                    BillingPeriod.billing_account_id == stripe_account_id,
-                    BillingPeriod.starts_at == stripe_start,
-                    BillingPeriod.state == "active",
-                )
-            )
-            assert period_count == 1
-            assert (
-                await session.scalar(
-                    select(BillingPeriod.state).where(
-                        BillingPeriod.id == free_period_before_upgrade.id
-                    )
-                )
-                == "suspended"
-            )
-            assert (
-                await apply_subscription_event(
-                    session,
-                    event_id="evt_disposable_subscription_old",
-                    event_created_at=subscription_event_time - timedelta(seconds=1),
-                    event_type="customer.subscription.updated",
-                    livemode=False,
-                    obj={**subscription_payload, "status": "past_due"},
-                    settings=stripe_settings,
-                )
-                == "stale"
-            )
-
-            # A plan switch inside the same Stripe period has no defined
-            # proration/credit policy. It must not end the old grant or create
-            # a second, larger grant before reconciliation.
-            investigator_payload = {
-                **subscription_payload,
-                "items": {
-                    "data": [
-                        {
-                            **subscription_payload["items"]["data"][0],
-                            "price": {
-                                **subscription_payload["items"]["data"][0]["price"],
-                                "id": "price_investigator_test",
-                                "unit_amount": 1299,
-                            },
-                        }
-                    ]
-                },
-            }
-            assert (
-                await apply_subscription_event(
-                    session,
-                    event_id="evt_disposable_subscription_plan_switch",
-                    event_created_at=subscription_event_time + timedelta(seconds=1),
-                    event_type="customer.subscription.updated",
-                    livemode=False,
-                    obj=investigator_payload,
-                    settings=stripe_settings,
-                )
-                == "reconciliation_required"
-            )
-            assert (
-                await session.scalar(
-                    select(BillingPeriod.state).where(
-                        BillingPeriod.tenant_id == tenant,
-                        BillingPeriod.billing_account_id == stripe_account_id,
-                        BillingPeriod.plan_key == "scholar",
-                        BillingPeriod.starts_at == stripe_start,
-                    )
-                )
-                == "active"
-            )
-            assert (
-                await session.scalar(
-                    select(func.count())
-                    .select_from(BillingPeriod)
-                    .where(
-                        BillingPeriod.tenant_id == tenant,
-                        BillingPeriod.billing_account_id == stripe_account_id,
-                        BillingPeriod.plan_key == "investigator",
-                        BillingPeriod.starts_at == stripe_start,
-                    )
-                )
-                == 0
-            )
-
-            assert (
-                await apply_subscription_event(
-                    session,
-                    event_id="evt_disposable_subscription_past_due",
-                    event_created_at=subscription_event_time + timedelta(seconds=2),
-                    event_type="customer.subscription.updated",
-                    livemode=False,
-                    obj={**subscription_payload, "status": "past_due"},
-                    settings=stripe_settings,
-                )
-                == "processed"
-            )
-            assert (
-                await session.scalar(
-                    select(BillingPeriod.id).where(
-                        BillingPeriod.tenant_id == tenant,
-                        BillingPeriod.billing_account_id == stripe_account_id,
-                        BillingPeriod.starts_at == stripe_start,
-                        BillingPeriod.state == "suspended",
-                    )
-                )
-                is not None
-            )
-            free_during_delinquency = await ensure_default_free_period(
-                session, tenant_id=tenant, user_id=users[2], now=now
-            )
-            assert free_during_delinquency.id == free_period_before_upgrade.id
-            assert free_during_delinquency.state == "active"
-
-            assert (
-                await apply_subscription_event(
-                    session,
-                    event_id="evt_disposable_subscription_recovered",
-                    event_created_at=subscription_event_time + timedelta(seconds=3),
-                    event_type="customer.subscription.updated",
-                    livemode=False,
-                    obj=subscription_payload,
-                    settings=stripe_settings,
-                )
-                == "processed"
-            )
-            recovered_projection = await read_entitlement(
-                session, tenant_id=tenant, user_id=users[2], now=now
-            )
-            assert recovered_projection.period_end == stripe_end
-            assert recovered_projection.available_units == 20
-            assert (
-                await session.scalar(
-                    select(BillingPeriod.state).where(
-                        BillingPeriod.id == free_period_before_upgrade.id
-                    )
-                )
-                == "suspended"
-            )
-
-        async with session_factory() as session, session.begin():
-            await session.execute(text("SELECT set_config('app.billing_system', 'on', true)"))
-            cancelled = {
-                "id": subscription_payload["id"],
-                "customer": subscription_customer_id,
-                "status": "canceled",
-            }
-            assert (
-                await apply_subscription_event(
-                    session,
-                    event_id="evt_disposable_subscription_deleted",
-                    event_created_at=subscription_event_time + timedelta(seconds=4),
-                    event_type="customer.subscription.deleted",
-                    livemode=False,
-                    obj=cancelled,
-                    settings=stripe_settings,
-                )
-                == "processed"
-            )
-            await set_identity(session, users[2])
-            free_after_cancel = await ensure_default_free_period(
-                session, tenant_id=tenant, user_id=users[2], now=now
-            )
-            assert free_after_cancel.id == free_period_before_upgrade.id
-            assert free_after_cancel.state == "active"
-            assert free_after_cancel.plan_key == "free"
-            assert (
-                await session.scalar(
-                    select(BillingPeriod.id).where(
-                        BillingPeriod.tenant_id == tenant,
-                        BillingPeriod.billing_account_id == stripe_account_id,
-                        BillingPeriod.starts_at == stripe_start,
-                        BillingPeriod.state == "active",
-                    )
-                )
-                is None
-            )
-            saved_subscription = await session.get(StripeSubscription, subscription_payload["id"])
-            assert saved_subscription is not None
-            assert saved_subscription.status == "canceled"
 
         async with session_factory() as session, session.begin():
             await set_identity(session, users[3])

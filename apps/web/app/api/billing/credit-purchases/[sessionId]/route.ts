@@ -8,7 +8,7 @@ export async function GET(
   context: { params: Promise<{ sessionId: string }> },
 ) {
   const { sessionId } = await context.params;
-  if (!/^cs_[A-Za-z0-9_]+$/.test(sessionId))
+  if (!/^order_[A-Za-z0-9_]+$/.test(sessionId))
     return Response.json({ detail: "Credit purchase not found" }, { status: 404 });
   return forwardResearch(request, `/billing/credit-purchases/${sessionId}`);
 }

@@ -1,10 +1,32 @@
 "use client";
 
+import Script from "next/script";
 import { useEffect, useRef, useState } from "react";
 
 type Pack = { key: string; amountMinor: number; units: number; expiryDays: null };
 type Catalog = { enabled: boolean; currency: string; packs: Pack[] };
 type Balance = { enabled: boolean; availableUnits?: number; reservedUnits?: number; frozen?: boolean };
+type RazorpayResult = {
+  razorpay_payment_id: string;
+  razorpay_order_id: string;
+  razorpay_signature: string;
+};
+type CheckoutOrder = {
+  purchaseId: string;
+  orderId: string;
+  amount: number;
+  currency: string;
+  keyId: string;
+};
+
+declare global {
+  interface Window {
+    Razorpay?: new (options: Record<string, unknown>) => {
+      open: () => void;
+      on: (event: string, callback: (details: { error?: { description?: string } }) => void) => void;
+    };
+  }
+}
 
 export function ResearchCreditTopUp({
   revision,
@@ -19,6 +41,7 @@ export function ResearchCreditTopUp({
   const [balance, setBalance] = useState<Balance | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState("");
+  const [checkoutScriptReady, setCheckoutScriptReady] = useState(false);
   const requestKey = useRef<{ packKey: string; key: string } | null>(null);
 
   useEffect(() => {
@@ -46,54 +69,12 @@ export function ResearchCreditTopUp({
     return () => controller.abort();
   }, [revision]);
 
-  useEffect(() => {
-    const url = new URL(window.location.href);
-    if (url.searchParams.get("credits") !== "success") return;
-    const sessionId = url.searchParams.get("session_id");
-    url.searchParams.delete("credits");
-    url.searchParams.delete("session_id");
-    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
-    if (!sessionId || !/^cs_[A-Za-z0-9_]+$/.test(sessionId)) {
-      setMessage("Checkout returned without a valid session. Check your balance shortly.");
-      return;
-    }
-    let cancelled = false;
-    async function checkPurchase() {
-      setMessage("Payment returned. Waiting for verified credit delivery…");
-      for (let attempt = 0; attempt < 10 && !cancelled; attempt += 1) {
-        try {
-          const response = await fetch(`/api/billing/credit-purchases/${sessionId}`, {
-            cache: "no-store",
-          });
-          if (response.ok) {
-            const result = (await response.json()) as { status: string };
-            if (result.status === "paid") {
-              const balanceResponse = await fetch("/api/billing/credit-balance", {
-                cache: "no-store",
-              });
-              if (balanceResponse.ok && !cancelled) {
-                setBalance((await balanceResponse.json()) as Balance);
-                setMessage("Research credits are ready to use.");
-                return;
-              }
-            } else if (result.status !== "pending") {
-              if (!cancelled) setMessage("Payment needs review. Credits were not added; contact support before trying again.");
-              return;
-            }
-          }
-        } catch {
-          // A transient network error must not imply payment failure or trigger a second purchase.
-        }
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-      }
-      if (!cancelled) setMessage("Payment confirmation is pending. Refresh the budget shortly; do not buy again yet.");
-    }
-    void checkPurchase();
-    return () => { cancelled = true; };
-  }, []);
-
   async function buy(pack: Pack) {
     if (busy) return;
+    if (!checkoutScriptReady || !window.Razorpay) {
+      setMessage("Secure checkout is still loading. Please try again in a moment.");
+      return;
+    }
     const key = requestKey.current?.packKey === pack.key
       ? requestKey.current.key
       : crypto.randomUUID();
@@ -106,12 +87,71 @@ export function ResearchCreditTopUp({
         headers: { "Content-Type": "application/json", "Idempotency-Key": key },
         body: JSON.stringify({ packageKey: pack.key }),
       });
-      if (!response.ok) throw new Error();
-      const result = (await response.json()) as { url?: string };
-      if (!result.url || new URL(result.url).hostname !== "checkout.stripe.com") throw new Error();
-      window.location.assign(result.url);
+      if (!response.ok) throw new Error("A secure payment order could not be created.");
+      const order = (await response.json()) as CheckoutOrder;
+      if (
+        !order.orderId.startsWith("order_") ||
+        order.amount !== pack.amountMinor ||
+        order.currency !== catalog?.currency ||
+        !order.keyId.startsWith("rzp_")
+      ) throw new Error("The payment order could not be validated.");
+
+      const verify = async (result: RazorpayResult) => {
+        setMessage("Verifying payment securely…");
+        for (let attempt = 0; attempt < 4; attempt += 1) {
+          const verifyResponse = await fetch("/api/billing/credit-checkout/verify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(result),
+          });
+          const verification = (await verifyResponse.json()) as { status?: string; detail?: string };
+          if (verification.status === "paid") {
+            const balanceResponse = await fetch("/api/billing/credit-balance", { cache: "no-store" });
+            if (balanceResponse.ok) setBalance((await balanceResponse.json()) as Balance);
+            requestKey.current = null;
+            setBusy(null);
+            setMessage("Payment verified. Your research units are ready.");
+            return;
+          }
+          if (verification.status !== "processing" || attempt === 3) {
+            throw new Error(
+              verification.status === "processing"
+                ? "Payment is still processing. Your balance will update after capture; do not pay again."
+                : verification.detail ?? "Payment could not be verified. No units were added.",
+            );
+          }
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+        }
+      };
+
+      const checkout = new window.Razorpay({
+        key: order.keyId,
+        amount: order.amount,
+        currency: order.currency,
+        name: "HogsKin",
+        description: `Add ${pack.units} research units`,
+        order_id: order.orderId,
+        handler: (result: RazorpayResult) => {
+          void verify(result).catch((error: unknown) => {
+            setBusy(null);
+            setMessage(error instanceof Error ? error.message : "Payment verification failed.");
+          });
+        },
+        modal: {
+          ondismiss: () => {
+            setBusy(null);
+            setMessage("Checkout closed. No units were added.");
+          },
+        },
+        theme: { color: "#315b60" },
+      });
+      checkout.on("payment.failed", (details) => {
+        setBusy(null);
+        setMessage(details.error?.description ?? "Payment failed. No units were added.");
+      });
+      checkout.open();
     } catch {
-      setMessage("Checkout could not open. No credits were added. Try again or refresh your budget.");
+      setMessage("Checkout could not open. If an order was created, retrying uses the same order safely.");
       setBusy(null);
     }
   }
@@ -120,6 +160,12 @@ export function ResearchCreditTopUp({
     return null;
   return (
     <div className="workspace-credit-topup" aria-label="Purchased research credits">
+      <Script
+        src="https://checkout.razorpay.com/v1/checkout.js"
+        strategy="afterInteractive"
+        onReady={() => setCheckoutScriptReady(true)}
+        onError={() => setMessage("Secure checkout could not be loaded. Please try again later.")}
+      />
       {balance?.enabled && (
         <p>
           <strong>{balance.availableUnits} purchased units</strong> available
@@ -133,8 +179,8 @@ export function ResearchCreditTopUp({
           <p>Purchased units do not reset monthly and do not unlock additional research modes.</p>
           <div className="workspace-credit-packs">
             {catalog.packs.map((pack) => (
-              <button key={pack.key} type="button" disabled={busy !== null} onClick={() => void buy(pack)}>
-                {busy === pack.key ? "Opening checkout…" : `Add ${pack.units} units · ${(pack.amountMinor / 100).toLocaleString(undefined, { style: "currency", currency: "USD" })}`}
+              <button key={pack.key} type="button" disabled={busy !== null || !checkoutScriptReady} onClick={() => void buy(pack)}>
+                {busy === pack.key ? "Opening secure checkout…" : `Add ${pack.units} units · ${(pack.amountMinor / 100).toLocaleString(undefined, { style: "currency", currency: catalog.currency })}`}
               </button>
             ))}
           </div>

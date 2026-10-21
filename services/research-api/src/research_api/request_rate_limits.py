@@ -19,7 +19,7 @@ from research_api.config import Settings, get_settings
 logger = logging.getLogger("research_api.rate_limits")
 _warned_redis_unavailable = False
 _RESEARCH_START_PATH = re.compile(r"^/research/runs(?:/[^/]+/(?:retry|followups|approve))?$")
-_STRIPE_WEBHOOK_PATH = "/billing/webhooks/stripe"
+_RAZORPAY_WEBHOOK_PATH = "/billing/webhooks/razorpay"
 
 _INCREMENT_WITH_EXPIRY = """
 local count = redis.call('INCR', KEYS[1])
@@ -43,8 +43,10 @@ def request_policy(method: str, path: str, settings: Settings) -> RateLimitPolic
     """Use dedicated buckets for costly paths; leave only probes unmetered."""
     if method in {"OPTIONS", "HEAD"} or path == "/health" or path.startswith("/health/"):
         return None
-    if path == _STRIPE_WEBHOOK_PATH:
-        return RateLimitPolicy("stripe-webhook", settings.HTTP_RATE_LIMIT_WEBHOOK_PER_MINUTE, True)
+    if path == _RAZORPAY_WEBHOOK_PATH:
+        return RateLimitPolicy(
+            "razorpay-webhook", settings.HTTP_RATE_LIMIT_WEBHOOK_PER_MINUTE, True
+        )
     if method == "POST" and _RESEARCH_START_PATH.fullmatch(path):
         return RateLimitPolicy(
             "research-start", settings.HTTP_RATE_LIMIT_RESEARCH_START_PER_MINUTE, True

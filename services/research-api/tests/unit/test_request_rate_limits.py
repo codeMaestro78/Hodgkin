@@ -53,8 +53,8 @@ def rate_limited_app(redis: InMemoryRedis) -> FastAPI:
     async def live() -> dict[str, bool]:
         return {"ok": True}
 
-    @app.post("/billing/webhooks/stripe")
-    async def webhook() -> dict[str, bool]:
+    @app.post("/billing/webhooks/razorpay")
+    async def razorpay_webhook() -> dict[str, bool]:
         return {"ok": True}
 
     return app
@@ -131,14 +131,14 @@ def test_untrusted_account_header_does_not_choose_rate_limit_identity() -> None:
     assert len(redis.counts) == 1
 
 
-def test_health_is_exempt_but_stripe_webhook_has_its_own_limit() -> None:
+def test_health_is_exempt_but_payment_webhooks_have_their_own_limit() -> None:
     client = TestClient(rate_limited_app(InMemoryRedis()))
 
     for _ in range(5):
         assert client.get("/health/live").status_code == 200
     for _ in range(3):
-        assert client.post("/billing/webhooks/stripe").status_code == 200
-    assert client.post("/billing/webhooks/stripe").status_code == 429
+        assert client.post("/billing/webhooks/razorpay").status_code == 200
+    assert client.post("/billing/webhooks/razorpay").status_code == 429
 
 
 def test_redis_failure_fails_closed_for_mutations_but_not_reads() -> None:

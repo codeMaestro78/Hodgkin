@@ -183,7 +183,7 @@ async def system_session() -> AsyncIterator[AsyncSession]:
     """Open a narrowly scoped transaction for system-owned, non-tenant records.
 
     Use only for tables whose ownership is intentionally global (such as the
-    Stripe event inbox); request payloads must never choose a tenant here.
+    payment-provider webhook inbox); request payloads must never choose a tenant here.
     """
     async with session_factory() as session:
         async with session.begin():

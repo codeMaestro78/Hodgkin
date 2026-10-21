@@ -150,7 +150,7 @@ def test_readiness_uses_schema_capabilities_when_runtime_cannot_read_alembic_his
     assert not any("version_num >= :revision" in query for query in queries)
 
 
-def test_stripe_readiness_requires_period_transition_migration(
+def test_razorpay_readiness_requires_provider_order_migration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     queries: list[tuple[str, dict[str, object] | None]] = []
@@ -170,15 +170,8 @@ def test_stripe_readiness_requires_period_transition_migration(
 
     settings = Settings(
         APP_ENV="test",
-        BILLING_STRIPE_ENABLED=True,
+        BILLING_RAZORPAY_ENABLED=True,
         BILLING_ENFORCEMENT_ENABLED=True,
-        STRIPE_SECRET_KEY="sk_test_disposable",  # noqa: S106 - inert test fixture
-        STRIPE_WEBHOOK_SECRET="whsec_disposable",  # noqa: S106 - inert test fixture
-        STRIPE_API_VERSION="2026-10-19",
-        STRIPE_PRICE_SCHOLAR_MONTHLY="price_scholar_disposable",
-        STRIPE_PRICE_INVESTIGATOR_MONTHLY="price_investigator_disposable",
-        STRIPE_PORTAL_CONFIGURATION_ID="bpc_disposable",
-        BILLING_APP_BASE_URL="http://localhost:3000",
     )
     monkeypatch.setattr(main, "get_settings", lambda: settings)
     monkeypatch.setattr(main, "engine", Engine())
@@ -186,7 +179,7 @@ def test_stripe_readiness_requires_period_transition_migration(
 
     assert asyncio.run(main.readiness())["status"] == "ok"
     assert any(
-        "version_num >= :revision" in query and params == {"revision": "0028"}
+        "version_num >= :revision" in query and params == {"revision": "0033"}
         for query, params in queries
     )
 

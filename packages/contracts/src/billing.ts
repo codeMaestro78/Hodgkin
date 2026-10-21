@@ -70,3 +70,24 @@ export const BillingEntitlementSchema = z
   });
 
 export type BillingEntitlement = z.infer<typeof BillingEntitlementSchema>;
+
+export const RazorpayCreditOrderSchema = z
+  .object({
+    purchaseId: z.uuid(),
+    orderId: z.string().regex(/^order_[A-Za-z0-9_]+$/),
+    amount: z.number().int().min(100),
+    currency: z.literal("INR"),
+    keyId: z.string().regex(/^rzp_(test|live)_[A-Za-z0-9]+$/),
+  })
+  .strict();
+
+export const RazorpayPaymentVerificationSchema = z
+  .object({
+    razorpay_payment_id: z.string().regex(/^pay_[A-Za-z0-9_]+$/),
+    razorpay_order_id: z.string().regex(/^order_[A-Za-z0-9_]+$/),
+    razorpay_signature: z.string().regex(/^[A-Fa-f0-9]{64}$/),
+  })
+  .strict();
+
+export type RazorpayCreditOrder = z.infer<typeof RazorpayCreditOrderSchema>;
+export type RazorpayPaymentVerification = z.infer<typeof RazorpayPaymentVerificationSchema>;

@@ -109,31 +109,3 @@ async def settle_terminal_run(session: AsyncSession, run: ResearchRun) -> bool:
             outcome=outcome,
         )
     return True
-
-
-def stripe_signature_valid(
-    payload: bytes,
-    signature_header: str,
-    secret: str,
-    *,
-    now_seconds: int,
-    tolerance_seconds: int = 300,
-) -> bool:
-    """Verify a Stripe v1 signature over the exact raw request bytes."""
-    import hashlib
-    import hmac
-
-    try:
-        fields = [part.strip().split("=", 1) for part in signature_header.split(",")]
-        timestamp_values = [value for key, value in fields if key == "t"]
-        signatures = [value for key, value in fields if key == "v1"]
-        if len(timestamp_values) != 1 or not signatures:
-            return False
-        timestamp = int(timestamp_values[0])
-        if abs(now_seconds - timestamp) > tolerance_seconds:
-            return False
-        signed_payload = timestamp_values[0].encode("ascii") + b"." + payload
-        expected = hmac.new(secret.encode("utf-8"), signed_payload, hashlib.sha256).hexdigest()
-        return any(hmac.compare_digest(expected, candidate) for candidate in signatures)
-    except (UnicodeEncodeError, ValueError):
-        return False

@@ -366,7 +366,7 @@ class BillingUnitEntry(Base, TenantScopedMixin):
 
 
 class BillingCreditPurchase(Base, TenantScopedMixin):
-    """Minimal one-time pack order projection; never stores raw Stripe payloads."""
+    """Provider-neutral purchase projection with legacy columns retained for migration safety."""
 
     __tablename__ = "billing_credit_purchases"
     __table_args__ = (
@@ -391,7 +391,13 @@ class BillingCreditPurchase(Base, TenantScopedMixin):
             name="fk_billing_credit_purchase_user",
         ),
         CheckConstraint("length(btrim(package_key)) BETWEEN 1 AND 64"),
-        CheckConstraint("length(btrim(stripe_price_id)) BETWEEN 1 AND 255"),
+        # `stripe` is accepted only so pre-existing rows remain readable; the
+        # application no longer creates or processes Stripe purchases.
+        CheckConstraint("payment_provider IN ('stripe','razorpay')"),
+        CheckConstraint(
+            "provider_order_state IN ('not_started','creating','created','uncertain')",
+            name="ck_billing_credit_provider_order_state",
+        ),
         CheckConstraint("amount_minor > 0 AND unit_grant > 0"),
         CheckConstraint("currency ~ '^[A-Z]{3}$'", name="ck_billing_credit_purchase_currency"),
         CheckConstraint(
@@ -400,6 +406,8 @@ class BillingCreditPurchase(Base, TenantScopedMixin):
         ),
         UniqueConstraint("stripe_checkout_session_id", name="uq_billing_credit_checkout_session"),
         UniqueConstraint("stripe_payment_intent_id", name="uq_billing_credit_payment_intent"),
+        UniqueConstraint("provider_order_id", name="uq_billing_credit_provider_order"),
+        UniqueConstraint("provider_payment_id", name="uq_billing_credit_provider_payment"),
         Index(
             "ix_billing_credit_purchase_account_created",
             "tenant_id",
@@ -413,9 +421,21 @@ class BillingCreditPurchase(Base, TenantScopedMixin):
     billing_account_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
     package_key: Mapped[str] = mapped_column(String(64), nullable=False)
-    stripe_price_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    payment_provider: Mapped[str] = mapped_column(String(16), nullable=False, default="razorpay")
+    provider_order_state: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="not_started"
+    )
+    provider_order_id: Mapped[str | None] = mapped_column(String(255))
+    provider_payment_id: Mapped[str | None] = mapped_column(String(255))
+    # Legacy database column retained for already-written provider history.
+    legacy_provider_price_id: Mapped[str | None] = mapped_column(
+        "stripe_price_id", String(255)
+    )
     request_key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    stripe_idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    # Existing schema column is kept mapped until a separate archival migration.
+    provider_idempotency_key: Mapped[str] = mapped_column(
+        "stripe_idempotency_key", String(200), nullable=False
+    )
     terms_version: Mapped[str] = mapped_column(String(64), nullable=False)
     amount_minor: Mapped[int] = mapped_column(Integer, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
@@ -562,6 +582,26 @@ class StripeWebhookEvent(Base):
     event_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     object_id: Mapped[str | None] = mapped_column(String(255))
     livemode: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    processing_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class RazorpayWebhookEvent(Base):
+    """Minimal idempotency inbox for signed Razorpay events; no raw payloads."""
+
+    __tablename__ = "razorpay_webhook_events"
+    __table_args__ = (
+        CheckConstraint(
+            "processing_status IN ('received','processed','ignored','reconciliation_required')",
+            name="ck_razorpay_webhook_event_status",
+        ),
+    )
+
+    event_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(160), nullable=False)
+    payment_id: Mapped[str | None] = mapped_column(String(255))
     processing_status: Mapped[str] = mapped_column(String(32), nullable=False)
     received_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

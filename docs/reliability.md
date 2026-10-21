@@ -94,12 +94,12 @@ other requests use a hash of the bearer credential or the direct peer address.
 Identity values and credentials are never stored in Redis keys or rate-limit
 responses. Current defaults are 120 general requests/minute, 30 mutations/
 minute, 4 research starts/retries/follow-ups/approvals per minute, and 300
-Stripe webhook deliveries/minute. Health probes and `OPTIONS`/`HEAD` are
+Razorpay webhook deliveries/minute. Health probes and `OPTIONS`/`HEAD` are
 exempt. `HTTP_RATE_LIMIT_*` settings can tune these ceilings.
 
 Over-limit requests receive `429` with `Retry-After` and `RateLimit-*` headers.
 If Redis is unavailable, safe reads fail open; state-changing requests,
-research starts, billing checkouts, and Stripe webhooks fail closed with `503`
+research starts, billing checkouts, and Razorpay webhooks fail closed with `503`
 so provider spend or account changes cannot bypass the limiter. Redis must be
 reachable by every API instance. These request limits complement, but do not
 replace, per-tenant queue caps, billing admission, provider-operation budgets,

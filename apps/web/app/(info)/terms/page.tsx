@@ -76,7 +76,7 @@ const SECTIONS: Section[] = [
     blocks: [
       {
         kind: "p",
-        text: "HogsKin has three plans — Free, Scholar, and Investigator. Free requires no card. Paid plans are billed through Stripe, and checkout opens only when billing is live; the buttons on the pricing page show whether it is.",
+        text: "HogsKin offers a free plan and may offer paid plans or one-time research-credit packs where available. Monthly subscription checkout is currently unavailable. Any one-time purchase is shown with its price and terms before payment.",
       },
       {
         kind: "p",

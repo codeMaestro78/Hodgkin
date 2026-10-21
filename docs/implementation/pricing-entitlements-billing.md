@@ -1,6 +1,14 @@
-# Pricing, Entitlements, and Billing — Implementation Specification
+# Pricing, Entitlements, and Billing — Historical Implementation Specification
 
-**Status:** lower-price v2 local catalog approved by the product owner on 2026-10-19; cost validation, paid launch, finance/legal review, Stripe setup, migrations, and enforcement rollout remain gated
+> **Superseded on 2026-10-21:** Stripe subscriptions, Checkout, Customer Portal,
+> webhook processing, and Stripe configuration were removed from the active
+> application. This document is retained as a historical record because earlier
+> migrations and persisted billing rows may still reference Stripe-named schema.
+> Do not follow Stripe setup, launch, or endpoint instructions below. The active
+> one-time credit-purchase provider is Razorpay; subscription checkout remains
+> unavailable until a provider-specific subscription flow is implemented.
+
+**Status:** historical design; current checkout implementation and provider decisions are documented in the active Razorpay billing code and environment examples
 **As of:** 2026-10-19
 **Scope:** Free, Scholar, and Investigator plans; server-enforced usage; future paid subscriptions
 **Non-goal:** this document does not authorize production billing, database changes, or a Supabase migration.

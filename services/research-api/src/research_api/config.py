@@ -111,8 +111,15 @@ class Settings(BaseSettings):
     BILLING_ENFORCEMENT_ENABLED: bool = False
     # JSON object mapping immutable operator UUIDs to unique bearer secrets.
     BILLING_OPERATOR_TOKENS: SecretStr | None = None
-    # Paid subscription writes remain disabled until economics and hosted rollout gates pass.
-    BILLING_STRIPE_ENABLED: bool = False
+    # Razorpay Standard Checkout is fail-closed until account and commercial gates pass.
+    BILLING_RAZORPAY_ENABLED: bool = False
+    RAZORPAY_KEY_ID: str | None = Field(default=None, min_length=1, max_length=128)
+    RAZORPAY_KEY_SECRET: SecretStr | None = None
+    RAZORPAY_WEBHOOK_SECRET: SecretStr | None = None
+    RAZORPAY_LIVEMODE: bool = False
+    RAZORPAY_CREDIT_PACKS_JSON: str = Field(default="[]", max_length=20_000)
+    # Separate operator approval required before any live payment provider is enabled.
+    BILLING_LIVE_LAUNCH_APPROVED: bool = False
     # One-time credit sales require explicit commercial, fulfillment, and spend gates.
     BILLING_CREDIT_TOPUPS_ENABLED: bool = False
     BILLING_CREDIT_TERMS_APPROVED: bool = False
@@ -120,20 +127,6 @@ class Settings(BaseSettings):
     BILLING_CREDIT_FULFILLMENT_ENABLED: bool = False
     BILLING_CREDIT_SPENDING_ENABLED: bool = False
     BILLING_CREDIT_MAX_WALLET_UNITS: int = Field(default=0, ge=0, le=1_000_000)
-    BILLING_CREDIT_PACKS_JSON: str = Field(default="[]", max_length=20_000)
-    STRIPE_SECRET_KEY: SecretStr | None = None
-    STRIPE_WEBHOOK_SECRET: SecretStr | None = None
-    STRIPE_API_VERSION: str | None = Field(default=None, min_length=1, max_length=64)
-    STRIPE_PRICE_SCHOLAR_MONTHLY: str | None = Field(default=None, min_length=1, max_length=255)
-    STRIPE_PRICE_INVESTIGATOR_MONTHLY: str | None = Field(
-        default=None, min_length=1, max_length=255
-    )
-    STRIPE_PORTAL_CONFIGURATION_ID: str | None = Field(default=None, min_length=1, max_length=255)
-    STRIPE_LIVEMODE: bool = False
-    # Separate operator gate: live Stripe requests are impossible until economics,
-    # terms, and hosted rollout have been explicitly approved.
-    BILLING_LIVE_LAUNCH_APPROVED: bool = False
-    BILLING_APP_BASE_URL: str | None = None
     DISCOVERY_RETRY_AFTER_MAX_SECONDS: float = Field(default=5, ge=0, le=30)
     OBJECT_STORAGE_ENDPOINT: str = "http://localhost:54566"
     OBJECT_STORAGE_BUCKET: str = "research-artifacts"
@@ -155,14 +148,10 @@ class Settings(BaseSettings):
         "OPENALEX_API_KEY",
         "INTERNAL_SERVICE_AUTH",
         "BILLING_OPERATOR_TOKENS",
-        "STRIPE_SECRET_KEY",
-        "STRIPE_WEBHOOK_SECRET",
-        "STRIPE_API_VERSION",
-        "STRIPE_PRICE_SCHOLAR_MONTHLY",
-        "STRIPE_PRICE_INVESTIGATOR_MONTHLY",
-        "STRIPE_PORTAL_CONFIGURATION_ID",
+        "RAZORPAY_KEY_ID",
+        "RAZORPAY_KEY_SECRET",
+        "RAZORPAY_WEBHOOK_SECRET",
         "BILLING_CREDIT_TERMS_VERSION",
-        "BILLING_APP_BASE_URL",
         mode="before",
     )
     @classmethod

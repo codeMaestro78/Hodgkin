@@ -38,7 +38,7 @@ const SECTIONS: Section[] = [
         items: [
           "Account basics: your email address and authentication identifiers, plus the preferences you set during onboarding.",
           "Research content: your questions, report requirements, runs, plans, reports, library items, projects, schedules, and batches.",
-          "Billing: checkout session identifiers through Stripe when billing is live. Card numbers go to Stripe, not to us.",
+          "Billing: payment and order identifiers needed to verify and fulfill purchases. Payment details are processed by the payment provider, not stored as card data by HogsKin.",
           "Technical records: request logs and error diagnostics needed to run and debug the service.",
         ],
       },
@@ -92,7 +92,7 @@ const SECTIONS: Section[] = [
         kind: "ul",
         items: [
           "Supabase — accounts, authentication, and the database behind your workspace.",
-          "Stripe — payments when checkout is live.",
+          "Razorpay — payment processing when credit-pack checkout is enabled.",
           "Tavily — public web search during runs.",
           "Language-model services — the drafting and verification steps of a run.",
         ],
