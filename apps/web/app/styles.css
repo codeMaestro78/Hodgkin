@@ -2465,7 +2465,7 @@ button,
   border-right: 1px solid var(--steel);
 }
 
-/* History actions stay quiet until intent is expressed, but remain keyboard reachable. */
+/* Keep history actions discoverable without competing with the research title. */
 .history-entry {
   position: relative;
   display: flex;
@@ -2497,31 +2497,30 @@ button,
 .history-pinned-marker { flex: 0 0 auto; margin-top: 2px; color: var(--primary); }
 .history-entry .history-actions-trigger {
   display: inline-flex;
-  flex: 0 0 30px;
+  flex: 0 0 34px;
   align-self: center;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
-  margin-right: 5px;
-  border: 0;
+  width: 34px;
+  height: 34px;
+  margin: 0 5px 0 2px;
+  border: 1px solid #d6d0c7;
   border-radius: 8px;
-  background: transparent;
-  color: var(--muted);
+  background: #f4f1ec;
+  color: #403d38;
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 140ms ease, background-color 140ms ease, color 140ms ease;
-}
-.history-entry:hover .history-actions-trigger,
-.history-entry:focus-within .history-actions-trigger,
-.history-actions-trigger[data-pressed] {
   opacity: 1;
+  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
 }
 .history-entry .history-actions-trigger:hover,
 .history-entry .history-actions-trigger:focus-visible {
-  background: rgb(37 37 34 / 8%);
-  color: var(--ink);
-  outline: none;
+  background: #e8e2d9;
+  border-color: #bdb4a8;
+  color: #24221f;
+}
+.history-entry .history-actions-trigger:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 .history-menu-positioner { z-index: 120; }
 .history-menu-popup {
@@ -2604,7 +2603,6 @@ button,
 @keyframes history-menu-in { from { opacity: 0; transform: scale(.97) translateY(-2px); } to { opacity: 1; transform: scale(1) translateY(0); } }
 @keyframes history-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes history-dialog-in { from { opacity: 0; transform: translate(-50%, -48%) scale(.98); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
-@media (hover: none) { .history-entry .history-actions-trigger { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
   .history-entry .history-actions-trigger { transition: none; }
   .history-menu-popup, .history-delete-backdrop, .history-delete-dialog { animation: none; }
