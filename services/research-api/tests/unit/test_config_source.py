@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import research_api.config as config
 from research_api.config import Settings, configuration_file, configuration_files
 
 
@@ -32,6 +33,15 @@ def test_tests_and_explicit_empty_file_disable_implicit_secrets(monkeypatch):
     assert configuration_files() == ()
     monkeypatch.setenv("APP_ENV", "development")
     monkeypatch.setenv("RESEARCH_ENV_FILE", "")
+    assert configuration_file() is None
+    assert configuration_files() == ()
+
+
+def test_container_layout_without_repository_dotenv_is_supported(monkeypatch):
+    monkeypatch.delenv("RESEARCH_ENV_FILE", raising=False)
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setattr(config, "__file__", "/app/src/research_api/config.py")
+
     assert configuration_file() is None
     assert configuration_files() == ()
 

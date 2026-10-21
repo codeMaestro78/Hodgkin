@@ -9,6 +9,17 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from research_api.model_routing import ModelRole, ModelRoute
 
 
+def _repository_root() -> Path | None:
+    return next(
+        (
+            parent
+            for parent in Path(__file__).resolve().parents
+            if (parent / "pnpm-workspace.yaml").is_file()
+        ),
+        None,
+    )
+
+
 def configuration_file() -> str | None:
     """Use one repository environment regardless of the API launch directory."""
     explicit = os.environ.get("RESEARCH_ENV_FILE")
@@ -16,12 +27,12 @@ def configuration_file() -> str | None:
         return str(Path(explicit).expanduser().resolve()) if explicit else None
     if os.environ.get("APP_ENV") == "test":
         return None
-    root = Path(__file__).resolve().parents[4]
-    if (root / "pnpm-workspace.yaml").is_file():
-        if (root / ".env").is_file():
-            return str(root / ".env")
-        return str(root / "services/research-api/.env")
-    return ".env"
+    root = _repository_root()
+    if root is None:
+        return None
+    if (root / ".env").is_file():
+        return str(root / ".env")
+    return str(root / "services/research-api/.env")
 
 
 def configuration_files() -> tuple[str, ...]:
@@ -29,7 +40,9 @@ def configuration_files() -> tuple[str, ...]:
     selected = configuration_file()
     if selected is None:
         return ()
-    root = Path(__file__).resolve().parents[4]
+    root = _repository_root()
+    if root is None:
+        return (selected,)
     service = root / "services/research-api/.env"
     if (
         "RESEARCH_ENV_FILE" not in os.environ
