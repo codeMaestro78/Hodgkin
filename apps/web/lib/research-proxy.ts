@@ -111,6 +111,7 @@ export async function forwardResearch(
     const headers = new Headers({
       authorization: `Bearer ${session.access_token}`,
       "x-internal-service-auth": serviceKey,
+      "x-verified-account-id": identity.user.id,
       accept: events ? "text/event-stream" : "application/json",
       "x-request-id": requestId,
     });

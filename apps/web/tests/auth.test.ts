@@ -506,6 +506,7 @@ describe("research BFF identity", () => {
         headers: {
           origin: "http://localhost:3000",
           "x-research-account-id": "verified",
+          "x-verified-account-id": "forged",
           "idempotency-key": "fixture-mode-request",
           authorization: "Bearer forged",
         },
@@ -524,6 +525,7 @@ describe("research BFF identity", () => {
       expect(forwarded.headers.get("x-internal-service-auth")).toBe(
         "fixture-service",
       );
+      expect(forwarded.headers.get("x-verified-account-id")).toBe("verified");
       expect(forwarded.headers.has("x-research-account-id")).toBe(false);
     },
   );
@@ -573,6 +575,7 @@ describe("research BFF identity", () => {
     const headers = fetch.mock.calls[0]![1].headers as Headers;
     expect(headers.get("authorization")).toBe("Bearer fixture-access");
     expect(headers.get("x-internal-service-auth")).toBe("fixture-service");
+    expect(headers.get("x-verified-account-id")).toBe("verified");
     expect(headers.has("x-development-tenant-id")).toBe(false);
   });
   it("keeps streaming response bodies uncached and private", async () => {

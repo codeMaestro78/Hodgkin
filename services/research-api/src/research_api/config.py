@@ -68,6 +68,11 @@ class Settings(BaseSettings):
     WORKER_CONCURRENCY: int = Field(default=2, ge=1, le=8)
     WORKER_LEASE_SECONDS: int = Field(default=60, ge=30, le=300)
     MAX_PENDING_RUNS_PER_TENANT: int = Field(default=32, ge=1, le=100)
+    HTTP_RATE_LIMIT_ENABLED: bool = True
+    HTTP_RATE_LIMIT_GENERAL_PER_MINUTE: int = Field(default=120, ge=1, le=10_000)
+    HTTP_RATE_LIMIT_MUTATION_PER_MINUTE: int = Field(default=30, ge=1, le=1_000)
+    HTTP_RATE_LIMIT_RESEARCH_START_PER_MINUTE: int = Field(default=4, ge=1, le=100)
+    HTTP_RATE_LIMIT_WEBHOOK_PER_MINUTE: int = Field(default=300, ge=1, le=10_000)
     DISPATCHER_ENABLED: bool = True
     REDIS_URL: str = "redis://localhost:56379/0"
     SSE_REDIS_WAKEUPS_ENABLED: bool = True

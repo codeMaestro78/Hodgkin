@@ -88,6 +88,11 @@ def test_readiness_succeeds_when_current_schema_is_present(
             "get_settings",
             lambda: Settings(BILLING_ENFORCEMENT_ENABLED=True),
         )
+        class Redis:
+            async def ping(self) -> bool:
+                return True
+
+        monkeypatch.setattr(main.app.state, "rate_limit_redis", Redis(), raising=False)
 
     assert asyncio.run(main.readiness())["status"] == "ok"
     assert any(
@@ -97,6 +102,19 @@ def test_readiness_succeeds_when_current_schema_is_present(
     assert any(
         "billing_accounts" in query and "billing_periods" in query for query, _params in queries
     )
+
+
+def test_readiness_fails_when_rate_limit_redis_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(main, "get_settings", lambda: Settings(APP_ENV="production"))
+    monkeypatch.setattr(main.app.state, "rate_limit_redis", None, raising=False)
+
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(main.readiness())
+
+    assert error.value.status_code == 503
+    assert error.value.detail == "request protection is unavailable"
 
 
 def test_readiness_uses_schema_capabilities_when_runtime_cannot_read_alembic_history(

@@ -6,6 +6,9 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from time import monotonic
 
 from fastapi import FastAPI, HTTPException
+from redis.asyncio import Redis
+from redis.asyncio.retry import Retry
+from redis.backoff import NoBackoff
 from sqlalchemy import text
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -28,6 +31,7 @@ from research_api.dispatcher import dispatch_loop
 from research_api.events.wakeups import event_wakeups
 from research_api.library_api import router as library_router
 from research_api.providers.http_clients import provider_http_transport
+from research_api.request_rate_limits import RequestRateLimitMiddleware
 from research_api.runtime_api import router as runtime_router
 from research_api.sharing_exports_api import router as sharing_exports_router
 from research_api.telemetry import dependency_logging, operation_event, request_id
@@ -117,6 +121,18 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         async with AsyncExitStack() as stack:
             await stack.enter_async_context(identity_transport())
             settings = get_settings()
+            _app.state.rate_limit_settings = settings
+            if settings.HTTP_RATE_LIMIT_ENABLED:
+                rate_limit_redis = Redis.from_url(
+                    settings.REDIS_URL,
+                    decode_responses=False,
+                    max_connections=64,
+                    socket_connect_timeout=0.25,
+                    socket_timeout=0.25,
+                    retry=Retry(NoBackoff(), 0),
+                )
+                _app.state.rate_limit_redis = rate_limit_redis
+                stack.push_async_callback(rate_limit_redis.aclose)
             await stack.enter_async_context(
                 provider_http_transport(
                     timeout_seconds=settings.PROVIDER_TIMEOUT_SECONDS,
@@ -158,6 +174,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="Research API", version="0.1.0", lifespan=lifespan)
+app.add_middleware(RequestRateLimitMiddleware)
 app.add_middleware(RequestTiming)
 app.include_router(research_router)
 app.include_router(runtime_router)
@@ -176,6 +193,14 @@ async def liveness() -> dict[str, str]:
 @app.get("/health/ready", tags=["health"])
 async def readiness() -> dict[str, str]:
     settings = get_settings()
+    if settings.HTTP_RATE_LIMIT_ENABLED and settings.APP_ENV != "test":
+        rate_limit_redis = getattr(app.state, "rate_limit_redis", None)
+        if rate_limit_redis is None:
+            raise HTTPException(503, "request protection is unavailable")
+        try:
+            await rate_limit_redis.ping()
+        except Exception as exc:
+            raise HTTPException(503, "request protection is unavailable") from exc
     if settings.BILLING_STRIPE_ENABLED:
         try:
             if not settings.BILLING_ENFORCEMENT_ENABLED:

@@ -86,6 +86,26 @@ traced.
 - In the Python LangGraph runtime, prefer graph-native fan-out and
   reducers over hiding concurrency inside one opaque node.
 
+## Inbound request limits
+
+The research API uses an atomic Redis fixed-window counter shared by API
+replicas. Authenticated BFF requests are bucketed by the verified account ID;
+other requests use a hash of the bearer credential or the direct peer address.
+Identity values and credentials are never stored in Redis keys or rate-limit
+responses. Current defaults are 120 general requests/minute, 30 mutations/
+minute, 4 research starts/retries/follow-ups/approvals per minute, and 300
+Stripe webhook deliveries/minute. Health probes and `OPTIONS`/`HEAD` are
+exempt. `HTTP_RATE_LIMIT_*` settings can tune these ceilings.
+
+Over-limit requests receive `429` with `Retry-After` and `RateLimit-*` headers.
+If Redis is unavailable, safe reads fail open; state-changing requests,
+research starts, billing checkouts, and Stripe webhooks fail closed with `503`
+so provider spend or account changes cannot bypass the limiter. Redis must be
+reachable by every API instance. These request limits complement, but do not
+replace, per-tenant queue caps, billing admission, provider-operation budgets,
+or edge-level DDoS protection. The limits are starting defaults, not a measured
+production capacity guarantee.
+
 ## Retries
 
 - **Structured-output nodes** (`planner`, `distiller`, `writer`,
