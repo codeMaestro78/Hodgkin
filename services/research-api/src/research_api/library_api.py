@@ -130,6 +130,7 @@ def item_query(caller: Caller) -> Select[*tuple[Any, ...]]:
         .where(
             owned(LibraryItem, caller),
             owned(ResearchRun, caller),
+            ResearchRun.deleted_at.is_(None),
             or_(LibraryItem.report_id.is_(None), Report.published.is_(True)),
         )
     )
@@ -194,6 +195,7 @@ async def save_item(payload: SaveLibraryItemRequest, caller: CallerDep) -> Libra
                 target.tenant_id == caller.tenant_id,
                 target.id == target_id,
                 owned(ResearchRun, caller),
+                ResearchRun.deleted_at.is_(None),
             )
         )
         if target is Report:

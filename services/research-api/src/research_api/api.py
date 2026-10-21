@@ -9,7 +9,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request, status
 from fastapi.sse import EventSourceResponse, ServerSentEvent
-from sqlalchemy import func, select
+from pydantic import BaseModel, ConfigDict
+from sqlalchemy import func, select, update
 
 from research_api.auth import authenticated_caller as _caller
 from research_api.billing.ledger import BillingLedgerError, billing_http_status
@@ -22,6 +23,7 @@ from research_api.db.models import (
     EvidenceClaim,
     PlanApproval,
     Report,
+    ReportShare,
     ResearchGap,
     ResearchPlan,
     ResearchRun,
@@ -60,6 +62,11 @@ from research_api.snapshots import load_collections
 from research_api.verified_preview import verified_preview
 
 router = APIRouter(prefix="/research", tags=["research"])
+
+
+class PinResearchRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    pinned: bool
 AfterSequenceQuery = Annotated[int, Query(ge=0, alias="after")]
 
 _PUBLIC_REPAIR_REASONS = frozenset(
@@ -313,13 +320,14 @@ async def list_research_runs(
                 .where(
                     ResearchRun.tenant_id == caller.tenant_id,
                     ResearchRun.user_id == caller.user_id,
+                    ResearchRun.deleted_at.is_(None),
                     *(
                         [ResearchRun.report_id.is_not(None), ResearchRun.status == "completed"]
                         if reports_only
                         else []
                     ),
                 )
-                .order_by(ResearchRun.created_at.desc())
+                .order_by(ResearchRun.pinned_at.desc().nulls_last(), ResearchRun.created_at.desc())
                 .limit(100 if reports_only else 24)
             )
         )
@@ -339,10 +347,95 @@ async def list_research_runs(
                     "modePolicyVersion": run.mode_policy_version,
                     "modeResolution": "explicit" if run.mode is not None else "legacy-inferred",
                     "createdAt": run.created_at.isoformat(),
+                    "pinned": run.pinned_at is not None,
                 }
                 for run, count in rows
             ]
         }
+
+
+@router.patch("/runs/{run_id}/pin")
+async def set_research_run_pin(
+    run_id: uuid.UUID,
+    payload: PinResearchRunRequest,
+    authorization: Annotated[str | None, Header()] = None,
+    x_internal_service_auth: str | None = Header(default=None),
+    x_development_tenant_id: str | None = Header(default=None),
+    x_development_user_id: str | None = Header(default=None),
+) -> dict[str, object]:
+    settings = get_settings()
+    caller = await _caller(
+        settings,
+        x_internal_service_auth,
+        x_development_tenant_id,
+        x_development_user_id,
+        authorization=authorization,
+    )
+    async with tenant_session(str(caller.tenant_id)) as session:
+        run = await session.scalar(
+            select(ResearchRun)
+            .where(
+                ResearchRun.tenant_id == caller.tenant_id,
+                ResearchRun.user_id == caller.user_id,
+                ResearchRun.id == run_id,
+                ResearchRun.deleted_at.is_(None),
+            )
+            .with_for_update()
+        )
+        if run is None:
+            raise HTTPException(404, "research run not found")
+        run.pinned_at = datetime.now(UTC) if payload.pinned else None
+        return {"runId": str(run.id), "pinned": run.pinned_at is not None}
+
+
+@router.delete("/runs/{run_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_research_run(
+    run_id: uuid.UUID,
+    authorization: Annotated[str | None, Header()] = None,
+    x_internal_service_auth: str | None = Header(default=None),
+    x_development_tenant_id: str | None = Header(default=None),
+    x_development_user_id: str | None = Header(default=None),
+) -> None:
+    settings = get_settings()
+    caller = await _caller(
+        settings,
+        x_internal_service_auth,
+        x_development_tenant_id,
+        x_development_user_id,
+        authorization=authorization,
+    )
+    async with tenant_session(str(caller.tenant_id)) as session:
+        await set_user_context(session, str(caller.user_id))
+        run = await session.scalar(
+            select(ResearchRun)
+            .where(
+                ResearchRun.tenant_id == caller.tenant_id,
+                ResearchRun.user_id == caller.user_id,
+                ResearchRun.id == run_id,
+                ResearchRun.deleted_at.is_(None),
+            )
+            .with_for_update()
+        )
+        if run is None:
+            raise HTTPException(404, "research run not found")
+        if run.status not in TERMINAL_RUN_STATUSES:
+            raise HTTPException(409, "stop the active research run before deleting it")
+
+        now = datetime.now(UTC)
+        run.deleted_at = now
+        run.pinned_at = None
+        report_ids = select(Report.id).where(
+            Report.tenant_id == caller.tenant_id, Report.run_id == run.id
+        )
+        await session.execute(
+            update(ReportShare)
+            .where(
+                ReportShare.tenant_id == caller.tenant_id,
+                ReportShare.report_id.in_(report_ids),
+                ReportShare.revoked_at.is_(None),
+            )
+            .values(revoked_at=now)
+        )
 
 
 @router.get("/runs/{run_id}")
@@ -388,6 +481,7 @@ async def get_research_run(
                     ResearchRun.tenant_id == caller.tenant_id,
                     ResearchRun.id == run_id,
                     ResearchRun.user_id == caller.user_id,
+                    ResearchRun.deleted_at.is_(None),
                 )
             )
         ).first()
@@ -638,7 +732,8 @@ async def get_research_run(
                     ResearchRun,
                     (ResearchRun.id == Report.run_id)
                     & (ResearchRun.tenant_id == caller.tenant_id)
-                    & (ResearchRun.user_id == caller.user_id),
+                    & (ResearchRun.user_id == caller.user_id)
+                    & (ResearchRun.deleted_at.is_(None)),
                 )
                 .where(Report.tenant_id == caller.tenant_id, Report.id == run.parent_report_id)
             )
@@ -650,6 +745,7 @@ async def get_research_run(
                         ResearchRun.tenant_id == caller.tenant_id,
                         ResearchRun.user_id == caller.user_id,
                         ResearchRun.parent_report_id == report.id,
+                        ResearchRun.deleted_at.is_(None),
                     )
                     .order_by(ResearchRun.created_at.desc())
                     .limit(20)
@@ -855,6 +951,7 @@ async def cancel_research_run(
                 ResearchRun.tenant_id == caller.tenant_id,
                 ResearchRun.user_id == caller.user_id,
                 ResearchRun.id == run_id,
+                ResearchRun.deleted_at.is_(None),
             )
             .with_for_update()
         )
@@ -916,6 +1013,7 @@ async def retry_research_run(
                 ResearchRun.tenant_id == caller.tenant_id,
                 ResearchRun.user_id == caller.user_id,
                 ResearchRun.id == run_id,
+                ResearchRun.deleted_at.is_(None),
             )
         )
         if prior is None:
@@ -1005,6 +1103,7 @@ async def followup_research_run(
                 ResearchRun.tenant_id == caller.tenant_id,
                 ResearchRun.user_id == caller.user_id,
                 ResearchRun.id == run_id,
+                ResearchRun.deleted_at.is_(None),
             )
             .with_for_update()
         )
@@ -1146,6 +1245,7 @@ async def stream_research_run_events(
                 ResearchRun.tenant_id == caller.tenant_id,
                 ResearchRun.user_id == caller.user_id,
                 ResearchRun.id == run_id,
+                ResearchRun.deleted_at.is_(None),
             )
         )
     if run is None:
@@ -1180,6 +1280,7 @@ async def stream_research_run_events(
                             ResearchRun.tenant_id == caller.tenant_id,
                             ResearchRun.user_id == caller.user_id,
                             ResearchRun.id == run_id,
+                            ResearchRun.deleted_at.is_(None),
                         )
                         .order_by(RunEvent.event_sequence)
                         .limit(128)

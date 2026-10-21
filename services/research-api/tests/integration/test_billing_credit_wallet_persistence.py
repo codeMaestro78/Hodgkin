@@ -1,4 +1,4 @@
-"""Apply the billing-credit migration in an isolated, generated loopback database.
+"""Apply all current migrations in an isolated, generated loopback database.
 
 Opt in with RUN_BILLING_CREDIT_DB_TESTS=1. The test creates and drops only its
 uniquely named disposable database; it never migrates the configured database.
@@ -45,7 +45,7 @@ pytestmark = [
 SERVICE_ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_all_migrations_through_0030_and_credit_guards_on_disposable_postgres():
+def test_all_migrations_through_0032_and_credit_guards_on_disposable_postgres():
     admin_url = make_url(os.environ["TEST_DATABASE_ADMIN_URL"])
     app_url = make_url(os.environ["DATABASE_URL"])
     assert admin_url.host in {"localhost", "127.0.0.1", "::1"}
@@ -73,7 +73,7 @@ def test_all_migrations_through_0030_and_credit_guards_on_disposable_postgres():
             ),
             DATABASE_URL=app_url.set(database=database).render_as_string(hide_password=False),
         )
-        subprocess.run(  # noqa: S603 - fixed Python/Alembic command; DB is a generated disposable name
+        migration = subprocess.run(  # noqa: S603 - DB is a generated disposable name
             [
                 sys.executable,
                 "-m",
@@ -85,14 +85,32 @@ def test_all_migrations_through_0030_and_credit_guards_on_disposable_postgres():
             ],
             cwd=SERVICE_ROOT,
             env=environment,
-            check=True,
+            check=False,
             capture_output=True,
             text=True,
             timeout=180,
         )
+        assert migration.returncode == 0, migration.stderr
 
         with owner.begin() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0030"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "0032"
+            history_columns = {
+                row[0]
+                for row in connection.execute(
+                    text("""
+                        SELECT column_name FROM information_schema.columns
+                        WHERE table_schema = 'public' AND table_name = 'research_runs'
+                          AND column_name IN ('pinned_at', 'deleted_at')
+                    """)
+                )
+            }
+            assert history_columns == {"pinned_at", "deleted_at"}
+            assert connection.scalar(
+                text("""
+                    SELECT to_regclass('public.ix_research_runs_owner_pinned_created')
+                    IS NOT NULL
+                """)
+            )
             for table in ("billing_credit_purchases", "billing_credit_entries"):
                 assert connection.execute(
                     text("""

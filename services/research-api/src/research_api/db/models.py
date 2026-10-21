@@ -216,6 +216,8 @@ class ResearchRun(Base, TenantScopedMixin, TimestampMixin):
     report_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     cancellation_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    pinned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     error_code: Mapped[str | None] = mapped_column(String(100))
     idempotency_key: Mapped[str | None] = mapped_column(String(200))
     next_event_sequence: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)

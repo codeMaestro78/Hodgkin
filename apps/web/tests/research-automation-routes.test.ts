@@ -14,6 +14,8 @@ import {
 import { POST as disableSchedule } from "../app/api/research/schedules/[scheduleId]/disable/route";
 import { POST as approve } from "../app/api/research/runs/[runId]/approve/route";
 import { POST as retry } from "../app/api/research/runs/[runId]/retry/route";
+import { DELETE as deleteRun } from "../app/api/research/runs/[runId]/route";
+import { PATCH as pinRun } from "../app/api/research/runs/[runId]/pin/route";
 
 beforeEach(() => {
   proxy.mockReset();
@@ -23,7 +25,7 @@ beforeEach(() => {
         JSON.stringify({
           path,
           method,
-          body: method === "POST" ? await request.text() : null,
+          body: method === "POST" || method === "PATCH" ? await request.text() : null,
         }),
         { status: 202 },
       ),
@@ -41,6 +43,25 @@ it("forwards an explicitly chosen retry deadline and drops unrelated query param
     "/research/runs/id/retry?maxWallClockMs=600000",
     "POST",
   );
+});
+
+it("forwards history deletion with an encoded run identifier", async () => {
+  const request = new NextRequest("http://localhost/api/research/runs/run%2Fid", {
+    method: "DELETE",
+  });
+  await deleteRun(request, { params: Promise.resolve({ runId: "run/id" }) });
+  expect(proxy).toHaveBeenCalledWith(request, "/research/runs/run%2Fid", "DELETE");
+});
+
+it("forwards the explicit pin state to the owner-scoped API", async () => {
+  const request = new NextRequest("http://localhost/api/research/runs/run%2Fid/pin", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pinned: true }),
+  });
+  const response = await pinRun(request, { params: Promise.resolve({ runId: "run/id" }) });
+  expect(proxy).toHaveBeenCalledWith(request, "/research/runs/run%2Fid/pin", "PATCH");
+  expect((await response.json()).body).toBe(JSON.stringify({ pinned: true }));
 });
 
 it.each([

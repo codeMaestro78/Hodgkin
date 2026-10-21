@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import clsx from "clsx";
+import { Menu } from "@base-ui/react/menu";
+import { Dialog } from "@base-ui/react/dialog";
 import {
   Empty,
   Sheet,
@@ -40,6 +42,7 @@ export type HistoryRun = {
   sourceCount: number;
   createdAt: string;
   quickMode: boolean;
+  pinned?: boolean;
 };
 
 type BillingEntitlement = {
@@ -81,6 +84,11 @@ export function WorkspaceShell({
   const [open, setOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const pathname = usePathname();
+  const router = useRouter();
+  const [deleteTarget, setDeleteTarget] = useState<HistoryRun | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [historyActionError, setHistoryActionError] = useState("");
+  const [historyActionRun, setHistoryActionRun] = useState<string | null>(null);
   const [account, setAccount] = useState<{
     name: string;
     email: string;
@@ -96,6 +104,9 @@ export function WorkspaceShell({
     "checking" | "active" | "pending" | "cancelled" | null
   >(null);
   const checkoutActivationPending = useRef(false);
+  const historyMutationOverrides = useRef(
+    new Map<string, { pinned?: boolean; deleted?: boolean }>(),
+  );
   const [portalBusy, setPortalBusy] = useState(false);
   const [portalError, setPortalError] = useState("");
   const content = useRef<HTMLElement>(null);
@@ -152,9 +163,21 @@ export function WorkspaceShell({
         if (!response.ok) throw new Error("History unavailable");
         const body = (await response.json()) as { runs?: HistoryRun[] };
         if (controller.signal.aborted) return;
-        let runs = body.runs ?? [];
+        let runs = (body.runs ?? [])
+          .filter((run) => !historyMutationOverrides.current.get(run.runId)?.deleted)
+          .map((run) => {
+            const override = historyMutationOverrides.current.get(run.runId);
+            return override?.pinned === undefined
+              ? run
+              : { ...run, pinned: override.pinned };
+          });
         for (const snapshot of snapshots.values())
           runs = patchResearchHistory(runs, snapshot);
+        runs.sort(
+          (left, right) =>
+            Number(Boolean(right.pinned)) - Number(Boolean(left.pinned)) ||
+            Date.parse(right.createdAt) - Date.parse(left.createdAt),
+        );
         setHistory(runs);
         setFailed(false);
       })
@@ -315,6 +338,70 @@ export function WorkspaceShell({
   const visible = history.filter((item) =>
     item.question.toLowerCase().includes(filter.toLowerCase()),
   );
+  async function togglePinned(item: HistoryRun) {
+    if (historyActionRun) return;
+    setHistoryActionRun(item.runId);
+    setHistoryActionError("");
+    try {
+      const response = await fetch(
+        `/api/research/runs/${encodeURIComponent(item.runId)}/pin`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pinned: !item.pinned }),
+        },
+      );
+      if (!response.ok) throw new Error("Couldn’t update the pinned state.");
+      const result = (await response.json()) as { pinned: boolean };
+      historyMutationOverrides.current.set(item.runId, { pinned: result.pinned });
+      setHistory((current) =>
+        current
+          .map((run) =>
+            run.runId === item.runId ? { ...run, pinned: result.pinned } : run,
+          )
+          .sort(
+            (left, right) =>
+              Number(Boolean(right.pinned)) - Number(Boolean(left.pinned)) ||
+              Date.parse(right.createdAt) - Date.parse(left.createdAt),
+          ),
+      );
+    } catch (error) {
+      setHistoryActionError(
+        error instanceof Error ? error.message : "Please try again.",
+      );
+    } finally {
+      setHistoryActionRun(null);
+    }
+  }
+  async function deleteHistoryRun() {
+    if (!deleteTarget || deleteBusy) return;
+    const target = deleteTarget;
+    setDeleteBusy(true);
+    setHistoryActionError("");
+    try {
+      const response = await fetch(
+        `/api/research/runs/${encodeURIComponent(target.runId)}`,
+        { method: "DELETE" },
+      );
+      if (!response.ok)
+        throw new Error(
+          response.status === 409
+            ? "Stop this research run before deleting it."
+            : "Couldn’t delete this research from your workspace.",
+        );
+      historyMutationOverrides.current.set(target.runId, { deleted: true });
+      setHistory((current) => current.filter((run) => run.runId !== target.runId));
+      setDeleteTarget(null);
+      if (target.runId === activeRunId) router.replace("/research");
+    } catch (error) {
+      setHistoryActionError(
+        error instanceof Error ? error.message : "Please try again.",
+      );
+      setDeleteTarget(null);
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
   const sidebar = (
     <>
       {" "}
@@ -395,23 +482,84 @@ export function WorkspaceShell({
           </div>
         ) : visible.length ? (
           visible.map((item) => (
-            <Link
-              href={`/research/${item.runId}`}
+            <div
+              className={clsx(
+                "history-entry",
+                item.runId === activeRunId && "history-entry-active",
+              )}
               key={item.runId}
-              aria-current={item.runId === activeRunId ? "page" : undefined}
-              onClick={() => setOpen(false)}
             >
-              <span className={`history-dot status-${item.status}`} />
-              <span>
-                <strong>{item.question}</strong>
-                <small>
-                  {item.sourceCount}{" "}
-                  {item.sourceCount === 1 ? "source" : "sources"}{" "}
-                  <span> / </span>
-                  {dateLabel(item.createdAt)}
-                </small>
-              </span>
-            </Link>
+              <Link
+                className="history-entry-link"
+                href={`/research/${item.runId}`}
+                aria-current={item.runId === activeRunId ? "page" : undefined}
+                onClick={() => setOpen(false)}
+              >
+                <span className={`history-dot status-${item.status}`} />
+                <span className="history-entry-copy">
+                  <span className="history-question-row">
+                    <strong>{item.question}</strong>
+                    {item.pinned && (
+                      <span className="history-pinned-marker" aria-label="Pinned">
+                        <Icon name="pin" size={12} />
+                      </span>
+                    )}
+                  </span>
+                  <small>
+                    {item.sourceCount}{" "}
+                    {item.sourceCount === 1 ? "source" : "sources"}{" "}
+                    <span> / </span>
+                    {dateLabel(item.createdAt)}
+                  </small>
+                </span>
+              </Link>
+              <Menu.Root>
+                <Menu.Trigger
+                  className="history-actions-trigger"
+                  aria-label={`Actions for ${item.question}`}
+                  disabled={historyActionRun === item.runId}
+                >
+                  <Icon name="more" size={17} />
+                </Menu.Trigger>
+                <Menu.Portal>
+                  <Menu.Positioner
+                    className="history-menu-positioner"
+                    sideOffset={5}
+                    align="end"
+                  >
+                    <Menu.Popup className="history-menu-popup">
+                      <Menu.Item
+                        className="history-menu-item"
+                        onClick={() => void togglePinned(item)}
+                      >
+                        <Icon name="pin" size={15} />
+                        {item.pinned ? "Unpin" : "Pin"}
+                      </Menu.Item>
+                      <Menu.Separator className="history-menu-separator" />
+                      <Menu.Item
+                        className="history-menu-item history-menu-delete"
+                        disabled={
+                          !["completed", "failed", "cancelled"].includes(
+                            item.status,
+                          )
+                        }
+                        onClick={() => setDeleteTarget(item)}
+                      >
+                        <Icon name="trash" size={15} />
+                        Delete
+                      </Menu.Item>
+                      {!(["completed", "failed", "cancelled"].includes(
+                        item.status,
+                      )) && (
+                        <span className="history-menu-hint">
+                          Stop the active run before deleting it.
+                        </span>
+                      )}
+                    </Menu.Popup>
+                  </Menu.Positioner>
+                </Menu.Portal>
+              </Menu.Root>
+            </div>
           ))
         ) : (
           <div className="history-placeholder">
@@ -427,6 +575,11 @@ export function WorkspaceShell({
           </div>
         )}
       </nav>
+      {historyActionError && (
+        <p className="history-action-error" role="alert">
+          {historyActionError}
+        </p>
+      )}
       <Link
         className="desk-library-link desk-preferences-link"
         href="/onboarding"
@@ -622,6 +775,48 @@ export function WorkspaceShell({
             </main>
           </div>
         </Sheet>
+        <Dialog.Root
+          open={deleteTarget !== null}
+          onOpenChange={(nextOpen) => {
+            if (!nextOpen && !deleteBusy) setDeleteTarget(null);
+          }}
+        >
+          <Dialog.Portal>
+            <Dialog.Backdrop className="history-delete-backdrop" />
+            <Dialog.Popup className="history-delete-dialog">
+              <Dialog.Title className="history-delete-title">
+                Delete this research?
+              </Dialog.Title>
+              <Dialog.Description className="history-delete-description">
+                “{deleteTarget?.question}” will disappear from your history,
+                reports, and library, and its shared links will be revoked. The
+                underlying research content and billing/audit records remain
+                retained internally.
+              </Dialog.Description>
+              {historyActionError && (
+                <p className="history-action-error" role="alert">
+                  {historyActionError}
+                </p>
+              )}
+              <div className="history-delete-actions">
+                <Dialog.Close
+                  className="history-delete-cancel"
+                  disabled={deleteBusy}
+                >
+                  Cancel
+                </Dialog.Close>
+                <button
+                  type="button"
+                  className="history-delete-confirm"
+                  onClick={() => void deleteHistoryRun()}
+                  disabled={deleteBusy}
+                >
+                  {deleteBusy ? "Deleting…" : "Delete research"}
+                </button>
+              </div>
+            </Dialog.Popup>
+          </Dialog.Portal>
+        </Dialog.Root>
         <CrewEyes />
       </div>
     </WorkspaceEntitlementContext.Provider>

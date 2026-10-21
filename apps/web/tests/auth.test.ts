@@ -282,6 +282,43 @@ describe("account flows", () => {
 });
 
 describe("research BFF identity", () => {
+  it("guards cross-origin DELETEs and preserves a valid no-content response", async () => {
+    const upstream = vi.fn();
+    vi.stubGlobal("fetch", upstream);
+    const crossOrigin = new NextRequest(
+      "http://localhost:3000/api/research/runs/run-id",
+      { method: "DELETE", headers: { origin: "https://evil.example" } },
+    );
+    expect(
+      (await forwardResearch(crossOrigin, "/research/runs/run-id", "DELETE"))
+        .status,
+    ).toBe(403);
+    expect(upstream).not.toHaveBeenCalled();
+
+    auth.getUser.mockResolvedValue({
+      data: { user: { id: "verified", email_confirmed_at: "2026-01-01" } },
+      error: null,
+    });
+    auth.getSession.mockResolvedValue({
+      data: {
+        session: { user: { id: "verified" }, access_token: "fixture-access" },
+      },
+    });
+    upstream.mockResolvedValue(new Response(null, { status: 204 }));
+    const sameOrigin = new NextRequest(
+      "http://localhost:3000/api/research/runs/run-id",
+      { method: "DELETE", headers: { origin: "http://localhost:3000" } },
+    );
+    const response = await forwardResearch(
+      sameOrigin,
+      "/research/runs/run-id",
+      "DELETE",
+    );
+    expect(response.status).toBe(204);
+    expect(await response.text()).toBe("");
+    expect(upstream.mock.calls[0]![1].method).toBe("DELETE");
+  });
+
   it("normalizes a plain-text upstream 500 into safe JSON for the client", async () => {
     auth.getUser.mockResolvedValue({
       data: { user: { id: "verified", email_confirmed_at: "2026-01-01" } },

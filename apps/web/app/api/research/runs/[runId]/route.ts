@@ -17,3 +17,15 @@ export async function GET(
     "GET",
   );
 }
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ runId: string }> },
+) {
+  const { runId } = await params;
+  return forwardResearch(
+    request,
+    `/research/runs/${encodeURIComponent(runId)}`,
+    "DELETE",
+  );
+}

@@ -8,7 +8,7 @@ import { researchApiUrl } from "./research-api-url";
 export async function forwardResearch(
   request: NextRequest,
   path: string,
-  method: "GET" | "POST" = "GET",
+  method: "GET" | "POST" | "PATCH" | "DELETE" = "GET",
   events = false,
   binary = false,
 ) {
@@ -37,13 +37,13 @@ export async function forwardResearch(
       }),
     );
   };
-  if (method === "POST" && !sameOrigin(request))
+  if (method !== "GET" && !sameOrigin(request))
     return authJson({ error: "Cross-site requests are not allowed." }, 403);
   if (!authConfigured())
     return authJson({ error: "Supabase Auth is not configured." }, 503);
   try {
     let requestBody: string | null = null;
-    if (method === "POST") {
+    if (method === "POST" || method === "PATCH") {
       const reader = request.body?.getReader();
       let bytes = 0;
       const chunks: Uint8Array[] = [];
@@ -114,7 +114,7 @@ export async function forwardResearch(
       accept: events ? "text/event-stream" : "application/json",
       "x-request-id": requestId,
     });
-    if (method === "POST") {
+    if (method === "POST" || method === "PATCH") {
       headers.set("content-type", "application/json");
       const idempotency = request.headers.get("idempotency-key");
       if (idempotency) headers.set("idempotency-key", idempotency);
@@ -137,6 +137,15 @@ export async function forwardResearch(
     // Numeric only; SSE measurements end at response headers, not stream closure.
     const serverTiming = () =>
       `auth;dur=${authDuration.toFixed(1)}, upstream_headers;dur=${upstreamDuration.toFixed(1)}, proxy;dur=${(performance.now() - started).toFixed(1)}`;
+    if (response.status === 204)
+      return new Response(null, {
+        status: 204,
+        headers: {
+          "cache-control": "private, no-store",
+          "x-request-id": requestId,
+          "server-timing": serverTiming(),
+        },
+      });
     if (events && response.ok && response.body)
       return new Response(response.body, {
         headers: {

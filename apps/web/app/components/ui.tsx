@@ -29,7 +29,10 @@ export function Icon({
     | "logout"
     | "link"
     | "spark"
-    | "quote";
+    | "quote"
+    | "more"
+    | "pin"
+    | "trash";
   size?: number;
 }) {
   const paths = {
@@ -58,6 +61,9 @@ export function Icon({
     spark:
       "M12 3v4m0 10v4M3 12h4m10 0h4M6.3 6.3l2.4 2.4m6.6 6.6 2.4 2.4m0-11.4-2.4 2.4m-6.6 6.6-2.4 2.4",
     quote: "M5 17c2.5 0 4-1.8 4-4.4V7H4v6h3M15 17c2.5 0 4-1.8 4-4.4V7h-5v6h3",
+    more: "M5 12h.01M12 12h.01M19 12h.01",
+    pin: "M16 3l5 5-4 1-4 4-1 5-2-2-4 4-1-1 4-4-2-2 5-1 4-4 1-4Z",
+    trash: "M3 6h18M8 6V4h8v2m3 0-1 14H6L5 6m4 4v6m6-6v6",
     link: "M10 14a4.2 4.2 0 0 0 6 0l3-3a4.2 4.2 0 0 0-6-6l-1 1M14 10a4.2 4.2 0 0 0-6 0l-3 3a4.2 4.2 0 0 0 6 6l1-1",
   };
   return (

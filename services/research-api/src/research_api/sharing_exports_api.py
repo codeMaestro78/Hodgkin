@@ -107,6 +107,7 @@ async def _owner_report(
                 Report.id == report_id,
                 Report.published.is_(True),
                 ResearchRun.user_id == caller.user_id,
+                ResearchRun.deleted_at.is_(None),
             )
         )
         if lock:
@@ -234,6 +235,7 @@ async def list_shares(report_id: uuid.UUID, caller: CallerDep) -> list[ShareSumm
                 ReportShare.report_id == report_id,
                 Report.published.is_(True),
                 ResearchRun.user_id == caller.user_id,
+                ResearchRun.deleted_at.is_(None),
             )
             .order_by(ReportShare.created_at.desc())
             .limit(30)
@@ -314,6 +316,7 @@ async def read_shared_report(
             select(ResearchRun).where(
                 ResearchRun.tenant_id == share.tenant_id,
                 ResearchRun.id == report.run_id,
+                ResearchRun.deleted_at.is_(None),
             )
         )
         if run is None:
@@ -423,6 +426,7 @@ async def download_export(
                     ReportExport.id == export_id,
                     Report.published.is_(True),
                     ResearchRun.user_id == caller.user_id,
+                    ResearchRun.deleted_at.is_(None),
                 )
             )
         ).one_or_none()

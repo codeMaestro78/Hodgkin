@@ -61,6 +61,7 @@ async def list_reports(
                 Report.tenant_id == caller.tenant_id,
                 Report.published.is_(True),
                 ResearchRun.user_id == caller.user_id,
+                ResearchRun.deleted_at.is_(None),
             )
             .order_by(Report.id.desc())
             .limit(limit + 1)
@@ -115,6 +116,7 @@ async def compare(
                     Report.id.in_(ids),
                     Report.published.is_(True),
                     ResearchRun.user_id == caller.user_id,
+                    ResearchRun.deleted_at.is_(None),
                 )
             )
         )
