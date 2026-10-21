@@ -65,6 +65,61 @@ def ensure_collection_questions_resolved(
         )
 
 
+async def _reconcile_interrupted_collection_attempt(
+    tenant_id: uuid.UUID,
+    run_id: uuid.UUID,
+    question_id: uuid.UUID,
+    attempt_id: uuid.UUID,
+) -> None:
+    """Clear a running attempt if cancellation rolled back its final status write."""
+    started = monotonic()
+    async with tenant_session(str(tenant_id)) as session:
+        run = await lock_run(session, tenant_id, run_id)
+        question = await session.scalar(
+            select(SubQuestion)
+            .where(SubQuestion.tenant_id == tenant_id, SubQuestion.id == question_id)
+            .with_for_update()
+        )
+        attempt = await session.scalar(
+            select(SubQuestionAttempt)
+            .where(
+                SubQuestionAttempt.tenant_id == tenant_id,
+                SubQuestionAttempt.run_id == run_id,
+                SubQuestionAttempt.id == attempt_id,
+            )
+            .with_for_update()
+        )
+        cancelled_by_user = run.cancellation_requested_at is not None
+        changed = False
+        if question is not None and question.status == "running":
+            question.status = "skipped" if cancelled_by_user else "pending"
+            changed = True
+        if attempt is not None and attempt.status == "running":
+            attempt.status = "cancelled"
+            attempt.error_code = (
+                "run_cancelled" if cancelled_by_user else "worker_interrupted"
+            )
+            attempt.completed_at = datetime.now(UTC)
+            changed = True
+            await EventOutbox(session, tenant_id).append(
+                run_id=run_id,
+                event_type="task.state",
+                payload={
+                    "taskId": str(attempt_id),
+                    "nodeId": "research_task",
+                    "status": "cancelled",
+                    "attempt": attempt.attempt,
+                    "label": "Research task interrupted; collected sources were preserved",
+                },
+            )
+        operation_event(
+            "research.collect.reconcile",
+            started=started,
+            outcome="succeeded" if changed else "unchanged",
+            userCancelled=cancelled_by_user,
+        )
+
+
 def build_collection_node(settings: Settings, checkpointer: Any = None) -> Any:
     """Build the collection worker without changing its provider/database seams."""
 
@@ -304,50 +359,74 @@ def build_collection_node(settings: Settings, checkpointer: Any = None) -> Any:
                         error=exc,
                     )
                 source_ids.extend(str(item) for item in ids)
-                async with tenant_session(str(tenant_id)) as session:
-                    run = await lock_run(session, tenant_id, run_id)
-                    sub_question = await session.scalar(
-                        select(SubQuestion).where(
-                            SubQuestion.tenant_id == tenant_id,
-                            SubQuestion.id == uuid.UUID(sub_question_id),
+                try:
+                    async with tenant_session(str(tenant_id)) as session:
+                        run = await lock_run(session, tenant_id, run_id)
+                        sub_question = await session.scalar(
+                            select(SubQuestion).where(
+                                SubQuestion.tenant_id == tenant_id,
+                                SubQuestion.id == uuid.UUID(sub_question_id),
+                            )
+                        )
+                        if sub_question is not None:
+                            # Shutdown interrupts an attempt, not its research question.
+                            # Read durable user intent under the same lock as this write.
+                            sub_question.status = (
+                                (
+                                    "skipped"
+                                    if run.cancellation_requested_at is not None
+                                    else "pending"
+                                )
+                                if task_status == "cancelled"
+                                else ("complete" if ids else "failed")
+                            )
+                        attempt_row = await session.scalar(
+                            select(SubQuestionAttempt).where(
+                                SubQuestionAttempt.tenant_id == tenant_id,
+                                SubQuestionAttempt.run_id == run_id,
+                                SubQuestionAttempt.id == attempt_id,
+                            )
+                        )
+                        if attempt_row is not None:
+                            attempt_row.status = (
+                                task_status if ids or task_status == "cancelled" else "failed"
+                            )
+                            attempt_row.error_code = (
+                                None if ids else "source_collection_empty_or_failed"
+                            )
+                            if (
+                                task_status == "cancelled"
+                                and run.cancellation_requested_at is None
+                            ):
+                                attempt_row.error_code = "worker_interrupted"
+                            attempt_row.completed_at = datetime.now(UTC)
+                            await EventOutbox(session, tenant_id).append(
+                                run_id=run_id,
+                                event_type="task.state",
+                                payload={
+                                    "taskId": str(attempt_id),
+                                    "nodeId": "research_task",
+                                    "status": attempt_row.status,
+                                    "attempt": attempt_row.attempt,
+                                    "label": "Research task finished",
+                                },
+                            )
+                except asyncio.CancelledError:
+                    cleanup = asyncio.create_task(
+                        _reconcile_interrupted_collection_attempt(
+                            tenant_id,
+                            run_id,
+                            uuid.UUID(sub_question_id),
+                            attempt_id,
                         )
                     )
-                    if sub_question is not None:
-                        # Shutdown interrupts an attempt, not its research question.
-                        # Read durable user intent under the same lock as this write.
-                        sub_question.status = (
-                            ("skipped" if run.cancellation_requested_at is not None else "pending")
-                            if task_status == "cancelled"
-                            else ("complete" if ids else "failed")
-                        )
-                    attempt_row = await session.scalar(
-                        select(SubQuestionAttempt).where(
-                            SubQuestionAttempt.tenant_id == tenant_id,
-                            SubQuestionAttempt.run_id == run_id,
-                            SubQuestionAttempt.id == attempt_id,
-                        )
-                    )
-                    if attempt_row is not None:
-                        attempt_row.status = (
-                            task_status if ids or task_status == "cancelled" else "failed"
-                        )
-                        attempt_row.error_code = (
-                            None if ids else "source_collection_empty_or_failed"
-                        )
-                        if task_status == "cancelled" and run.cancellation_requested_at is None:
-                            attempt_row.error_code = "worker_interrupted"
-                        attempt_row.completed_at = datetime.now(UTC)
-                        await EventOutbox(session, tenant_id).append(
-                            run_id=run_id,
-                            event_type="task.state",
-                            payload={
-                                "taskId": str(attempt_id),
-                                "nodeId": "research_task",
-                                "status": attempt_row.status,
-                                "attempt": attempt_row.attempt,
-                                "label": "Research task finished",
-                            },
-                        )
+                    while not cleanup.done():
+                        try:
+                            await asyncio.shield(cleanup)
+                        except asyncio.CancelledError:
+                            continue
+                    cleanup.result()
+                    raise
                 if task_status == "cancelled":
                     operation_event(
                         "research.collect",
