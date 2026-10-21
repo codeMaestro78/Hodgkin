@@ -53,9 +53,7 @@ def ensure_collection_questions_resolved(
     terminal_statuses = {"complete", "failed", "skipped"}
     if allow_pending:
         terminal_statuses.add("pending")
-    unresolved = sum(
-        status not in terminal_statuses for _, status in rows
-    )
+    unresolved = sum(status not in terminal_statuses for _, status in rows)
     missing = len(expected - observed)
     if not expected or missing or unresolved or observed - expected:
         raise RuntimeError(
@@ -65,11 +63,22 @@ def ensure_collection_questions_resolved(
         )
 
 
+def collection_attempt_cancel_reason(*, user_cancelled: bool, reserve_timeout: bool) -> str:
+    """Distinguish user cancellation, intentional budget cutoff, and interruption."""
+    if user_cancelled:
+        return "run_cancelled"
+    if reserve_timeout:
+        return "assessment_time_reserved"
+    return "worker_interrupted"
+
+
 async def _reconcile_interrupted_collection_attempt(
     tenant_id: uuid.UUID,
     run_id: uuid.UUID,
     question_id: uuid.UUID,
     attempt_id: uuid.UUID,
+    *,
+    reserve_timeout: bool = False,
 ) -> None:
     """Clear a running attempt if cancellation rolled back its final status write."""
     started = monotonic()
@@ -96,8 +105,9 @@ async def _reconcile_interrupted_collection_attempt(
             changed = True
         if attempt is not None and attempt.status == "running":
             attempt.status = "cancelled"
-            attempt.error_code = (
-                "run_cancelled" if cancelled_by_user else "worker_interrupted"
+            attempt.error_code = collection_attempt_cancel_reason(
+                user_cancelled=cancelled_by_user,
+                reserve_timeout=reserve_timeout,
             )
             attempt.completed_at = datetime.now(UTC)
             changed = True
@@ -109,7 +119,11 @@ async def _reconcile_interrupted_collection_attempt(
                     "nodeId": "research_task",
                     "status": "cancelled",
                     "attempt": attempt.attempt,
-                    "label": "Research task interrupted; collected sources were preserved",
+                    "label": (
+                        "Collection stopped to preserve time for evidence review"
+                        if reserve_timeout and not cancelled_by_user
+                        else "Research task interrupted; collected sources were preserved"
+                    ),
                 },
             )
         operation_event(
@@ -289,6 +303,11 @@ def build_collection_node(settings: Settings, checkpointer: Any = None) -> Any:
                         question_payload if isinstance(question_payload, dict) else {}
                     )
                     source_classes = question_payload.get("source_classes", [])
+                    allowed_domains = question_payload.get("allowed_domains", [])
+                    if not isinstance(allowed_domains, list) or any(
+                        not isinstance(domain, str) for domain in allowed_domains
+                    ):
+                        allowed_domains = []
                     if state.get("mode"):
                         saved_query = sub_question.payload.get("dispatchQuery")
                         if isinstance(saved_query, str):
@@ -336,6 +355,7 @@ def build_collection_node(settings: Settings, checkpointer: Any = None) -> Any:
                         },
                     )
                 task_status = "completed"
+                stopped_at_assessment_reserve = False
                 try:
                     ids = await ingestor.ingest(
                         tenant_id=tenant_id,
@@ -343,12 +363,16 @@ def build_collection_node(settings: Settings, checkpointer: Any = None) -> Any:
                         sub_question_id=uuid.UUID(sub_question_id),
                         query=query,
                         source_classes=source_classes,
+                        allowed_domains=allowed_domains,
                         max_results=slots,
                         quick_mode=state["quick_mode"],
                     )
                 except asyncio.CancelledError:
                     ids = []
                     task_status = "cancelled"
+                    stopped_at_assessment_reserve = bool(
+                        collection_timeout is not None and collection_timeout.expired()
+                    )
                 except Exception as exc:
                     ids = []
                     task_status = "failed"
@@ -394,11 +418,11 @@ def build_collection_node(settings: Settings, checkpointer: Any = None) -> Any:
                             attempt_row.error_code = (
                                 None if ids else "source_collection_empty_or_failed"
                             )
-                            if (
-                                task_status == "cancelled"
-                                and run.cancellation_requested_at is None
-                            ):
-                                attempt_row.error_code = "worker_interrupted"
+                            if task_status == "cancelled":
+                                attempt_row.error_code = collection_attempt_cancel_reason(
+                                    user_cancelled=run.cancellation_requested_at is not None,
+                                    reserve_timeout=stopped_at_assessment_reserve,
+                                )
                             attempt_row.completed_at = datetime.now(UTC)
                             await EventOutbox(session, tenant_id).append(
                                 run_id=run_id,
@@ -408,7 +432,12 @@ def build_collection_node(settings: Settings, checkpointer: Any = None) -> Any:
                                     "nodeId": "research_task",
                                     "status": attempt_row.status,
                                     "attempt": attempt_row.attempt,
-                                    "label": "Research task finished",
+                                    "label": (
+                                        "Collection stopped to preserve time for evidence review"
+                                        if stopped_at_assessment_reserve
+                                        and run.cancellation_requested_at is None
+                                        else "Research task finished"
+                                    ),
                                 },
                             )
                 except asyncio.CancelledError:
@@ -418,6 +447,9 @@ def build_collection_node(settings: Settings, checkpointer: Any = None) -> Any:
                             run_id,
                             uuid.UUID(sub_question_id),
                             attempt_id,
+                            reserve_timeout=bool(
+                                collection_timeout is not None and collection_timeout.expired()
+                            ),
                         )
                     )
                     while not cleanup.done():
@@ -460,7 +492,7 @@ def build_collection_node(settings: Settings, checkpointer: Any = None) -> Any:
             window = max(0.0, deadline - monotonic() - _repair_tail_ms(settings) / 1000)
         try:
             if window is None or window > 0:
-                async with asyncio.timeout(window):
+                async with asyncio.timeout(window) as collection_timeout:
                     async with asyncio.TaskGroup() as tasks:
                         for sub_question_id, slots in zip(
                             state["sub_question_ids"], allocations, strict=True

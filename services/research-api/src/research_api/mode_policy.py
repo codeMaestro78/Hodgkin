@@ -7,7 +7,7 @@ from typing import Literal
 from research_api.repositories.runs import RunBudgetDefaults
 
 ResearchMode = Literal["focused", "balanced", "deep"]
-MODE_POLICY_VERSION = "research-mode-policy-v2"
+MODE_POLICY_VERSION = "research-mode-policy-v3"
 # Keep historical versions available for idempotent replay after a policy rollout.
 MODE_POLICIES = {
     "research-mode-policy-v1": {
@@ -20,10 +20,16 @@ MODE_POLICIES = {
         "balanced": (12, 300_000),
         "deep": (20, 600_000),
     },
+    "research-mode-policy-v3": {
+        "focused": (6, 240_000),
+        "balanced": (12, 300_000),
+        "deep": (20, 600_000),
+    },
 }
 MODE_OUTPUT_TOKEN_BUDGETS = {
     "research-mode-policy-v1": {"focused": 20_000, "balanced": 20_000, "deep": 20_000},
     "research-mode-policy-v2": {"focused": 20_000, "balanced": 20_000, "deep": 40_000},
+    "research-mode-policy-v3": {"focused": 20_000, "balanced": 20_000, "deep": 40_000},
 }
 
 

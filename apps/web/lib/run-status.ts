@@ -2,7 +2,7 @@ export function modeDeadline(calls: number) {
   return calls <= 2
     ? 120_000
     : calls <= 6
-      ? 180_000
+      ? 240_000
       : calls <= 12
         ? 300_000
         : 600_000;
@@ -17,8 +17,17 @@ export function retryDeadline(run: {
   const recorded = run.budget.maxWallClockMs;
   if (typeof recorded === "number" && Number.isFinite(recorded) && recorded > 0)
     return recorded;
-  if (run.mode && run.modePolicyVersion === "research-mode-policy-v1") {
+  if (
+    run.mode &&
+    ["research-mode-policy-v1", "research-mode-policy-v2"].includes(
+      run.modePolicyVersion ?? "",
+    )
+  ) {
     const minutes = { focused: 3, balanced: 5, deep: 10 };
+    return minutes[run.mode] * 60_000;
+  }
+  if (run.mode && run.modePolicyVersion === "research-mode-policy-v3") {
+    const minutes = { focused: 4, balanced: 5, deep: 10 };
     return minutes[run.mode] * 60_000;
   }
   return modeDeadline(run.budget.maxSearchCalls);
@@ -226,7 +235,8 @@ export function researchBudgetFailure(
   )
     return null;
   const requiredUnits = "requiredUnits" in detail ? detail.requiredUnits : null;
-  const availableUnits = "availableUnits" in detail ? detail.availableUnits : null;
+  const availableUnits =
+    "availableUnits" in detail ? detail.availableUnits : null;
   const periodEnd = "periodEnd" in detail ? detail.periodEnd : null;
   if (
     typeof requiredUnits !== "number" ||

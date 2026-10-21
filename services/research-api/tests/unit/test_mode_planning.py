@@ -6,6 +6,7 @@ import pytest
 from research_api import mode_planning
 from research_api.mode_planning import CoveragePlan, attach_coverage_plan, planning_admission
 from research_api.mode_policy import resolve_mode_budget
+from research_api.source_policy import official_documentation_domains, query_with_domain_hints
 
 
 def plan(**kwargs):
@@ -92,6 +93,16 @@ def test_invalid_source_class_requests_reject_before_dispatch(classes):
                 }
             ]
         )
+
+
+def test_official_domain_is_applied_to_provider_query_without_changing_unscoped_queries():
+    domains = official_documentation_domains(
+        "Using official LangGraph Python documentation, describe fan-out semantics"
+    )
+    assert domains == ["docs.langchain.com"]
+    scoped = query_with_domain_hints("LangGraph fan-out and checkpoint semantics", domains)
+    assert scoped.endswith("site:docs.langchain.com")
+    assert query_with_domain_hints("ordinary research", []) == "ordinary research"
 
 
 @pytest.mark.parametrize(

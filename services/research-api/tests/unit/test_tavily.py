@@ -1,7 +1,11 @@
 import httpx
 import pytest
 
-from research_api.providers.tavily import TavilyAdapter
+from research_api.providers.tavily import (
+    TAVILY_REQUEST_SCHEMA_VERSION,
+    TAVILY_RESTRICTED_DOMAIN_REQUEST_SCHEMA_VERSION,
+    TavilyAdapter,
+)
 
 
 @pytest.mark.asyncio
@@ -56,6 +60,9 @@ async def test_search_uses_evidence_safe_defaults_and_post_filters_hosts() -> No
     assert captured["include_answer"] is False
     assert captured["include_raw_content"] is False
     assert captured["search_depth"] == "basic"
+    assert captured["include_domains"] == ["example.com"]
+    assert captured["include_domains_mode"] == "restrict"
+    assert request.request_schema_version == TAVILY_RESTRICTED_DOMAIN_REQUEST_SCHEMA_VERSION
     assert [result.title for result in response.results] == ["Allowed"]
     await client.aclose()
 
@@ -71,3 +78,8 @@ def test_extract_request_is_deterministic_and_deduplicated() -> None:
     )
     assert first.fingerprint == second.fingerprint
     assert first.payload["urls"] == ["https://example.com/a", "https://example.com/b"]
+
+
+def test_unrestricted_search_keeps_the_archived_request_schema_version() -> None:
+    request = TavilyAdapter.search_request(query="unrestricted")
+    assert request.request_schema_version == TAVILY_REQUEST_SCHEMA_VERSION

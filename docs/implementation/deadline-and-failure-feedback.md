@@ -22,7 +22,7 @@ is scrolled down and the snapshot response is deliberately blocked.
 ## Changes and bounds
 
 - New API submissions use visible mode defaults: quick explanations 2 minutes,
-  Focused 3, Balanced 5, Deep 10. The composer sends `maxWallClockMs` explicitly
+  Focused 4, Balanced 5, Deep 10. The composer sends `maxWallClockMs` explicitly
   and explains that planning, collection and verification share the active budget.
   These are ceilings, not promises of completion time. Explicit lower deadlines
   are respected. Search/source, token, estimated-cost and reflection caps are unchanged.

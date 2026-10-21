@@ -10,8 +10,9 @@ type NodeFixture =
   | string
   | {
       nodeId: string;
-      status?: "paused" | "completed";
+      status?: "paused" | "completed" | "cancelled";
       attempt?: number;
+      errorCode?: string | null;
     };
 
 function view(nodes: NodeFixture[], runStatus = "completed") {
@@ -35,7 +36,7 @@ function view(nodes: NodeFixture[], runStatus = "completed") {
         typeof node !== "string" && node.status === "paused"
           ? null
           : "2026-10-17T10:00:02Z",
-      errorCode: null,
+      errorCode: typeof node === "string" ? null : (node.errorCode ?? null),
       sourceIds: [],
       dependsOn: [],
     })),
@@ -107,4 +108,20 @@ it("does not imply repair ran when there is no recorded repair task", () => {
   ]);
   expect(html).toContain("No coverage repair was recorded");
   expect(html).not.toContain("Plan approval was required");
+});
+
+it("clarifies a cancelled collection attempt when the overall run completed", () => {
+  const html = view(
+    [
+      {
+        nodeId: "research_task",
+        status: "cancelled",
+        errorCode: "assessment_time_reserved",
+      },
+    ],
+    "completed",
+  );
+  expect(html).toContain("Stopped at the evidence-review time reserve");
+  expect(html).toContain('data-status="failed" data-empty="true"');
+  expect(html).toContain('data-status="cancelled" data-empty="false"');
 });

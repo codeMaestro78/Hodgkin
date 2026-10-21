@@ -47,6 +47,27 @@ def test_collection_still_rejects_running_questions_after_bounded_window() -> No
         )
 
 
+@pytest.mark.parametrize(
+    "user_cancelled,reserve_timeout,expected",
+    [
+        (True, True, "run_cancelled"),
+        (True, False, "run_cancelled"),
+        (False, True, "assessment_time_reserved"),
+        (False, False, "worker_interrupted"),
+    ],
+)
+def test_collection_attempt_cancellation_records_the_actual_cause(
+    user_cancelled, reserve_timeout, expected
+):
+    assert (
+        collection.collection_attempt_cancel_reason(
+            user_cancelled=user_cancelled,
+            reserve_timeout=reserve_timeout,
+        )
+        == expected
+    )
+
+
 @pytest.mark.asyncio
 async def test_expired_explicit_collection_window_continues_with_pending_questions(
     monkeypatch,
@@ -91,15 +112,11 @@ async def test_expired_explicit_collection_window_continues_with_pending_questio
     monkeypatch.setattr(builder, "_cancel_if_requested", AsyncMock(return_value=False))
     monkeypatch.setattr(builder, "start_node", AsyncMock(return_value=uuid.uuid4()))
     monkeypatch.setattr(builder, "finish_node", AsyncMock())
-    monkeypatch.setattr(
-        collection, "TavilyEvidenceIngestor", lambda **_kwargs: SimpleNamespace()
-    )
+    monkeypatch.setattr(collection, "TavilyEvidenceIngestor", lambda **_kwargs: SimpleNamespace())
     deadline_token = builder.assessment_deadline.set(monotonic() - 1)
     try:
         worker = (
-            builder.build_graph(
-                Settings(_env_file=None, TAVILY_API_KEY="test")
-            )
+            builder.build_graph(Settings(_env_file=None, TAVILY_API_KEY="test"))
             .nodes["research_worker"]
             .bound.afunc
         )
@@ -229,10 +246,17 @@ async def test_real_worker_bounds_sources_and_concurrency(
 ) -> None:
     question_ids = [str(uuid.uuid4()) for _ in range(questions)]
     records = {
-        key: SimpleNamespace(id=uuid.UUID(key), question=key, status="pending", attempts=0)
+        key: SimpleNamespace(
+            id=uuid.UUID(key),
+            question=key,
+            status="pending",
+            attempts=0,
+            payload={"allowed_domains": ["docs.langchain.com"]},
+        )
         for key in question_ids
     }
     slots_used = []
+    forwarded_domains = []
     active = peak = 0
     collection_started = False
     session_count = 0
@@ -291,6 +315,7 @@ async def test_real_worker_bounds_sources_and_concurrency(
             active += 1
             peak = max(peak, active)
             slots_used.append(kwargs["max_results"])
+            forwarded_domains.append(kwargs["allowed_domains"])
             await asyncio.sleep(0)
             active -= 1
             return [uuid.uuid4() for _ in range(kwargs["max_results"])]
@@ -339,6 +364,7 @@ async def test_real_worker_bounds_sources_and_concurrency(
     )
     assert len(result["source_ids"]) <= calls
     assert sum(slots_used) == calls
+    assert forwarded_domains == [["docs.langchain.com"]] * questions
     assert peak == 3
     assert all(record.status == "complete" for record in records.values())
     assert len(setup_sessions) == 1, "Worker setup must reuse one tenant transaction"

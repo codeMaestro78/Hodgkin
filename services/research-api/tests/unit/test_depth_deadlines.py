@@ -6,7 +6,7 @@ from research_api.api import _budget_from_request
 from research_api.schemas.generated.create_research_run_request import CreateResearchRunRequest
 
 
-@pytest.mark.parametrize("calls,expected", [(6, 180_000), (12, 300_000), (20, 600_000)])
+@pytest.mark.parametrize("calls,expected", [(6, 240_000), (12, 300_000), (20, 600_000)])
 def test_depth_deadline_matches_workload(calls, expected):
     request = CreateResearchRunRequest(
         question="Compare architectural options", budgetOverrides={"maxSearchCalls": calls}

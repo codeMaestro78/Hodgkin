@@ -18,7 +18,7 @@ const JUMP = [
 
 /*
  * Ceilings copied from the depth cards (lib/research-draft.ts): Focused
- * 6 sources / 6 provider operations / 3 active minutes; Balanced 12/12/5;
+ * 6 sources / 6 provider operations / 4 active minutes; Balanced 12/12/5;
  * Deep 20/20/10. Deep's plan gate is real (lib/run-status.ts).
  */
 const DEPTHS = [
@@ -26,7 +26,7 @@ const DEPTHS = [
     name: "Focused",
     sources: "6 sources",
     operations: "6 operations",
-    minutes: "3 active minutes",
+    minutes: "4 active minutes",
     read: "A first read. When you want the shape of an answer more than the argument.",
     units: "1 unit",
   },
@@ -81,12 +81,14 @@ const WEAK_STRONG = [
   },
   {
     weak: "Is AI overrated?",
-    strong: "What measured productivity effects are documented for AI coding assistants?",
+    strong:
+      "What measured productivity effects are documented for AI coding assistants?",
     why: "Asks for measurements a source can actually record.",
   },
   {
     weak: "Everything about solar",
-    strong: "What do utilities disclose about residential solar payback periods?",
+    strong:
+      "What do utilities disclose about residential solar payback periods?",
     why: "Scoped to what public filings can answer.",
   },
 ];
@@ -101,8 +103,8 @@ export default function GuidesPage() {
         </h1>
         <p className="lg-lead lp-enter">
           The manuals for running better research here — drawn from how the
-          product actually works, not how we wish it did. Four short reads,
-          each one about a habit you can practice on the next run.
+          product actually works, not how we wish it did. Four short reads, each
+          one about a habit you can practice on the next run.
         </p>
         <div className="gd-jump lp-enter" role="list">
           {JUMP.map((item) => (
@@ -118,8 +120,8 @@ export default function GuidesPage() {
         <h2>Ask the question well.</h2>
         <p className="gd-lead">
           The composer starts almost empty on purpose. The field only hints at
-          what fits: &ldquo;Ask a question, compare alternatives, or investigate a
-          decision…&rdquo; — three reportable shapes, and the rules for asking
+          what fits: &ldquo;Ask a question, compare alternatives, or investigate
+          a decision…&rdquo; — three reportable shapes, and the rules for asking
           them well are the same.
         </p>
         <div className="gd-table-wrap">
@@ -143,11 +145,11 @@ export default function GuidesPage() {
           </table>
         </div>
         <p className="gd-body">
-          The pattern: point at something <em>checkable</em>. Questions that
-          ask for measurements, disclosures, or documented decisions give a
-          run something to quote. The requirements field then steers the
-          report&rsquo;s shape — one requirement per line, up to 20
-          requirements and 500 characters each:
+          The pattern: point at something <em>checkable</em>. Questions that ask
+          for measurements, disclosures, or documented decisions give a run
+          something to quote. The requirements field then steers the
+          report&rsquo;s shape — one requirement per line, up to 20 requirements
+          and 500 characters each:
         </p>
         <aside className="gd-callout">
           <p>
@@ -161,8 +163,7 @@ export default function GuidesPage() {
         <p className="gd-note">
           While you type, a counter counts the question&rsquo;s characters
           (1,000 is the ceiling) and unsent drafts stay in your browser&rsquo;s
-          session storage, per account — nothing merely typed is sent
-          anywhere.
+          session storage, per account — nothing merely typed is sent anywhere.
         </p>
       </section>
 
@@ -171,9 +172,9 @@ export default function GuidesPage() {
         <h2>Pick the depth.</h2>
         <p className="gd-lead">
           Depth is the search budget: how many sources the run may read, how
-          many operations it may spend reading them, and how many active
-          minutes it gets. The numbers below are the ceilings a run states
-          before it starts — not vague adjectives.
+          many operations it may spend reading them, and how many active minutes
+          it gets. The numbers below are the ceilings a run states before it
+          starts — not vague adjectives.
         </p>
         <div className="gd-depths">
           {DEPTHS.map((depth) => (
@@ -200,21 +201,19 @@ export default function GuidesPage() {
             </article>
           ))}
         </div>
-        <p className="gd-body">
-          Two budget notes that trip people up:
-        </p>
+        <p className="gd-body">Two budget notes that trip people up:</p>
         <ul className="gd-list">
           <li>
             <strong>Approval pauses the clock, never spends it.</strong> A run
-            waits — with active time stopped — until you approve its plan
-            (that checkbox is on by default). Unchecking it lets the run
-            proceed without the pause.
+            waits — with active time stopped — until you approve its plan (that
+            checkbox is on by default). Unchecking it lets the run proceed
+            without the pause.
           </li>
           <li>
             <strong>Depths cost units on paid plans.</strong> Focused, Balanced,
-            and Deep draw from a monthly allowance of units — one, two, and
-            four respectively. The Free plan runs Focused and Balanced;
-            Deep unlocks with the Investigator plan.
+            and Deep draw from a monthly allowance of units — one, two, and four
+            respectively. The Free plan runs Focused and Balanced; Deep unlocks
+            with the Investigator plan.
           </li>
         </ul>
       </section>
@@ -228,13 +227,14 @@ export default function GuidesPage() {
         </p>
         <ol className="gd-steps">
           <li>
-            <strong>Check the claim gate.</strong> &ldquo;Answer assessed&rdquo; or
-            &ldquo;Partial answer&rdquo; tells you how the run judged its own coverage
-            before publishing.
+            <strong>Check the claim gate.</strong> &ldquo;Answer assessed&rdquo;
+            or &ldquo;Partial answer&rdquo; tells you how the run judged its own
+            coverage before publishing.
           </li>
           <li>
-            <strong>Read the overview strip.</strong> Evidence collected, questions
-            explored, and reading time — the shape of the run in one row.
+            <strong>Read the overview strip.</strong> Evidence collected,
+            questions explored, and reading time — the shape of the run in one
+            row.
           </li>
           <li>
             <strong>Follow an inline citation.</strong> Chips sit beside the
@@ -260,15 +260,15 @@ export default function GuidesPage() {
           The verification trail sits beside the report: how many sources were
           fetched, kept, and dropped, and how many claims got softened or
           dropped before you ever read them. When two runs disagree, compare
-          them side by side — same question, different depth makes short work
-          of deciding which answer earned its confidence.
+          them side by side — same question, different depth makes short work of
+          deciding which answer earned its confidence.
         </p>
         <aside className="gd-callout">
           <p>
             <strong>Exports keep the trail too.</strong> A Markdown export
-            carries every heading, quote, and citation; the BibTeX export
-            lists the sources for your bibliography. The published version is
-            fixed — an export or shared link shows exactly what you read.
+            carries every heading, quote, and citation; the BibTeX export lists
+            the sources for your bibliography. The published version is fixed —
+            an export or shared link shows exactly what you read.
           </p>
         </aside>
       </section>
@@ -282,24 +282,23 @@ export default function GuidesPage() {
         <ul className="gd-list">
           <li>
             <strong>Library.</strong> Save the runs worth returning to. Revisit
-            them, organize them, or remove them — the library is yours to
-            sort.
+            them, organize them, or remove them — the library is yours to sort.
           </li>
           <li>
             <strong>Share links.</strong> Publish a read-only link to a finished
-            run and revoke it whenever you like. Treat it like a key you
-            handed someone — the run itself is immutable, so what they see is
-            what you saw.
+            run and revoke it whenever you like. Treat it like a key you handed
+            someone — the run itself is immutable, so what they see is what you
+            saw.
           </li>
           <li>
-            <strong>Automation.</strong> Queue a batch of questions, or repeat one
-            on a schedule — no closer than every 60 minutes. A run scheduled
+            <strong>Automation.</strong> Queue a batch of questions, or repeat
+            one on a schedule — no closer than every 60 minutes. A run scheduled
             is still a run governed by the same approval step.
           </li>
           <li>
-            <strong>Compare.</strong> Park two finished runs side by side and read
-            the disagreement — the fastest way to see which answer earned its
-            confidence.
+            <strong>Compare.</strong> Park two finished runs side by side and
+            read the disagreement — the fastest way to see which answer earned
+            its confidence.
           </li>
         </ul>
         <div className="gd-end-links">

@@ -22,6 +22,21 @@ const STATUS_LABEL: Record<Status, string> = {
   skipped: "Skipped",
 };
 
+function taskStatusLabel(task: Task) {
+  return task.errorCode === "assessment_time_reserved"
+    ? "Stopped at the evidence-review time reserve"
+    : STATUS_LABEL[task.status];
+}
+
+function taskStatusExplanation(errorCode: string, runStatus: string) {
+  if (errorCode !== "assessment_time_reserved") return null;
+  const outcome =
+    runStatus === "completed"
+      ? "The overall research run completed with its available evidence."
+      : "This task-level cancellation does not by itself indicate the overall run outcome.";
+  return `Collection stopped to preserve time for evidence review. ${outcome} Any sources already collected were retained.`;
+}
+
 const ENDED_TASK_STATUS: Record<string, Status> = {
   completed: "completed",
   failed: "failed",
@@ -281,22 +296,18 @@ export function ExecutionView({
       ),
     },
   ];
-  const counts = (["completed", "running", "queued", "failed"] as const).map(
-    (status) => ({
-      status,
-      count: tasks.filter((item) =>
-        status === "queued"
-          ? ["queued", "paused"].includes(
-              presentationStatus(item, tasks, runStatus),
-            )
-          : status === "failed"
-            ? ["failed", "cancelled"].includes(
-                presentationStatus(item, tasks, runStatus),
-              )
-            : presentationStatus(item, tasks, runStatus) === status,
-      ).length,
-    }),
-  );
+  const counts = (
+    ["completed", "running", "queued", "failed", "cancelled"] as const
+  ).map((status) => ({
+    status,
+    count: tasks.filter((item) =>
+      status === "queued"
+        ? ["queued", "paused"].includes(
+            presentationStatus(item, tasks, runStatus),
+          )
+        : presentationStatus(item, tasks, runStatus) === status,
+    ).length,
+  }));
   const sourceTotal = new Set(tasks.flatMap((item) => item.sourceIds)).size;
   const repairs = tasks.filter(
     (item) => item.nodeId === "planner_delta" && item.status !== "queued",
@@ -342,7 +353,7 @@ export function ExecutionView({
         <small>
           {presentation?.label ?? (
             <>
-              {STATUS_LABEL[item.status]} · <Elapsed task={item} />
+              {taskStatusLabel(item)} · <Elapsed task={item} />
               {item.attempt > 1 && ` · attempt ${item.attempt}`}
             </>
           )}
@@ -485,7 +496,7 @@ export function ExecutionView({
               <p>
                 {taskPresentation?.label ?? (
                   <>
-                    {STATUS_LABEL[task.status]} · attempt {task.attempt} ·{" "}
+                    {taskStatusLabel(task)} · attempt {task.attempt} ·{" "}
                     <Elapsed task={task} />
                   </>
                 )}
@@ -560,8 +571,12 @@ export function ExecutionView({
           </dl>
           {task.errorCode && (
             <p role="status" className="orch-error">
-              {runFailure(task.errorCode)} Retry the entire run using its
-              existing retry action; per-task restart is not available.
+              {taskStatusExplanation(task.errorCode, runStatus) ?? (
+                <>
+                  {runFailure(task.errorCode)} Retry the entire run using its
+                  existing retry action; per-task restart is not available.
+                </>
+              )}
             </p>
           )}
           {task.sourceIds.length > 0 && (

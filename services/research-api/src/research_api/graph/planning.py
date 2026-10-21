@@ -18,6 +18,7 @@ from research_api.graph.state import RunState
 from research_api.lifecycle import ensure_active, lock_run
 from research_api.mode_planning import attach_coverage_plan, planning_admission
 from research_api.research_limits import operation_limit, run_source_limit
+from research_api.source_policy import official_documentation_domains
 
 
 def build_planning_nodes(settings: Settings, checkpointer: Any = None) -> tuple[Any, Any]:
@@ -107,10 +108,16 @@ def build_planning_nodes(settings: Settings, checkpointer: Any = None) -> tuple[
                 **({"mode": state["mode"]} if state.get("mode") else {}),
             )
         )
+        allowed_domains = official_documentation_domains(planning_question)
         async with tenant_session(str(tenant_id)) as session:
             run = await lock_run(session, tenant_id, run_id)
             ensure_active(run)
             plan_payload = plan.model_dump(mode="json", by_alias=True)
+            if allowed_domains:
+                plan_payload["source_policy"] = {
+                    "kind": "official_documentation",
+                    "allowed_domains": allowed_domains,
+                }
             if state.get("mode"):
                 coverage = attach_coverage_plan(
                     run_id=run_id,
@@ -146,6 +153,7 @@ def build_planning_nodes(settings: Settings, checkpointer: Any = None) -> tuple[
                     question=item.question,
                     payload=item.model_dump(mode="json", by_alias=True)
                     | {"planIndex": index}
+                    | ({"allowed_domains": allowed_domains} if allowed_domains else {})
                     | (
                         {"dimensionIds": [str(key) for key in coverage.question_dimensions[index]]}
                         if state.get("mode")

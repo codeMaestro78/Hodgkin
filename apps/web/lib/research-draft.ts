@@ -7,7 +7,7 @@ export const researchModes = [
     name: "Focused",
     sources: 6,
     operations: 6,
-    minutes: 3,
+    minutes: 4,
     description:
       "A decision brief with analysis, trade-offs and cited findings.",
   },

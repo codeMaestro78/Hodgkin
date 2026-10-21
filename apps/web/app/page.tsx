@@ -183,7 +183,7 @@ export default function HomePage() {
               <div className="lp-tile-visual">
                 <div className="lp-depth" aria-hidden="true">
                   {[
-                    ["Focused", "6 searches", "about 3 min"],
+                    ["Focused", "6 searches", "about 4 min"],
                     ["Balanced", "12 searches", "about 5 min"],
                     ["Deep", "20 searches", "about 10 min"],
                   ].map(([name, sources, time], index) => (

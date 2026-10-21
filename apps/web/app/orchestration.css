@@ -228,6 +228,9 @@ html .execution-view-switch button:focus-visible {
 .orch-stats > [data-status="failed"]::before {
   background: var(--orch-fail);
 }
+.orch-stats > [data-status="cancelled"]::before {
+  background: var(--orch-muted);
+}
 .orch-stats > [data-status="sources"]::before {
   border-radius: 2px;
   background: #a96142;

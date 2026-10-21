@@ -40,6 +40,7 @@ from research_api.schemas.generated.edit_research_plan_request import (
 )
 from research_api.schemas.generated.edit_research_plan_response import EditResearchPlanResponse
 from research_api.schemas.generated.schedule_request import ScheduleRequest
+from research_api.source_policy import allowed_domains_from_plan
 
 router = APIRouter(prefix="/research", tags=["runtime"])
 
@@ -154,6 +155,7 @@ async def edit_plan(
         )
         if current is None or budget is None:
             raise HTTPException(409, "the active research plan could not be loaded")
+        allowed_domains = allowed_domains_from_plan(current.plan)
         try:
             original = PlannerOutput.model_validate(
                 {"sub_questions": current.plan.get("sub_questions")}
@@ -192,6 +194,11 @@ async def edit_plan(
         )
         version = run.plan_version + 1
         plan_payload = current.plan | edited.model_dump(mode="json")
+        if allowed_domains:
+            plan_payload["source_policy"] = {
+                "kind": "official_documentation",
+                "allowed_domains": allowed_domains,
+            }
         coverage: CoveragePlan | None = None
         if run.mode is not None:
             if run.mode_policy_version is None:
@@ -230,6 +237,7 @@ async def edit_plan(
                 question=item.question,
                 payload=item.model_dump(mode="json")
                 | {"planIndex": index}
+                | ({"allowed_domains": allowed_domains} if allowed_domains else {})
                 | (
                     {"dimensionIds": [str(key) for key in coverage.question_dimensions[index]]}
                     if coverage is not None

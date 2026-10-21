@@ -65,6 +65,7 @@ from research_api.repositories.sources import SourceRepository
 from research_api.research_limits import run_source_limit
 from research_api.retrieval_accounting import search_provider_usage
 from research_api.source_identity import SourceIdentity, map_source_identity
+from research_api.source_policy import query_with_domain_hints
 from research_api.telemetry import dependency_event, operation_event
 
 _METADATA_BATCH_SIZE = 8
@@ -136,7 +137,12 @@ class TavilyEvidenceIngestor:
         if max_results <= 0:
             return []
         await self._check_cancelled(tenant_id, run_id)
-        if self._academic_adapter is not None and "academic" in (source_classes or []):
+        query = query_with_domain_hints(query, allowed_domains)
+        if (
+            self._academic_adapter is not None
+            and "academic" in (source_classes or [])
+            and not allowed_domains
+        ):
             search_request = self._academic_adapter.search_request(
                 query=query,
                 per_page=OPENALEX_MAX_PAGE_SIZE,

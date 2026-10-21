@@ -16,6 +16,7 @@ from research_api.providers.retry_policy import pre_dispatch_failure, retry_dela
 from research_api.telemetry import dependency_event
 
 TAVILY_REQUEST_SCHEMA_VERSION = "2026-09-28"
+TAVILY_RESTRICTED_DOMAIN_REQUEST_SCHEMA_VERSION = "2026-10-21-official-docs-v1"
 TAVILY_RESPONSE_SCHEMA_VERSION = "2026-09-28"
 
 
@@ -122,7 +123,19 @@ class TavilyAdapter:
             "include_usage": True,
             "include_domains": allowed_domains or [],
         }
-        return ProviderRequest("search", payload, request_fingerprint("search", payload))
+        if allowed_domains:
+            # Pin the hard-filter mode explicitly and post-filter results again.
+            payload["include_domains_mode"] = "restrict"
+        return ProviderRequest(
+            "search",
+            payload,
+            request_fingerprint("search", payload),
+            request_schema_version=(
+                TAVILY_RESTRICTED_DOMAIN_REQUEST_SCHEMA_VERSION
+                if allowed_domains
+                else TAVILY_REQUEST_SCHEMA_VERSION
+            ),
+        )
 
     @staticmethod
     def extract_request(*, urls: list[str], query: str) -> ProviderRequest:

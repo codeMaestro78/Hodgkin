@@ -89,7 +89,7 @@ async def submit(mode=None, overrides=None, key=None):
 @pytest.mark.parametrize(
     "mode,operations,sources,wall",
     [
-        ("focused", 6, 6, 180_000),
+        ("focused", 6, 6, 240_000),
         ("balanced", 12, 12, 300_000),
         ("deep", 20, 20, 600_000),
     ],
@@ -444,7 +444,14 @@ async def test_migration_reapplication_is_idempotent(identity):
 
 
 async def editable_explicit_plan(
-    identity, monkeypatch, mode="deep", *, operations=4, sources=2, reflections=0
+    identity,
+    monkeypatch,
+    mode="deep",
+    *,
+    operations=4,
+    sources=2,
+    reflections=0,
+    source_policy=False,
 ):
     tenant, user = identity
     initial = [
@@ -498,6 +505,11 @@ async def editable_explicit_plan(
             repair_sources=admission.repair_sources_reserved,
         )
         original_payload = {"sub_questions": initial, "coverage": coverage.model_dump(mode="json")}
+        if source_policy:
+            original_payload["source_policy"] = {
+                "kind": "official_documentation",
+                "allowed_domains": ["docs.langchain.com"],
+            }
         plan = ResearchPlan(tenant_id=tenant, run_id=run.id, plan_version=1, plan=original_payload)
         session.add(plan)
         await session.flush()
@@ -527,7 +539,7 @@ async def test_edit_explicit_plan_regenerates_coverage_and_question_associations
     identity, monkeypatch, mode
 ):
     tenant, run_id, plan_id, original_payload = await editable_explicit_plan(
-        identity, monkeypatch, mode
+        identity, monkeypatch, mode, source_policy=True
     )
     edited_questions = ["How does restart recovery work?", "What are the operation costs?"]
     payload = runtime_api.EditResearchPlanRequest.model_validate(
@@ -544,6 +556,7 @@ async def test_edit_explicit_plan_regenerates_coverage_and_question_associations
         run = await session.get(ResearchRun, run_id)
         assert old.plan == original_payload
         assert replacement.parent_plan_version == 1 and replacement.plan_version == 2
+        assert replacement.plan["source_policy"] == original_payload["source_policy"]
         assert run.active_plan_id == replacement.id
         assert run.report_requirements == ["Discuss recovery", "Discuss costs"]
         coverage = CoveragePlan.model_validate(replacement.plan["coverage"])
@@ -572,6 +585,9 @@ async def test_edit_explicit_plan_regenerates_coverage_and_question_associations
         assert [item.payload["dimensionIds"] for item in questions] == [
             [str(key) for key in ids] for ids in coverage.question_dimensions
         ]
+        assert [item.payload["allowed_domains"] for item in questions] == [
+            ["docs.langchain.com"]
+        ] * len(questions)
         assert (
             len(
                 list(

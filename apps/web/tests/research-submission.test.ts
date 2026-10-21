@@ -7,7 +7,7 @@ import {
 import { CreateResearchRunRequestSchema } from "@research/contracts";
 
 it.each([
-  ["focused", 6, 3],
+  ["focused", 6, 4],
   ["balanced", 12, 5],
   ["deep", 20, 10],
 ] as const)(

@@ -157,6 +157,7 @@ from research_api.repositories.budgets import BudgetExceededError
 from research_api.repositories.source_relationships import SourceRelationshipRepository
 from research_api.research_limits import operation_limit, run_source_limit
 from research_api.runtime_context import LeaseLostError
+from research_api.source_policy import allowed_domains_from_plan
 from research_api.structured_output import (
     StructuredModelOutputError,
     parse_structured_response,
@@ -1572,9 +1573,7 @@ def _restore_assessment_assertion_payload(result: Mapping[str, Any]) -> dict[str
             receipt["proposal"] for receipt in result["technical_results"]
         ]
     if report_version >= 6:
-        payload["measurements"] = [
-            receipt["proposal"] for receipt in result["measurements"]
-        ]
+        payload["measurements"] = [receipt["proposal"] for receipt in result["measurements"]]
     return payload
 
 
@@ -2340,15 +2339,13 @@ def _repair_capable(graph_version: str | None, approval_required: bool) -> bool:
 def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
     async def intake(state: RunState) -> RunState:
         return state
+
     from research_api.graph.collection import build_collection_node
 
     research_worker = build_collection_node(settings, checkpointer)
     from research_api.graph.planning import build_planning_nodes
 
     planner, approval_gate = build_planning_nodes(settings, checkpointer)
-
-
-
 
     async def verifier(state: RunState) -> RunState:
         tenant_id = uuid.UUID(state["tenant_id"])
@@ -3534,24 +3531,31 @@ def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
                     )
                 )
             version = run.plan_version + 1
+            allowed_domains = allowed_domains_from_plan(parent.plan)
+            repair_plan: dict[str, Any] = {
+                "reason": "bounded coverage repair",
+                "coverage": parent.plan["coverage"],
+                "repair": {
+                    "round": 1,
+                    "base_assessment_id": str(base_id),
+                    "parent_plan_id": str(parent.id),
+                    "candidate_ids": [str(item.candidate_id) for item in proposals],
+                    "allocated": allocated.model_dump(mode="json"),
+                },
+                "sub_questions": [item.model_dump(mode="json") for item in planned],
+                "reportRequirements": run.report_requirements or [],
+            }
+            if allowed_domains:
+                repair_plan["source_policy"] = {
+                    "kind": "official_documentation",
+                    "allowed_domains": allowed_domains,
+                }
             plan = ResearchPlan(
                 tenant_id=tenant_id,
                 run_id=run_id,
                 plan_version=version,
                 parent_plan_version=run.plan_version,
-                plan={
-                    "reason": "bounded coverage repair",
-                    "coverage": parent.plan["coverage"],
-                    "repair": {
-                        "round": 1,
-                        "base_assessment_id": str(base_id),
-                        "parent_plan_id": str(parent.id),
-                        "candidate_ids": [str(item.candidate_id) for item in proposals],
-                        "allocated": allocated.model_dump(mode="json"),
-                    },
-                    "sub_questions": [item.model_dump(mode="json") for item in planned],
-                    "reportRequirements": run.report_requirements or [],
-                },
+                plan=repair_plan,
             )
             session.add(plan)
             await session.flush()
@@ -3571,7 +3575,8 @@ def build_graph(settings: Settings, checkpointer: Any = None) -> Any:
                         "dispatchSlots": 1,
                         "success_criteria": item.success_criteria,
                         "source_classes": item.source_classes,
-                    },
+                    }
+                    | ({"allowed_domains": allowed_domains} if allowed_domains else {}),
                     status="pending",
                     attempts=0,
                 )
@@ -4567,10 +4572,7 @@ async def run_graph(
             effective_graph_version = job_version or graph_version_for(
                 settings, explicit_mode=run_mode is not None
             )
-        if (
-            run_mode is not None
-            and effective_graph_version in PROTECTED_EXPLICIT_GRAPH_VERSIONS
-        ):
+        if run_mode is not None and effective_graph_version in PROTECTED_EXPLICIT_GRAPH_VERSIONS:
             writer_timeout_context = writer_timeout_override.set(
                 _explicit_writer_timeout_seconds(settings, run_mode)
             )

@@ -134,14 +134,16 @@ it("recognizes only the structured insufficient-research-units response", () => 
   });
   expect(researchBudgetFailure(402, "payment required")).toBeNull();
   expect(
-    researchBudgetFailure(402, { message: "billing configuration unavailable" }),
+    researchBudgetFailure(402, {
+      message: "billing configuration unavailable",
+    }),
   ).toBeNull();
   expect(
     researchBudgetFailure(403, { message: "insufficient research units" }),
   ).toBeNull();
 });
 it.each([
-  [6, 180_000],
+  [6, 240_000],
   [12, 300_000],
   [20, 600_000],
 ])("keeps mode %i bounded at %i", (calls, ms) => {
@@ -174,7 +176,7 @@ it.each([
 });
 
 it.each([
-  ["focused", 180_000],
+  ["focused", 240_000],
   ["balanced", 300_000],
   ["deep", 600_000],
 ] as const)(
@@ -183,12 +185,27 @@ it.each([
     expect(
       retryDeadline({
         mode,
-        modePolicyVersion: "research-mode-policy-v1",
+        modePolicyVersion: "research-mode-policy-v3",
         budget: { maxSearchCalls: 2 },
       }),
     ).toBe(deadline);
   },
 );
+
+it("keeps retries without a recorded deadline on archived policy limits", () => {
+  for (const policyVersion of [
+    "research-mode-policy-v1",
+    "research-mode-policy-v2",
+  ]) {
+    expect(
+      retryDeadline({
+        mode: "focused",
+        modePolicyVersion: policyVersion,
+        budget: { maxSearchCalls: 6 },
+      }),
+    ).toBe(180_000);
+  }
+});
 
 it.each([60_000, 90_000, 900_000])(
   "preserves recorded retry limit %i without raising it",
@@ -196,7 +213,7 @@ it.each([60_000, 90_000, 900_000])(
     expect(
       retryDeadline({
         mode: "deep",
-        modePolicyVersion: "research-mode-policy-v1",
+        modePolicyVersion: "research-mode-policy-v3",
         budget: { maxSearchCalls: 20, maxWallClockMs },
       }),
     ).toBe(maxWallClockMs);
@@ -213,7 +230,7 @@ it("uses the legacy call-derived deadline only when persisted policy is absent",
     }),
   ).toBe(300_000);
   expect(retryDeadline({ mode: "deep", budget: { maxSearchCalls: 6 } })).toBe(
-    180_000,
+    240_000,
   );
   expect(
     retryDeadline({
@@ -221,7 +238,7 @@ it("uses the legacy call-derived deadline only when persisted policy is absent",
       modePolicyVersion: "future-policy",
       budget: { maxSearchCalls: 6 },
     }),
-  ).toBe(180_000);
+  ).toBe(240_000);
   expect(
     retryDeadline({
       mode: "deep",

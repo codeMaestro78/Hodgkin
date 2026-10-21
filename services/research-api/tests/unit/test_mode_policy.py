@@ -12,7 +12,7 @@ from research_api.schemas.generated.create_research_run_request import CreateRes
 @pytest.mark.parametrize(
     "mode,ceiling,wall",
     [
-        ("focused", 6, 180_000),
+        ("focused", 6, 240_000),
         ("balanced", 12, 300_000),
         ("deep", 20, 600_000),
     ],
@@ -28,11 +28,16 @@ def test_explicit_mode_defaults(mode, ceiling, wall):
 def test_new_deep_policy_reserves_enough_total_output_for_long_writer():
     result = resolve_mode_budget("deep")
 
-    assert MODE_POLICY_VERSION == "research-mode-policy-v2"
+    assert MODE_POLICY_VERSION == "research-mode-policy-v3"
     assert result.max_output_tokens == 40_000
-    assert resolve_mode_budget(
-        "deep", policy_version="research-mode-policy-v1"
-    ).max_output_tokens == 20_000
+    assert (
+        resolve_mode_budget("deep", policy_version="research-mode-policy-v1").max_output_tokens
+        == 20_000
+    )
+    assert (
+        resolve_mode_budget("focused", policy_version="research-mode-policy-v2").max_wall_clock_ms
+        == 180_000
+    )
 
 
 def test_partial_override_does_not_apply_generated_search_default():
@@ -54,7 +59,7 @@ def test_partial_override_does_not_apply_generated_search_default():
         {"maxSearchCalls": 20},
         {"maxProviderOperations": 7},
         {"maxSources": 7},
-        {"maxWallClockMs": 180_001},
+        {"maxWallClockMs": 240_001},
         {"maxInputTokens": 100_001},
         {"maxOutputTokens": 20_001},
         {"maxEstimatedCostUsd": 5.01},

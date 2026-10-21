@@ -79,7 +79,7 @@ const PRINCIPLES = [
   {
     icon: "clock" as const,
     title: "Limits are features.",
-    body: "A run states how far it can go before it starts: Focused reads up to 6 sources in 3 active minutes, Balanced 12 in 5, Deep 20 in 10. Waiting for your approval pauses the clock — it never spends it.",
+    body: "A run states how far it can go before it starts: Focused reads up to 6 sources in 4 active minutes, Balanced 12 in 5, Deep 20 in 10. Waiting for your approval pauses the clock — it never spends it.",
   },
   {
     icon: "eye" as const,
@@ -105,9 +105,9 @@ export default function AboutPage() {
         </h1>
         <p className="lg-lead lp-enter">
           HogsKin exists for a habit most people already have and few tools
-          honored: asking where an answer came from. We built the product
-          around the trail instead of the answer — the plan a run followed, the
-          pages it read, and the claim-by-claim record of what held up.
+          honored: asking where an answer came from. We built the product around
+          the trail instead of the answer — the plan a run followed, the pages
+          it read, and the claim-by-claim record of what held up.
         </p>
         <div className="ab-jump lp-enter" role="list">
           <a href="#principles" role="listitem">
@@ -157,7 +157,11 @@ export default function AboutPage() {
         </p>
         <div className="ab-pipeline">
           {PIPELINE.map((stage) => (
-            <article className="ab-stage" data-critter="spotlight" key={stage.step}>
+            <article
+              className="ab-stage"
+              data-critter="spotlight"
+              key={stage.step}
+            >
               <span className="ab-stage-n" aria-hidden="true">
                 {stage.step}
               </span>
@@ -173,9 +177,9 @@ export default function AboutPage() {
         <div className="ab-prose">
           <p>
             A report can still be wrong. The machine here drafts, checks, and
-            quotes — and it fails the way careless researchers do:
-            confidently, occasionally, and in ways a citation exposes. The
-            point of the trail is not perfection. It is the ability to tell.
+            quotes — and it fails the way careless researchers do: confidently,
+            occasionally, and in ways a citation exposes. The point of the trail
+            is not perfection. It is the ability to tell.
           </p>
           <p>
             Nothing in a report is professional advice. The verification trail
@@ -193,8 +197,8 @@ export default function AboutPage() {
       <section className="lg-section" id="crew">
         <h2 className="ab-h2">The crew.</h2>
         <p className="lg-muted">
-          The site is staffed. Four small characters keep watch while you read
-          — their personalities are the review process in miniature.
+          The site is staffed. Four small characters keep watch while you read —
+          their personalities are the review process in miniature.
         </p>
         <div className="ab-crew">
           {CREW.map((member) => (
@@ -204,11 +208,7 @@ export default function AboutPage() {
               key={member.name}
             >
               <span className="ab-member-figure" aria-hidden="true">
-                <Critter
-                  kind={member.kind}
-                  size={56}
-                  delay={member.delay}
-                />
+                <Critter kind={member.kind} size={56} delay={member.delay} />
               </span>
               <h3>{member.name}</h3>
               <p>{member.line}</p>
@@ -216,8 +216,8 @@ export default function AboutPage() {
           ))}
         </div>
         <p className="lg-muted ab-crew-note">
-          They hop while you read, and hold still entirely when your system
-          asks for reduced motion.
+          They hop while you read, and hold still entirely when your system asks
+          for reduced motion.
         </p>
       </section>
 
