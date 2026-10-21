@@ -125,15 +125,17 @@ async def test_model_dispatch_uses_the_pinned_provider_and_model(monkeypatch):
 
     monkeypatch.setattr(builder, "model_response", dispatch)
     token = builder.model_client.set(runtime)
+    timeout_token = builder.writer_timeout_override.set(17)
     try:
         result = await builder._model_response(
             settings, role="writer", model="must-be-overridden", input="research"
         )
     finally:
+        builder.writer_timeout_override.reset(timeout_token)
         builder.model_client.reset(token)
 
     assert result == "response"
     assert seen["client"] is client
     assert seen["provider"] == "openrouter"
     assert seen["model"] == "deepseek/deepseek-v4.1-flash"
-    assert client.timeout_options == [{"timeout": settings.MODEL_WRITER_TIMEOUT_SECONDS}]
+    assert client.timeout_options == [{"timeout": 17}]

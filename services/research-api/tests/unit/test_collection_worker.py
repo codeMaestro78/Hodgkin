@@ -11,6 +11,20 @@ from research_api.db.models import Budget, ResearchRun, SubQuestion
 from research_api.graph import builder, collection
 
 
+@pytest.mark.parametrize("planned_count", [0, 3])
+def test_collection_rejects_planned_questions_left_unattempted(planned_count: int) -> None:
+    question_ids = [uuid.uuid4(), uuid.uuid4(), uuid.uuid4()]
+    expected_ids = question_ids[:planned_count]
+    rows = (
+        [(question_ids[0], "failed"), (question_ids[1], "pending"), (question_ids[2], "pending")]
+        if planned_count
+        else []
+    )
+
+    with pytest.raises(RuntimeError, match="collection left planned questions unresolved"):
+        collection.ensure_collection_questions_resolved(expected_ids, rows)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("calls,questions", [(6, 3), (12, 6), (20, 8)])
 @pytest.mark.parametrize("route", ["legacy", "tavily", "serper"])
@@ -63,6 +77,11 @@ async def test_real_worker_bounds_sources_and_concurrency(
                 return records[key]
             return 0 if entity is None else None
 
+        async def execute(self, _statement):
+            return SimpleNamespace(
+                all=lambda: [(record.id, record.status) for record in records.values()]
+            )
+
     @asynccontextmanager
     async def session(_tenant):
         yield Session()
@@ -94,6 +113,7 @@ async def test_real_worker_bounds_sources_and_concurrency(
 
     monkeypatch.setattr(collection, "SerperAdapter", discovery)
     monkeypatch.setattr(collection, "_cancel_if_requested", AsyncMock(return_value=False))
+    monkeypatch.setattr(builder, "_cancel_if_requested", AsyncMock(return_value=False))
     monkeypatch.setattr(collection, "_transition", AsyncMock())
     monkeypatch.setattr(builder, "start_node", AsyncMock(return_value=uuid.uuid4()))
     monkeypatch.setattr(builder, "finish_node", AsyncMock())

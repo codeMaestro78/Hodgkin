@@ -174,6 +174,9 @@ from research_api.verified_preview import record_verified_preview
 logger = logging.getLogger(__name__)
 model_client: ContextVar[Any | None] = ContextVar("model_client", default=None)
 assessment_deadline: ContextVar[float | None] = ContextVar("assessment_deadline", default=None)
+writer_timeout_override: ContextVar[float | None] = ContextVar(
+    "writer_timeout_override", default=None
+)
 # Older checkpoints retain their historical review policy. v16+ reserves
 # criterion review and publication before explicit-mode collection begins.
 EXPLICIT_REPAIR_STATUS = "disabled_pending_bounded_delta_assessment"
@@ -385,6 +388,8 @@ async def _model_response(settings: Settings, *, role: ModelRole = "writer", **r
         if role == "writer"
         else settings.PROVIDER_TIMEOUT_SECONDS
     )
+    if role == "writer" and writer_timeout_override.get() is not None:
+        timeout = min(timeout, writer_timeout_override.get() or timeout)
     base_client = (
         runtime.clients.get(route.provider) if isinstance(runtime, ModelRuntime) else runtime
     )
@@ -1779,12 +1784,18 @@ def _criterion_review_reserve_seconds(settings: Settings, *, protected: bool = F
     return review_timeout + publication_reserve
 
 
+def _explicit_writer_timeout_seconds(settings: Settings, mode: str | None = None) -> float:
+    """Keep a bounded writer window so Focused runs can collect evidence first."""
+    mode_cap = 30 if mode == "focused" else 60
+    return min(settings.MODEL_WRITER_TIMEOUT_SECONDS, mode_cap)
+
+
 def _explicit_assessment_tail_seconds(settings: Settings, mode: str | None = None) -> float:
     """Tail reserved before collection for writing, bounded claim review, and criteria."""
     batches = 1 if mode == "focused" else 2
     claim_review_timeout = min(settings.PROVIDER_TIMEOUT_SECONDS, EXPLICIT_REVIEW_TIMEOUT_SECONDS)
     return (
-        settings.MODEL_WRITER_TIMEOUT_SECONDS
+        _explicit_writer_timeout_seconds(settings, mode)
         + batches * claim_review_timeout
         + _criterion_review_reserve_seconds(settings, protected=True)
     )
@@ -4483,6 +4494,7 @@ async def run_graph(
     client_context = model_client.set(None)
     telemetry_context = dependency_run.set(run_id)
     deadline_context = None
+    writer_timeout_context = None
     try:
         routes = await pin_run_model_routing(
             tenant_id,
@@ -4554,6 +4566,13 @@ async def run_graph(
             )
             effective_graph_version = job_version or graph_version_for(
                 settings, explicit_mode=run_mode is not None
+            )
+        if (
+            run_mode is not None
+            and effective_graph_version in PROTECTED_EXPLICIT_GRAPH_VERSIONS
+        ):
+            writer_timeout_context = writer_timeout_override.set(
+                _explicit_writer_timeout_seconds(settings, run_mode)
             )
         config = (
             checkpointer.config()
@@ -4670,6 +4689,8 @@ async def run_graph(
     finally:
         if deadline_context is not None:
             assessment_deadline.reset(deadline_context)
+        if writer_timeout_context is not None:
+            writer_timeout_override.reset(writer_timeout_context)
         model_run.reset(model_context)
         dependency_run.reset(telemetry_context)
         runtime = model_client.get()

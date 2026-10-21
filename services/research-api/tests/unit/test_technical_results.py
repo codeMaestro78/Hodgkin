@@ -464,7 +464,7 @@ async def test_invalid_empty_draft_retry_keeps_original_valid_empty_result(monke
     assert draft.assertions.claims == []
 
 
-def test_explicit_assessment_reserves_reviewer_and_publication_but_not_another_writer():
+def test_focused_budget_caps_writer_to_leave_time_for_collection_and_review():
     settings = Settings(
         _env_file=None,
         MODEL_WRITER_TIMEOUT_SECONDS=45,
@@ -472,7 +472,8 @@ def test_explicit_assessment_reserves_reviewer_and_publication_but_not_another_w
     )
     assert builder._criterion_review_reserve_seconds(settings) == 90
     assert builder._criterion_review_reserve_seconds(settings, protected=True) == 60
-    assert builder._explicit_assessment_tail_seconds(settings, "focused") == 135
+    assert builder._explicit_writer_timeout_seconds(settings, "focused") == 30
+    assert builder._explicit_assessment_tail_seconds(settings, "focused") == 120
     assert builder._explicit_assessment_tail_seconds(settings, "balanced") == 165
     assert builder._post_writer_review_tail_seconds(settings, "focused") == 90
     assert builder._post_writer_review_tail_seconds(settings, "balanced") == 120

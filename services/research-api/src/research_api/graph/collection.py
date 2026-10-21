@@ -41,10 +41,29 @@ from research_api.research_limits import run_source_limit, source_allocations
 from research_api.telemetry import operation_event
 
 
+def ensure_collection_questions_resolved(
+    expected_ids: list[uuid.UUID], rows: list[tuple[uuid.UUID, str]]
+) -> None:
+    """Fail closed if the collection node would leave planned work queued."""
+    expected = set(expected_ids)
+    observed = {question_id for question_id, _ in rows}
+    unresolved = sum(
+        status not in {"complete", "failed", "skipped"} for _, status in rows
+    )
+    missing = len(expected - observed)
+    if not expected or missing or unresolved or observed - expected:
+        raise RuntimeError(
+            "collection left planned questions unresolved "
+            f"(planned={len(expected)}, missing={missing}, unresolved={unresolved}, "
+            f"unexpected={len(observed - expected)})"
+        )
+
+
 def build_collection_node(settings: Settings, checkpointer: Any = None) -> Any:
     """Build the collection worker without changing its provider/database seams."""
 
     async def research_worker(state: RunState) -> dict[str, list[str]]:
+        collection_node_started = monotonic()
         tenant_id = uuid.UUID(state["tenant_id"])
         run_id = uuid.UUID(state["run_id"])
         if await _cancel_if_requested(tenant_id=tenant_id, run_id=run_id):
@@ -374,6 +393,25 @@ def build_collection_node(settings: Settings, checkpointer: Any = None) -> Any:
                 await academic_adapter.aclose()
         if await _cancel_if_requested(tenant_id=tenant_id, run_id=run_id):
             return {"source_ids": source_ids}
+        expected_question_ids = [uuid.UUID(item) for item in state["sub_question_ids"]]
+        async with tenant_session(str(tenant_id)) as session:
+            result = await session.execute(
+                select(SubQuestion.id, SubQuestion.status).where(
+                    SubQuestion.tenant_id == tenant_id,
+                    SubQuestion.run_id == run_id,
+                    SubQuestion.id.in_(expected_question_ids),
+                )
+            )
+            question_rows = [(row[0], row[1]) for row in result.all()]
+        ensure_collection_questions_resolved(expected_question_ids, question_rows)
+        operation_event(
+            "research.collect.tasks",
+            started=collection_node_started,
+            plannedQuestionCount=len(expected_question_ids),
+            resolvedQuestionCount=len(question_rows),
+            attemptedQuestionCount=sum(status != "skipped" for _, status in question_rows),
+            skippedQuestionCount=sum(status == "skipped" for _, status in question_rows),
+        )
         await _transition(
             tenant_id=tenant_id,
             run_id=run_id,
