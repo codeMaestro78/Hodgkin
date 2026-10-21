@@ -1,6 +1,7 @@
 import asyncio
 import uuid
 from contextlib import asynccontextmanager
+from time import monotonic
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -23,6 +24,101 @@ def test_collection_rejects_planned_questions_left_unattempted(planned_count: in
 
     with pytest.raises(RuntimeError, match="collection left planned questions unresolved"):
         collection.ensure_collection_questions_resolved(expected_ids, rows)
+
+
+def test_collection_allows_pending_questions_after_bounded_collection_window() -> None:
+    question_ids = [uuid.uuid4(), uuid.uuid4()]
+
+    collection.ensure_collection_questions_resolved(
+        question_ids,
+        [(question_ids[0], "complete"), (question_ids[1], "pending")],
+        allow_pending=True,
+    )
+
+
+def test_collection_still_rejects_running_questions_after_bounded_window() -> None:
+    question_ids = [uuid.uuid4(), uuid.uuid4()]
+
+    with pytest.raises(RuntimeError, match="unresolved=1"):
+        collection.ensure_collection_questions_resolved(
+            question_ids,
+            [(question_ids[0], "complete"), (question_ids[1], "running")],
+            allow_pending=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_expired_explicit_collection_window_continues_with_pending_questions(
+    monkeypatch,
+) -> None:
+    question_ids = [uuid.uuid4(), uuid.uuid4()]
+    rows = {
+        question_id: SimpleNamespace(id=question_id, status="pending")
+        for question_id in question_ids
+    }
+
+    class Session:
+        async def scalar(self, statement):
+            entity = statement.column_descriptions[0].get("entity")
+            if entity is Budget:
+                return SimpleNamespace(max_search_calls=6)
+            if entity is ResearchRun:
+                return SimpleNamespace(
+                    concurrency_limit=3,
+                    cancellation_requested_at=None,
+                    mode=None,
+                    active_plan_id=None,
+                )
+            return 0 if entity is None else None
+
+        async def execute(self, _statement):
+            return SimpleNamespace(
+                all=lambda: [(question.id, question.status) for question in rows.values()]
+            )
+
+    @asynccontextmanager
+    async def session(_tenant):
+        yield Session()
+
+    monkeypatch.setattr(collection, "tenant_session", session)
+    monkeypatch.setattr(collection, "S3ArtifactStore", lambda **_kwargs: object())
+    monkeypatch.setattr(
+        collection, "TavilyAdapter", lambda **_kwargs: SimpleNamespace(aclose=AsyncMock())
+    )
+    monkeypatch.setattr(collection, "_cancel_if_requested", AsyncMock(return_value=False))
+    transition = AsyncMock()
+    monkeypatch.setattr(collection, "_transition", transition)
+    monkeypatch.setattr(builder, "_cancel_if_requested", AsyncMock(return_value=False))
+    monkeypatch.setattr(builder, "start_node", AsyncMock(return_value=uuid.uuid4()))
+    monkeypatch.setattr(builder, "finish_node", AsyncMock())
+    monkeypatch.setattr(
+        collection, "TavilyEvidenceIngestor", lambda **_kwargs: SimpleNamespace()
+    )
+    deadline_token = builder.assessment_deadline.set(monotonic() - 1)
+    try:
+        worker = (
+            builder.build_graph(
+                Settings(_env_file=None, TAVILY_API_KEY="test")
+            )
+            .nodes["research_worker"]
+            .bound.afunc
+        )
+        result = await worker(
+            {
+                "tenant_id": str(uuid.uuid4()),
+                "run_id": str(uuid.uuid4()),
+                "sub_question_ids": [str(question_id) for question_id in question_ids],
+                "quick_mode": False,
+                "mode": "focused",
+                "graph_version": next(iter(builder.PROTECTED_EXPLICIT_GRAPH_VERSIONS)),
+            }
+        )
+    finally:
+        builder.assessment_deadline.reset(deadline_token)
+
+    assert result == {"source_ids": []}
+    assert all(question.status == "pending" for question in rows.values())
+    transition.assert_awaited_once()
 
 
 @pytest.mark.asyncio

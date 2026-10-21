@@ -42,13 +42,19 @@ from research_api.telemetry import operation_event
 
 
 def ensure_collection_questions_resolved(
-    expected_ids: list[uuid.UUID], rows: list[tuple[uuid.UUID, str]]
+    expected_ids: list[uuid.UUID],
+    rows: list[tuple[uuid.UUID, str]],
+    *,
+    allow_pending: bool = False,
 ) -> None:
-    """Fail closed if the collection node would leave planned work queued."""
+    """Fail closed on missing or active work; bounded runs may leave work queued."""
     expected = set(expected_ids)
     observed = {question_id for question_id, _ in rows}
+    terminal_statuses = {"complete", "failed", "skipped"}
+    if allow_pending:
+        terminal_statuses.add("pending")
     unresolved = sum(
-        status not in {"complete", "failed", "skipped"} for _, status in rows
+        status not in terminal_statuses for _, status in rows
     )
     missing = len(expected - observed)
     if not expected or missing or unresolved or observed - expected:
@@ -403,14 +409,19 @@ def build_collection_node(settings: Settings, checkpointer: Any = None) -> Any:
                 )
             )
             question_rows = [(row[0], row[1]) for row in result.all()]
-        ensure_collection_questions_resolved(expected_question_ids, question_rows)
+        ensure_collection_questions_resolved(
+            expected_question_ids, question_rows, allow_pending=window is not None
+        )
         operation_event(
             "research.collect.tasks",
             started=collection_node_started,
             plannedQuestionCount=len(expected_question_ids),
             resolvedQuestionCount=len(question_rows),
-            attemptedQuestionCount=sum(status != "skipped" for _, status in question_rows),
+            attemptedQuestionCount=sum(
+                status in {"complete", "failed"} for _, status in question_rows
+            ),
             skippedQuestionCount=sum(status == "skipped" for _, status in question_rows),
+            pendingQuestionCount=sum(status == "pending" for _, status in question_rows),
         )
         await _transition(
             tenant_id=tenant_id,
