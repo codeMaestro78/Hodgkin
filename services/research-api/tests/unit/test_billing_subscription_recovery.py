@@ -259,6 +259,66 @@ def test_terminal_idempotency_key_cannot_create_a_second_subscription(monkeypatc
     create.assert_not_awaited()
 
 
+def test_owner_can_reconcile_existing_captured_subscription_payment(monkeypatch):
+    caller = Caller(tenant_id=uuid.uuid4(), user_id=uuid.uuid4())
+    subscription = _subscription(
+        tenant_id=caller.tenant_id,
+        user_id=caller.user_id,
+        status="reconciliation_required",
+        provider_plan_id="plan_scholar_monthly",
+        last_event_id="evt_fixture123",
+    )
+    event_receipt = SimpleNamespace(
+        event_id="evt_fixture123",
+        event_type="subscription.charged",
+        payment_id="pay_fixture123",
+        processing_status="reconciliation_required",
+    )
+    lookup_session = AsyncMock()
+    lookup_session.scalar = AsyncMock(side_effect=[subscription, None, event_receipt])
+    apply_session = AsyncMock()
+    apply_session.scalar = AsyncMock(side_effect=[subscription, None, event_receipt])
+    sessions = [lookup_session, apply_session]
+
+    @asynccontextmanager
+    async def system_session():
+        yield sessions.pop(0)
+
+    razorpay_subscription = {
+        "id": subscription.subscription_id,
+        "plan_id": "plan_scholar_monthly",
+        "status": "active",
+        "quantity": 1,
+        "total_count": 120,
+        "current_start": 1792636800,
+        "current_end": 1795228800,
+    }
+    razorpay_payment = {
+        "id": "pay_fixture123",
+        "status": "captured",
+        "amount": 59900,
+        "currency": "INR",
+        "subscription_id": subscription.subscription_id,
+    }
+    monkeypatch.setattr(api, "get_settings", _settings)
+    monkeypatch.setattr(api, "system_session", system_session)
+    fetch_subscription = AsyncMock(return_value=razorpay_subscription)
+    fetch_payment = AsyncMock(return_value=razorpay_payment)
+    grant = AsyncMock(return_value="processed")
+    monkeypatch.setattr(api, "fetch_razorpay_subscription", fetch_subscription)
+    monkeypatch.setattr(api, "fetch_razorpay_payment", fetch_payment)
+    monkeypatch.setattr(api, "_grant_subscription_cycle", grant)
+
+    response = _client(caller).post("/billing/subscription/reconcile")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"status": "reconciled", "planKey": "scholar"}
+    fetch_subscription.assert_awaited_once_with(_settings(), subscription.subscription_id)
+    fetch_payment.assert_awaited_once_with(_settings(), "pay_fixture123")
+    grant.assert_awaited_once()
+    assert subscription.status == "active"
+
+
 def test_plan_verification_failure_is_safely_classified_and_stops_before_subscription_create(
     monkeypatch,
 ):

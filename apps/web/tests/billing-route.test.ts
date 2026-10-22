@@ -12,6 +12,7 @@ import { POST as creditCheckout } from "../app/api/billing/credit-checkout/route
 import { POST as verifySubscription } from "../app/api/billing/verify-subscription/route";
 import { GET as subscription } from "../app/api/billing/subscription/route";
 import { POST as cancelCheckout } from "../app/api/billing/checkout/cancel/route";
+import { POST as reconcileSubscription } from "../app/api/billing/subscription/reconcile/route";
 
 beforeEach(() => {
   proxy.mockReset();
@@ -119,6 +120,17 @@ it("forwards subscription verification, status, and abandoned-checkout cancellat
   expect(proxy).toHaveBeenLastCalledWith(
     cancelRequest,
     "/billing/checkout/cancel",
+    "POST",
+  );
+
+  const reconcileRequest = new NextRequest(
+    "http://localhost/api/billing/subscription/reconcile",
+    { method: "POST" },
+  );
+  await reconcileSubscription(reconcileRequest);
+  expect(proxy).toHaveBeenLastCalledWith(
+    reconcileRequest,
+    "/billing/subscription/reconcile",
     "POST",
   );
 });

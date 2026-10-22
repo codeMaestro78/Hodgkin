@@ -7,6 +7,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from hmac import compare_digest
 from time import monotonic
+from types import SimpleNamespace
 from typing import Annotated, Any, Literal, cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
@@ -707,6 +708,204 @@ async def get_caller_subscription(caller: CallerDep) -> dict[str, object]:
                 "cancelAtCycleEnd": subscription.cancel_at_cycle_end,
             }
         }
+
+
+@router.post("/subscription/reconcile")
+async def reconcile_caller_subscription(caller: CallerDep) -> dict[str, str]:
+    """Revalidate a signed-webhook charge with Razorpay, then safely grant its period."""
+    started = monotonic()
+    settings = get_settings()
+    if not razorpay_subscriptions_available(settings):
+        raise HTTPException(503, "Paid subscriptions are not available")
+
+    async with system_session() as session:
+        await session.execute(text("SELECT set_config('app.billing_system', 'on', true)"))
+        subscription = await session.scalar(
+            select(RazorpaySubscription)
+            .where(
+                RazorpaySubscription.tenant_id == caller.tenant_id,
+                RazorpaySubscription.user_id == caller.user_id,
+                RazorpaySubscription.status == "reconciliation_required",
+            )
+            .order_by(RazorpaySubscription.created_at.desc())
+            .limit(1)
+        )
+        if subscription is None:
+            raise HTTPException(404, "No subscription needs payment reconciliation")
+        payment = await session.scalar(
+            select(RazorpaySubscriptionPayment)
+            .where(
+                RazorpaySubscriptionPayment.subscription_id == subscription.subscription_id,
+                RazorpaySubscriptionPayment.status == "reconciliation_required",
+            )
+            .order_by(RazorpaySubscriptionPayment.received_at.desc())
+            .limit(1)
+        )
+        if payment is None and subscription.last_event_id:
+            # Older webhook deployments recorded payment_id on the signed event
+            # inbox but did not create the payment reconciliation row.
+            event_receipt = await session.scalar(
+                select(RazorpayWebhookEvent).where(
+                    RazorpayWebhookEvent.event_id == subscription.last_event_id,
+                    RazorpayWebhookEvent.event_type.in_(
+                        ("subscription.charged", "subscription.activated")
+                    ),
+                    RazorpayWebhookEvent.processing_status == "reconciliation_required",
+                )
+            )
+            if event_receipt is not None and event_receipt.payment_id:
+                payment = SimpleNamespace(
+                    payment_id=event_receipt.payment_id,
+                    subscription_id=subscription.subscription_id,
+                    status="reconciliation_required",
+                )
+        if payment is None:
+            raise HTTPException(
+                409,
+                "No captured payment is safely linked to this subscription. Contact support.",
+            )
+        subscription_id = subscription.subscription_id
+        payment_id = payment.payment_id
+        expected_plan_id = subscription.provider_plan_id
+        plan_key = subscription.plan_key
+        billing_period = subscription.billing_period
+
+    try:
+        provider_subscription = await fetch_razorpay_subscription(settings, subscription_id)
+        provider_payment = await fetch_razorpay_payment(settings, payment_id)
+    except RazorpayUnavailable as exc:
+        operation_event(
+            "razorpay.subscription.reconcile",
+            started=started,
+            outcome="uncertain",
+            providerStatus=exc.status_code,
+            providerCode=exc.provider_code,
+            providerRequestId=exc.provider_request_id,
+            verificationFailure="provider_lookup",
+        )
+        raise HTTPException(
+            503, "Payment status could not be confirmed. Try again shortly."
+        ) from exc
+
+    expected_cycles = 120 if billing_period == "monthly" else 10
+    cycle_start = _provider_timestamp(provider_subscription.get("current_start"))
+    cycle_end = _provider_timestamp(provider_subscription.get("current_end"))
+    terms = BILLING_CATALOG.plans[cast(Literal["scholar", "investigator"], plan_key)]
+    expected_price = terms.monthly_price if billing_period == "monthly" else terms.annual_price
+    expected_minor = int(expected_price * 100) if expected_price is not None else -1
+    payment_subscription_id = provider_payment.get("subscription_id")
+    provider_matches = (
+        provider_subscription.get("id") == subscription_id
+        and provider_subscription.get("plan_id") == expected_plan_id
+        and provider_subscription.get("status") == "active"
+        and provider_subscription.get("quantity") == 1
+        and provider_subscription.get("total_count") == expected_cycles
+        and provider_payment.get("id") == payment_id
+        and provider_payment.get("status") == "captured"
+        and provider_payment.get("amount") == expected_minor
+        and provider_payment.get("currency") == "INR"
+        and payment_subscription_id in (None, subscription_id)
+        and cycle_start is not None
+        and cycle_end is not None
+        and cycle_start < cycle_end
+    )
+    if not provider_matches:
+        operation_event(
+            "razorpay.subscription.reconcile",
+            started=started,
+            outcome="rejected",
+            verificationFailure="provider_terms_mismatch",
+        )
+        raise HTTPException(
+            409,
+            "Razorpay payment or subscription details do not match the configured plan. "
+            "No allowance was changed; contact support.",
+        )
+
+    async with system_session() as session:
+        await session.execute(text("SELECT set_config('app.billing_system', 'on', true)"))
+        subscription = await session.scalar(
+            select(RazorpaySubscription)
+            .where(
+                RazorpaySubscription.subscription_id == subscription_id,
+                RazorpaySubscription.tenant_id == caller.tenant_id,
+                RazorpaySubscription.user_id == caller.user_id,
+            )
+            .with_for_update()
+        )
+        payment = await session.scalar(
+            select(RazorpaySubscriptionPayment)
+            .where(
+                RazorpaySubscriptionPayment.payment_id == payment_id,
+                RazorpaySubscriptionPayment.subscription_id == subscription_id,
+            )
+            .with_for_update()
+        )
+        if subscription is None:
+            raise HTTPException(409, "The reconciliation record changed. Refresh status.")
+        if payment is not None and payment.status == "processed":
+            return {"status": "reconciled", "planKey": subscription.plan_key}
+        if payment is not None and payment.status != "reconciliation_required":
+            raise HTTPException(409, "The payment is not eligible for reconciliation")
+        if payment is None:
+            event_receipt = await session.scalar(
+                select(RazorpayWebhookEvent)
+                .where(
+                    RazorpayWebhookEvent.event_id == subscription.last_event_id,
+                    RazorpayWebhookEvent.event_type.in_(
+                        ("subscription.charged", "subscription.activated")
+                    ),
+                    RazorpayWebhookEvent.payment_id == payment_id,
+                    RazorpayWebhookEvent.processing_status == "reconciliation_required",
+                )
+                .with_for_update()
+            )
+            if event_receipt is None:
+                raise HTTPException(409, "The reconciliation record changed. Refresh status.")
+
+        result = await _grant_subscription_cycle(
+            session,
+            subscription=subscription,
+            payment=provider_payment,
+            cycle_start=cycle_start,
+            cycle_end=cycle_end,
+        )
+        if result != "processed":
+            operation_event(
+                "razorpay.subscription.reconcile",
+                started=started,
+                outcome="rejected",
+                verificationFailure="ledger_conflict",
+            )
+            raise HTTPException(
+                409,
+                "The paid period conflicts with existing billing records. "
+                "No allowance was changed; contact support.",
+            )
+        if payment is not None:
+            payment.amount_minor = expected_minor
+            payment.currency = "INR"
+            payment.status = "processed"
+        subscription.status = "active"
+        subscription.current_period_start = cycle_start
+        subscription.current_period_end = cycle_end
+        await session.execute(
+            update(RazorpayWebhookEvent)
+            .where(
+                RazorpayWebhookEvent.payment_id == payment_id,
+                RazorpayWebhookEvent.event_type.in_(
+                    ("subscription.charged", "subscription.activated")
+                ),
+                RazorpayWebhookEvent.processing_status == "reconciliation_required",
+            )
+            .values(processing_status="processed")
+        )
+    operation_event(
+        "razorpay.subscription.reconcile",
+        started=started,
+        outcome="succeeded",
+    )
+    return {"status": "reconciled", "planKey": plan_key}
 
 
 @router.get("/credit-packs")
@@ -1417,8 +1616,13 @@ async def _grant_subscription_cycle(
             RazorpaySubscriptionPayment.payment_id == payment["id"]
         )
     )
-    if existing_payment is not None:
+    if existing_payment is not None and existing_payment.status == "processed":
         return str(existing_payment.status)
+    if (
+        existing_payment is not None
+        and existing_payment.subscription_id != subscription.subscription_id
+    ):
+        return "reconciliation_required"
 
     starts = _monthly_period_bounds(subscription.billing_period, cycle_start, cycle_end)
     if starts is None:
@@ -1478,16 +1682,65 @@ async def _grant_subscription_cycle(
             ends_at=end,
         )
         session.add(period_row)
+    if existing_payment is not None:
+        existing_payment.amount_minor = expected_minor
+        existing_payment.currency = "INR"
+        existing_payment.status = "processed"
+    else:
+        session.add(
+            RazorpaySubscriptionPayment(
+                payment_id=payment["id"],
+                subscription_id=subscription.subscription_id,
+                amount_minor=expected_minor,
+                currency="INR",
+                status="processed",
+            )
+        )
+    return "processed"
+
+
+async def _save_subscription_payment_for_reconciliation(
+    session: Any, *, subscription: RazorpaySubscription, payment: dict[str, Any]
+) -> None:
+    """Persist the provider payment ID from a signed event for safe later recovery."""
+    payment_id = payment.get("id")
+    amount = payment.get("amount")
+    currency = payment.get("currency")
+    if (
+        not isinstance(payment_id, str)
+        or not payment_id.startswith("pay_")
+        or isinstance(amount, bool)
+        or not isinstance(amount, int)
+        or amount <= 0
+        or not isinstance(currency, str)
+        or len(currency) != 3
+        or not currency.isalpha()
+        or not currency.isupper()
+    ):
+        return
+    existing = await session.scalar(
+        select(RazorpaySubscriptionPayment)
+        .where(RazorpaySubscriptionPayment.payment_id == payment_id)
+        .with_for_update()
+    )
+    if existing is not None:
+        if (
+            existing.subscription_id == subscription.subscription_id
+            and existing.status != "processed"
+        ):
+            existing.amount_minor = amount
+            existing.currency = currency
+            existing.status = "reconciliation_required"
+        return
     session.add(
         RazorpaySubscriptionPayment(
-            payment_id=payment["id"],
+            payment_id=payment_id,
             subscription_id=subscription.subscription_id,
-            amount_minor=expected_minor,
-            currency="INR",
-            status="processed",
+            amount_minor=amount,
+            currency=currency,
+            status="reconciliation_required",
         )
     )
-    return "processed"
 
 
 @router.post("/webhooks/razorpay", response_model=None)
@@ -1697,6 +1950,14 @@ async def receive_razorpay_webhook(request: Request) -> dict[str, object] | JSON
                     if event_created is not None:
                         subscription.last_event_created = event_created
                     subscription.last_event_id = event_id
+                if (
+                    processing_status == "reconciliation_required"
+                    and event_type in {"subscription.charged", "subscription.activated"}
+                    and isinstance(payment_entity, dict)
+                ):
+                    await _save_subscription_payment_for_reconciliation(
+                        session, subscription=subscription, payment=payment_entity
+                    )
             await session.execute(
                 update(RazorpayWebhookEvent)
                 .where(RazorpayWebhookEvent.event_id == event_id)

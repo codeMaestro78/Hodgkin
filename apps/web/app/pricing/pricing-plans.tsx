@@ -471,6 +471,29 @@ export function PricingPlans() {
     }
   }
 
+  async function reconcileSubscription() {
+    setManageBusy(true);
+    setManageMessage("");
+    try {
+      const response = await fetch("/api/billing/subscription/reconcile", { method: "POST" });
+      const result: unknown = await response.json().catch(() => null);
+      if (!response.ok) {
+        const detail = getErrorDetail(result);
+        throw new Error(
+          typeof detail === "string"
+            ? detail
+            : "Payment could not be verified yet. Try again shortly.",
+        );
+      }
+      await refreshBillingState();
+      setManageMessage("Payment verified. Your paid plan allowance is now active.");
+    } catch (error) {
+      setManageMessage(error instanceof Error ? error.message : "Payment could not be verified. Try again shortly.");
+    } finally {
+      setManageBusy(false);
+    }
+  }
+
   async function cancelAbandonedCheckout(planKey: PaidPlanKey, billingPeriod: Billing, subscriptionId: string) {
     try {
       const response = await fetch("/api/billing/checkout/cancel", {
@@ -580,13 +603,21 @@ export function PricingPlans() {
               onClick={() => {
                 setManageBusy(true);
                 setManageMessage("");
-                void refreshBillingState()
-                  .then(() => setManageMessage("Subscription status refreshed."))
-                  .catch(() => setManageMessage("Could not refresh subscription status. Try again shortly."))
-                  .finally(() => setManageBusy(false));
+                if (subscription.status === "reconciliation_required") {
+                  void reconcileSubscription();
+                } else {
+                  setManageBusy(true);
+                  setManageMessage("");
+                  void refreshBillingState()
+                    .then(() => setManageMessage("Subscription status refreshed."))
+                    .catch(() => setManageMessage("Could not refresh subscription status. Try again shortly."))
+                    .finally(() => setManageBusy(false));
+                }
               }}
             >
-              {manageBusy ? "Refreshing…" : "Refresh status"}
+              {manageBusy
+                ? subscription.status === "reconciliation_required" ? "Verifying payment…" : "Refreshing…"
+                : subscription.status === "reconciliation_required" ? "Sync paid plan" : "Refresh status"}
             </button>
             {canCancel && !confirmCancel && (
               <button
