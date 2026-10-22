@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   checkoutFailureMessage,
+  shouldOfferCheckoutResume,
   parseCheckoutAvailability,
   waitForPaidPlanActivation,
 } from "../lib/billing-pricing";
@@ -19,6 +20,18 @@ describe("pricing checkout availability", () => {
     expect(checkoutFailureMessage(500, "internal details")).toContain(
       "could not be opened",
     );
+    expect(
+      checkoutFailureMessage(503, "The configured Razorpay plan could not be verified"),
+    ).toContain("No subscription was created");
+    expect(
+      shouldOfferCheckoutResume(
+        503,
+        "The existing checkout could not be verified. It is preserved; retry status check before creating another.",
+      ),
+    ).toBe(true);
+    expect(
+      shouldOfferCheckoutResume(503, "The configured Razorpay plan could not be verified"),
+    ).toBe(false);
     expect(
       checkoutFailureMessage(429, "Finish an existing credit checkout before starting another"),
     ).toBe("Finish an existing credit checkout before starting another");

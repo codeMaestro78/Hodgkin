@@ -39,6 +39,12 @@ export function checkoutFailureMessage(
   detail: unknown,
   retryAfterSeconds?: string | null,
 ): string {
+  if (
+    status === 503 &&
+    detail === "The configured Razorpay plan could not be verified"
+  ) {
+    return "Subscription billing setup could not be verified. No subscription was created. Contact support.";
+  }
   const safeDetails = new Set([
     "Too many requests. Please retry shortly.",
     "Daily research-credit purchase limit reached",
@@ -71,6 +77,15 @@ export function checkoutFailureMessage(
     return "Checkout is temporarily unavailable. Please try again shortly.";
   }
   return "Secure checkout could not be opened. Please try again.";
+}
+
+export function shouldOfferCheckoutResume(status: number, detail: unknown): boolean {
+  return (
+    status === 503 &&
+    (detail ===
+      "The existing checkout could not be verified. It is preserved; retry status check before creating another." ||
+      detail === "The existing checkout needs reconciliation; no replacement was created.")
+  );
 }
 
 type EntitlementSnapshot = {

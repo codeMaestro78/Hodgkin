@@ -419,19 +419,36 @@ async def create_subscription_checkout(
             "The previous checkout is confirmed terminal. Start a new checkout to continue.",
         )
 
+    plan_verify_started = monotonic()
+    verification_failure = "provider_lookup"
+    plan_matches: dict[str, bool] = {}
     try:
         provider_plan = await fetch_razorpay_plan(settings, plan.provider_plan_id)
         item = provider_plan.get("item")
-        if (
-            provider_plan.get("id") != plan.provider_plan_id
-            or provider_plan.get("period") != plan.period
-            or provider_plan.get("interval") != 1
-            or not isinstance(item, dict)
-            or item.get("amount") != plan.amount_minor
-            or item.get("currency") != plan.currency
-        ):
+        plan_matches = {
+            "idMatches": provider_plan.get("id") == plan.provider_plan_id,
+            "periodMatches": provider_plan.get("period") == plan.period,
+            "intervalMatches": provider_plan.get("interval") == 1,
+            "amountMatches": isinstance(item, dict) and item.get("amount") == plan.amount_minor,
+            "currencyMatches": isinstance(item, dict) and item.get("currency") == plan.currency,
+        }
+        if not all(plan_matches.values()):
+            verification_failure = "plan_terms_mismatch"
             raise RazorpayUnavailable("Configured Razorpay plan terms do not match the application")
     except RazorpayUnavailable as exc:
+        operation_event(
+            "razorpay.plan.verify",
+            started=plan_verify_started,
+            outcome="rejected"
+            if exc.status_code or verification_failure == "plan_terms_mismatch"
+            else "uncertain",
+            error=exc,
+            providerStatus=exc.status_code,
+            providerCode=exc.provider_code,
+            providerRequestId=exc.provider_request_id,
+            verificationFailure=verification_failure,
+            **plan_matches,
+        )
         async with tenant_session(str(caller.tenant_id)) as session:
             await session.execute(
                 text("SELECT set_config('app.user_id', :id, true)"), {"id": str(caller.user_id)}

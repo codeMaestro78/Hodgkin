@@ -1,7 +1,7 @@
 import uuid
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -257,3 +257,46 @@ def test_terminal_idempotency_key_cannot_create_a_second_subscription(monkeypatc
     assert response.status_code == 409
     fetch.assert_not_awaited()
     create.assert_not_awaited()
+
+
+def test_plan_verification_failure_is_safely_classified_and_stops_before_subscription_create(
+    monkeypatch,
+):
+    caller = Caller(tenant_id=uuid.uuid4(), user_id=uuid.uuid4())
+    session = AsyncMock()
+    session.scalar = AsyncMock(side_effect=[None, None, None, None])
+    session.add = Mock()
+    event = Mock()
+    monkeypatch.setattr(api, "get_settings", _settings)
+    monkeypatch.setattr(api, "tenant_session", _tenant_session(session))
+    monkeypatch.setattr(api, "operation_event", event)
+    monkeypatch.setattr(
+        api,
+        "fetch_razorpay_plan",
+        AsyncMock(
+            return_value={
+                "id": "plan_scholar_monthly",
+                "period": "monthly",
+                "interval": 1,
+                "item": {"amount": 59901, "currency": "INR"},
+            }
+        ),
+    )
+    create = AsyncMock()
+    monkeypatch.setattr(api, "create_razorpay_subscription", create)
+
+    response = _client(caller).post(
+        "/billing/checkout",
+        headers={"Idempotency-Key": "plan-metadata-mismatch"},
+        json={"planKey": "scholar", "billingPeriod": "monthly"},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "The configured Razorpay plan could not be verified"
+    create.assert_not_awaited()
+    event.assert_called_once()
+    event_args = event.call_args.kwargs
+    assert event.call_args.args == ("razorpay.plan.verify",)
+    assert event_args["verificationFailure"] == "plan_terms_mismatch"
+    assert event_args["amountMatches"] is False
+    assert event_args["currencyMatches"] is True
