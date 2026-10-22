@@ -6,7 +6,9 @@ import { Icon } from "../components/ui";
 import { Critter, type CritterKind } from "../components/crew/critter";
 import {
   checkoutFailureMessage,
+  paidAccessState,
   parseCheckoutAvailability,
+  shouldOfferCheckoutResume,
   type CheckoutAvailability,
   type PaidPlanKey,
   waitForPaidPlanActivation,
@@ -21,6 +23,7 @@ type PricingSubscription = {
   currentPeriodEnd: string | null;
   cancelAtCycleEnd: boolean;
 };
+type PricingEntitlement = { status?: string; planKey?: "free" | PaidPlanKey };
 
 type RazorpayCheckoutResult = {
   razorpay_payment_id: string;
@@ -144,8 +147,11 @@ function PlanCard({
   busy,
   error,
   canResume,
+  lockedBySubscription,
+  isCurrentPlan,
   onChoose,
   onResume,
+  onManage,
   onRetryAvailability,
 }: {
   plan: Plan;
@@ -158,8 +164,11 @@ function PlanCard({
   busy: string | null;
   error: string;
   canResume: boolean;
+  lockedBySubscription: boolean;
+  isCurrentPlan: boolean;
   onChoose: (planKey: PaidPlanKey) => void;
-  onResume: (planKey: PaidPlanKey) => void;
+  onResume: (planKey: PaidPlanKey, period: Billing) => void;
+  onManage: () => void;
   onRetryAvailability: () => void;
 }) {
   const price = billing === "yearly" ? plan.yearly : plan.monthly;
@@ -226,6 +235,14 @@ function PlanCard({
         <span className="lp-btn lp-btn-paper" aria-disabled="true">
           {billing === "yearly" ? "Annual billing coming soon" : "Monthly billing coming soon"}
         </span>
+      ) : isCurrentPlan ? (
+        <span className="lp-btn lp-btn-paper" aria-disabled="true">
+          Current plan
+        </span>
+      ) : lockedBySubscription ? (
+        <button type="button" className="lp-btn lp-btn-paper" onClick={onManage}>
+          Manage current plan
+        </button>
       ) : (
         <button
           type="button"
@@ -246,10 +263,10 @@ function PlanCard({
               type="button"
               disabled={busy !== null}
               onClick={() => {
-                if (plan.id !== "free") onResume(plan.id);
+                if (plan.id !== "free") onResume(plan.id, billing);
               }}
             >
-              {busy === plan.id ? "Checking checkout…" : "Check status / Resume checkout"}
+              {busy === plan.id ? "Checking status…" : "Check status and reopen checkout"}
             </button>
           )}
         </div>
@@ -280,9 +297,12 @@ export function PricingPlans() {
   const [availabilityAttempt, setAvailabilityAttempt] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
   const [checkoutError, setCheckoutError] = useState("");
-  const [resumePlanKey, setResumePlanKey] = useState<PaidPlanKey | null>(null);
+  const [resumeTarget, setResumeTarget] = useState<{ planKey: PaidPlanKey; billingPeriod: Billing } | null>(null);
   const [subscription, setSubscription] = useState<PricingSubscription | null>(null);
+  const [entitlement, setEntitlement] = useState<PricingEntitlement | null>(null);
   const [manageBusy, setManageBusy] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [manageMessage, setManageMessage] = useState("");
   const [free, ...paid] = PLANS;
 
   useEffect(() => {
@@ -320,15 +340,7 @@ export function PricingPlans() {
                 : "unknown",
           );
           if (response.ok) {
-            void fetch("/api/billing/subscription", {
-              cache: "no-store",
-              signal: controller.signal,
-            })
-              .then((subscriptionResponse) => subscriptionResponse.json())
-              .then((value: { subscription?: PricingSubscription | null }) => {
-                if (!controller.signal.aborted) setSubscription(value.subscription ?? null);
-              })
-              .catch(() => undefined);
+            void refreshBillingState(controller.signal).catch(() => undefined);
           }
         }
       })
@@ -338,7 +350,7 @@ export function PricingPlans() {
     return () => controller.abort();
   }, [availabilityAttempt]);
 
-  async function choosePlan(planKey: PaidPlanKey) {
+  async function choosePlan(planKey: PaidPlanKey, billingPeriod: Billing = billing) {
     setCheckoutError("");
     setBusy(planKey);
     try {
@@ -348,11 +360,19 @@ export function PricingPlans() {
           "content-type": "application/json",
           "idempotency-key": crypto.randomUUID(),
         },
-        body: JSON.stringify({ planKey, billingPeriod: billing }),
+        body: JSON.stringify({ planKey, billingPeriod }),
       });
       const order: unknown = await orderResponse.json().catch(() => null);
       if (!orderResponse.ok || !isSubscriptionCheckout(order)) {
-        throw new Error(checkoutFailureMessage(orderResponse.status, getErrorDetail(order)));
+        const detail = getErrorDetail(order);
+        setCheckoutError(checkoutFailureMessage(orderResponse.status, detail));
+        setResumeTarget(
+          shouldOfferCheckoutResume(orderResponse.status, detail)
+            ? { planKey, billingPeriod }
+            : null,
+        );
+        setBusy(null);
+        return;
       }
       const razorpayWindow = window as Window & {
         Razorpay?: new (options: RazorpayCheckoutOptions) => RazorpayCheckoutInstance;
@@ -386,7 +406,8 @@ export function PricingPlans() {
                 ? `Payment verified. Your ${activation.planKey} plan is active.`
                 : "Payment verified. Plan units appear after Razorpay confirms the captured payment; refresh in a moment.",
             );
-            await refreshSubscription();
+            await refreshBillingState();
+            setResumeTarget(null);
           } catch (error) {
             setCheckoutError(error instanceof Error ? error.message : "Payment verification could not be completed.");
           } finally {
@@ -396,32 +417,61 @@ export function PricingPlans() {
         modal: {
           ondismiss: () => {
             setBusy(null);
-            void cancelAbandonedCheckout(planKey, order.subscriptionId);
+            void cancelAbandonedCheckout(planKey, billingPeriod, order.subscriptionId);
           },
         },
         theme: { color: "#222b31" },
       });
       checkout.on("payment.failed", () => {
         setCheckoutError("Payment was not completed. No plan units were granted.");
-        setResumePlanKey(planKey);
+        setResumeTarget({ planKey, billingPeriod });
       });
-      setResumePlanKey(null);
+      setResumeTarget(null);
       checkout.open();
     } catch (error) {
       setCheckoutError(error instanceof Error ? error.message : "Secure checkout could not be opened.");
-      setResumePlanKey(planKey);
+      // The request may have reached the API before the connection failed. A same-plan
+      // status check is safe: the server reconciles the existing attempt before creating anything.
+      setResumeTarget({ planKey, billingPeriod });
       setBusy(null);
     }
   }
 
-  async function refreshSubscription() {
-    const response = await fetch("/api/billing/subscription", { cache: "no-store" });
-    if (!response.ok) return;
-    const value: { subscription?: PricingSubscription | null } = await response.json();
-    setSubscription(value.subscription ?? null);
+  async function refreshBillingState(signal?: AbortSignal) {
+    const [subscriptionResponse, entitlementResponse] = await Promise.all([
+      fetch("/api/billing/subscription", {
+        cache: "no-store",
+        ...(signal ? { signal } : {}),
+      }),
+      fetch("/api/billing/entitlement", {
+        cache: "no-store",
+        ...(signal ? { signal } : {}),
+      }),
+    ]);
+    const reads: Promise<unknown>[] = [];
+    if (subscriptionResponse.ok) {
+      reads.push(
+        subscriptionResponse
+          .json()
+          .then((value: { subscription?: PricingSubscription | null }) =>
+            setSubscription(value.subscription ?? null),
+          ),
+      );
+    }
+    if (entitlementResponse.ok) {
+      reads.push(
+        entitlementResponse
+          .json()
+          .then((value: PricingEntitlement) => setEntitlement(value)),
+      );
+    }
+    await Promise.all(reads);
+    if (!subscriptionResponse.ok || !entitlementResponse.ok) {
+      throw new Error("Some billing status could not be refreshed.");
+    }
   }
 
-  async function cancelAbandonedCheckout(planKey: PaidPlanKey, subscriptionId: string) {
+  async function cancelAbandonedCheckout(planKey: PaidPlanKey, billingPeriod: Billing, subscriptionId: string) {
     try {
       const response = await fetch("/api/billing/checkout/cancel", {
         method: "POST",
@@ -432,36 +482,46 @@ export function PricingPlans() {
         setCheckoutError(
           "Cancellation could not be confirmed. Your checkout is preserved and has not been replaced; check its status or resume it.",
         );
-        setResumePlanKey(planKey);
+        setResumeTarget({ planKey, billingPeriod });
         return;
       }
-      setResumePlanKey(null);
-      await refreshSubscription();
+      setResumeTarget(null);
+      await refreshBillingState();
     } catch {
       setCheckoutError(
         "Could not confirm cancellation. Your checkout is preserved; check its status or resume it.",
       );
-      setResumePlanKey(planKey);
+      setResumeTarget({ planKey, billingPeriod });
     }
   }
 
   async function cancelSubscription() {
     setManageBusy(true);
-    setCheckoutError("");
+    setManageMessage("");
     try {
       const response = await fetch("/api/billing/portal", { method: "POST" });
       const result: unknown = await response.json().catch(() => null);
       if (!response.ok) {
         throw new Error(checkoutFailureMessage(response.status, getErrorDetail(result)));
       }
-      await refreshSubscription();
-      setCheckoutError("Cancellation is scheduled for the end of the current paid period.");
+      await refreshBillingState();
+      setConfirmCancel(false);
+      setManageMessage("Cancellation is scheduled. Your paid access continues through the current period.");
     } catch (error) {
-      setCheckoutError(error instanceof Error ? error.message : "Cancellation could not be confirmed.");
+      setManageMessage(error instanceof Error ? error.message : "Cancellation could not be confirmed.");
     } finally {
       setManageBusy(false);
     }
   }
+  const planLabel = (planKey: PaidPlanKey) => planKey === "scholar" ? "Scholar" : "Investigator";
+  const accessState = paidAccessState(subscription?.status, subscription?.planKey, entitlement?.planKey);
+  const subscriptionOpen = Boolean(subscription && !["cancelled", "completed", "expired"].includes(subscription.status));
+  const canCancel = Boolean(subscription && ["active", "authenticated", "pending", "halted", "paused"].includes(subscription.status) && !subscription.cancelAtCycleEnd);
+  const focusSubscriptionManagement = () => {
+    const section = document.getElementById("subscription-management");
+    section?.scrollIntoView({ behavior: "smooth", block: "center" });
+    section?.focus({ preventScroll: true });
+  };
   return (
     <>
       <Script
@@ -470,22 +530,85 @@ export function PricingPlans() {
         onError={() => setCheckoutError("Secure checkout could not load. Please try again later.")}
       />
       {subscription && (
-        <section className="pr-subscription-status" aria-live="polite">
-          <p>
-            Current plan: <strong>{subscription.planKey}</strong> · {subscription.status}
-            {subscription.currentPeriodEnd && ` · renews/ends ${new Date(subscription.currentPeriodEnd).toLocaleDateString()}`}
-            {subscription.cancelAtCycleEnd && " · cancellation scheduled"}
-          </p>
-          {["active", "authenticated", "pending", "halted", "paused"].includes(subscription.status) && !subscription.cancelAtCycleEnd && (
+        <section id="subscription-management" className="pr-subscription-status" aria-live="polite" tabIndex={-1}>
+          <div className="pr-subscription-copy">
+            <span className={`pr-subscription-badge pr-subscription-badge-${accessState}`}>
+              {accessState === "active" ? "Plan active" : accessState === "pending" ? "Activation pending" : subscription.status}
+            </span>
+            <h2>{planLabel(subscription.planKey)}</h2>
+            <p>
+              {accessState === "active"
+                ? `${planLabel(subscription.planKey)} is active${subscription.currentPeriodEnd ? ` through ${new Date(subscription.currentPeriodEnd).toLocaleDateString()}` : ""}.`
+                : accessState === "pending"
+                  ? "Razorpay has approved the subscription. HogsKin is waiting for captured-payment confirmation before enabling paid units."
+                  : subscription.status === "created"
+                    ? "This checkout is waiting for your approval. Resume it to continue; no second subscription will be created."
+                    : `Subscription status: ${subscription.status}.`}
+            </p>
+            {subscription.cancelAtCycleEnd && (
+              <p className="pr-subscription-note">
+                Cancellation is scheduled. Your paid access remains available through the current period.
+              </p>
+            )}
+          </div>
+          <div className="pr-subscription-actions">
+            {subscription.status === "created" && (
+              <button
+                type="button"
+                className="pr-manage-primary"
+                disabled={busy !== null}
+                onClick={() => void choosePlan(subscription.planKey, subscription.billingPeriod)}
+              >
+                {busy === subscription.planKey ? "Checking subscription…" : `Resume ${planLabel(subscription.planKey)} checkout`}
+              </button>
+            )}
             <button
               type="button"
+              className="pr-manage-secondary"
               disabled={manageBusy}
-              onClick={() => void cancelSubscription()}
+              onClick={() => {
+                setManageBusy(true);
+                setManageMessage("");
+                void refreshBillingState()
+                  .then(() => setManageMessage("Subscription status refreshed."))
+                  .catch(() => setManageMessage("Could not refresh subscription status. Try again shortly."))
+                  .finally(() => setManageBusy(false));
+              }}
             >
-              {manageBusy ? "Scheduling cancellation…" : "Cancel at period end"}
+              {manageBusy ? "Refreshing…" : "Refresh status"}
             </button>
+            {canCancel && !confirmCancel && (
+              <button
+                type="button"
+                className="pr-manage-secondary"
+                disabled={manageBusy}
+                onClick={() => setConfirmCancel(true)}
+              >
+                Schedule cancellation
+              </button>
+            )}
+          </div>
+          {confirmCancel && canCancel && (
+            <div className="pr-cancel-confirm" role="group" aria-label="Confirm subscription cancellation">
+              <p>
+                Cancel at the end of this billing period? You’ll keep {planLabel(subscription.planKey)} access
+                {subscription.currentPeriodEnd ? ` through ${new Date(subscription.currentPeriodEnd).toLocaleDateString()}` : " until the period ends"}.
+              </p>
+              <button type="button" className="pr-manage-secondary" disabled={manageBusy} onClick={() => setConfirmCancel(false)}>
+                Keep my plan
+              </button>
+              <button type="button" className="pr-manage-danger" disabled={manageBusy} onClick={() => void cancelSubscription()}>
+                {manageBusy ? "Scheduling…" : "Confirm cancellation"}
+              </button>
+            </div>
           )}
+          {manageMessage && <p className="pr-manage-message" role="status">{manageMessage}</p>}
         </section>
+      )}
+      {checkoutError && !resumeTarget && (
+        <div className="pr-checkout-error pr-checkout-error-global" role="alert">
+          <p>{checkoutError}</p>
+        </div>
       )}
       <div
         className="pr-billing"
@@ -520,8 +643,11 @@ export function PricingPlans() {
               busy={busy}
               error=""
               canResume={false}
+              lockedBySubscription={false}
+              isCurrentPlan={false}
               onChoose={choosePlan}
               onResume={choosePlan}
+              onManage={focusSubscriptionManagement}
               onRetryAvailability={() => setAvailabilityAttempt((value) => value + 1)}
             />
           )}
@@ -538,10 +664,20 @@ export function PricingPlans() {
               authStatus={authStatus}
               signInRequired={signInRequiredPlan === plan.id}
               busy={busy}
-              error={resumePlanKey === null || resumePlanKey === plan.id ? checkoutError : ""}
-              canResume={resumePlanKey === plan.id}
+              error={resumeTarget?.planKey === plan.id ? checkoutError : ""}
+              canResume={resumeTarget?.planKey === plan.id}
+              lockedBySubscription={subscriptionOpen}
+              isCurrentPlan={subscription?.planKey === plan.id && accessState === "active"}
               onChoose={choosePlan}
-              onResume={choosePlan}
+              onResume={(planKey) =>
+                choosePlan(
+                  planKey,
+                  resumeTarget?.planKey === planKey
+                    ? resumeTarget.billingPeriod
+                    : billing,
+                )
+              }
+              onManage={focusSubscriptionManagement}
               onRetryAvailability={() => setAvailabilityAttempt((value) => value + 1)}
             />
           ))}

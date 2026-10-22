@@ -88,6 +88,18 @@ export function shouldOfferCheckoutResume(status: number, detail: unknown): bool
   );
 }
 
+export function paidAccessState(
+  subscriptionStatus: string | null | undefined,
+  subscriptionPlan: string | null | undefined,
+  entitlementPlan: string | null | undefined,
+): "active" | "pending" | "none" {
+  if (!subscriptionPlan || subscriptionPlan === "free") return "none";
+  if (entitlementPlan === subscriptionPlan) return "active";
+  return ["active", "authenticated"].includes(subscriptionStatus ?? "")
+    ? "pending"
+    : "none";
+}
+
 type EntitlementSnapshot = {
   status?: string;
   planKey?: string;

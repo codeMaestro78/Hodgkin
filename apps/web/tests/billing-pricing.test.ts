@@ -2,11 +2,20 @@ import { describe, expect, it, vi } from "vitest";
 import {
   checkoutFailureMessage,
   shouldOfferCheckoutResume,
+  paidAccessState,
   parseCheckoutAvailability,
   waitForPaidPlanActivation,
 } from "../lib/billing-pricing";
 
 describe("pricing checkout availability", () => {
+  it("distinguishes provider-active subscriptions from ledger-confirmed access", () => {
+    expect(paidAccessState("active", "scholar", "scholar")).toBe("active");
+    expect(paidAccessState("active", "scholar", "free")).toBe("pending");
+    expect(paidAccessState("created", "scholar", "free")).toBe("none");
+    expect(paidAccessState("active", "investigator", "scholar")).toBe("pending");
+    expect(paidAccessState("active", null, "free")).toBe("none");
+  });
+
   it("surfaces safe checkout conflicts instead of hiding the server explanation", () => {
     expect(
       checkoutFailureMessage(

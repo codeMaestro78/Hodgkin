@@ -32,7 +32,7 @@ import {
   subscribeResearchHistorySnapshots,
   type ResearchHistorySnapshot,
 } from "../../lib/research-history-events";
-import { waitForPaidPlanActivation } from "../../lib/billing-pricing";
+import { paidAccessState, waitForPaidPlanActivation } from "../../lib/billing-pricing";
 import { ResearchCreditTopUp } from "./research-credit-topup";
 
 export type HistoryRun = {
@@ -55,6 +55,11 @@ type BillingEntitlement = {
   reservedUnits?: number;
   availableUnits?: number;
 };
+type WorkspaceSubscription = {
+  planKey?: "scholar" | "investigator";
+  status?: string;
+  cancelAtCycleEnd?: boolean;
+} | null;
 
 const WorkspaceEntitlementContext = createContext<{
   entitlement: BillingEntitlement | null;
@@ -98,6 +103,7 @@ export function WorkspaceShell({
   const [entitlement, setEntitlement] = useState<BillingEntitlement | null>(
     null,
   );
+  const [subscription, setSubscription] = useState<WorkspaceSubscription>(null);
   const [entitlementUnavailable, setEntitlementUnavailable] = useState(false);
   const [entitlementRevision, setEntitlementRevision] = useState(0);
   const [checkoutReturnState, setCheckoutReturnState] = useState<
@@ -194,6 +200,7 @@ export function WorkspaceShell({
   useEffect(() => {
     const controller = new AbortController();
     setEntitlement(null);
+    setSubscription(null);
     setEntitlementUnavailable(false);
     const returnUrl = new URL(window.location.href);
     const returnState = returnUrl.searchParams.get("billing");
@@ -233,7 +240,22 @@ export function WorkspaceShell({
       return result;
     }
 
+    async function loadSubscription() {
+      try {
+        const response = await fetch("/api/billing/subscription", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        if (!response.ok) return;
+        const body = (await response.json()) as { subscription?: WorkspaceSubscription };
+        if (!controller.signal.aborted) setSubscription(body.subscription ?? null);
+      } catch {
+        // Keep the budget available if the separate subscription read fails.
+      }
+    }
+
     async function refreshAfterCheckout() {
+      void loadSubscription();
       if (!checkoutActivationPending.current) {
         try {
           await loadEntitlement();
@@ -375,6 +397,12 @@ export function WorkspaceShell({
       setDeleteBusy(false);
     }
   }
+  const pendingPaidPlan = entitlement
+    ? paidAccessState(subscription?.status, subscription?.planKey, entitlement.planKey) === "pending"
+    : false;
+  const displayedPlan = pendingPaidPlan
+    ? subscription?.planKey
+    : entitlement?.planKey ?? "free";
   const sidebar = (
     <>
       {" "}
@@ -609,14 +637,26 @@ export function WorkspaceShell({
                       free: "Free",
                       scholar: "Scholar",
                       investigator: "Investigator",
-                    }[entitlement.planKey ?? "free"]
+                    }[displayedPlan ?? "free"]
                   }
                 </strong>
               </div>
-              <span className="workspace-budget-active">
-                <span aria-hidden="true" /> Active
-              </span>
+              {pendingPaidPlan ? (
+                <span className="workspace-budget-pending">Activation pending</span>
+              ) : (
+                <span className="workspace-budget-active">
+                  <span aria-hidden="true" /> Active
+                </span>
+              )}
             </div>
+            {pendingPaidPlan && (
+              <p className="workspace-budget-pending-detail" role="status">
+                Razorpay approved this subscription. Paid units appear after payment confirmation; the balance below is your current ledger allowance.
+              </p>
+            )}
+            {subscription?.cancelAtCycleEnd && (
+              <p className="workspace-budget-plan">Cancellation is scheduled; access continues through this period.</p>
+            )}
             {entitlement.periodEnd && (
               <p className="workspace-budget-plan">
                 Resets{" "}
