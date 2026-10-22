@@ -515,6 +515,7 @@ export function PricingPlans() {
   }
   const planLabel = (planKey: PaidPlanKey) => planKey === "scholar" ? "Scholar" : "Investigator";
   const accessState = paidAccessState(subscription?.status, subscription?.planKey, entitlement?.planKey);
+  const subscriptionIsActive = subscription?.status === "active";
   const subscriptionOpen = Boolean(subscription && !["cancelled", "completed", "expired"].includes(subscription.status));
   const canCancel = Boolean(subscription && ["active", "authenticated", "pending", "halted", "paused"].includes(subscription.status) && !subscription.cancelAtCycleEnd);
   const focusSubscriptionManagement = () => {
@@ -532,15 +533,25 @@ export function PricingPlans() {
       {subscription && (
         <section id="subscription-management" className="pr-subscription-status" aria-live="polite" tabIndex={-1}>
           <div className="pr-subscription-copy">
-            <span className={`pr-subscription-badge pr-subscription-badge-${accessState}`}>
-              {accessState === "active" ? "Plan active" : accessState === "pending" ? "Activation pending" : subscription.status}
+            <span className={`pr-subscription-badge pr-subscription-badge-${subscriptionIsActive || accessState === "active" ? "active" : "pending"}`}>
+              {subscriptionIsActive
+                ? "Active"
+                : accessState === "active"
+                  ? "Paid plan active"
+                  : subscription.status === "authenticated"
+                    ? "Authorized"
+                    : subscription.status === "created"
+                      ? "Checkout awaiting approval"
+                      : subscription.status}
             </span>
             <h2>{planLabel(subscription.planKey)}</h2>
             <p>
-              {accessState === "active"
-                ? `${planLabel(subscription.planKey)} is active${subscription.currentPeriodEnd ? ` through ${new Date(subscription.currentPeriodEnd).toLocaleDateString()}` : ""}.`
+              {subscriptionIsActive && accessState === "pending"
+                ? `${planLabel(subscription.planKey)} is active with Razorpay. Paid units have not synced to your balance yet.`
+                : accessState === "active"
+                  ? `${planLabel(subscription.planKey)} is active${subscription.currentPeriodEnd ? ` through ${new Date(subscription.currentPeriodEnd).toLocaleDateString()}` : ""}.`
                 : accessState === "pending"
-                  ? "Razorpay has approved the subscription. HogsKin is waiting for captured-payment confirmation before enabling paid units."
+                  ? "The subscription is authorized; paid units appear after the first captured payment is confirmed."
                   : subscription.status === "created"
                     ? "This checkout is waiting for your approval. Resume it to continue; no second subscription will be created."
                     : `Subscription status: ${subscription.status}.`}
@@ -667,7 +678,7 @@ export function PricingPlans() {
               error={resumeTarget?.planKey === plan.id ? checkoutError : ""}
               canResume={resumeTarget?.planKey === plan.id}
               lockedBySubscription={subscriptionOpen}
-              isCurrentPlan={subscription?.planKey === plan.id && accessState === "active"}
+              isCurrentPlan={subscription?.planKey === plan.id && (subscriptionIsActive || accessState === "active")}
               onChoose={choosePlan}
               onResume={(planKey) =>
                 choosePlan(

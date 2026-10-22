@@ -595,7 +595,7 @@ export function WorkspaceShell({
           <button
             type="button"
             className="workspace-budget-refresh"
-            aria-label="Refresh research budget"
+            aria-label={subscription?.planKey ? "Refresh subscription and budget status" : "Refresh research budget"}
             onClick={() => setEntitlementRevision((revision) => revision + 1)}
           >
             <Icon name="refresh" size={13} />
@@ -609,8 +609,7 @@ export function WorkspaceShell({
         )}
         {checkoutReturnState === "pending" && (
           <p role="status">
-            Checkout returned, but plan activation is not confirmed yet. Refresh
-            this budget shortly; don’t start another purchase.
+            Your subscription is recorded, but paid units are not in your balance yet. Reload status shortly; don’t buy again.
           </p>
         )}
         {checkoutReturnState === "cancelled" && (
@@ -629,7 +628,7 @@ export function WorkspaceShell({
             <div className="workspace-budget-plan-row">
               <div className="workspace-budget-plan-identity">
                 <span className="workspace-budget-plan-label">
-                  Current plan
+                  Plan
                 </span>
                 <strong className="workspace-budget-plan-name">
                   {
@@ -641,8 +640,10 @@ export function WorkspaceShell({
                   }
                 </strong>
               </div>
-              {pendingPaidPlan ? (
-                <span className="workspace-budget-pending">Activation pending</span>
+              {pendingPaidPlan && subscription?.status !== "active" ? (
+                <span className="workspace-budget-pending">
+                  {subscription?.status === "authenticated" ? "Authorized" : "Payment pending"}
+                </span>
               ) : (
                 <span className="workspace-budget-active">
                   <span aria-hidden="true" /> Active
@@ -651,7 +652,9 @@ export function WorkspaceShell({
             </div>
             {pendingPaidPlan && (
               <p className="workspace-budget-pending-detail" role="status">
-                Razorpay approved this subscription. Paid units appear after payment confirmation; the balance below is your current ledger allowance.
+                {subscription?.status === "active"
+                  ? "Your subscription is active. The paid allowance has not synced yet; your current balance remains unchanged."
+                  : "Paid units appear after the first captured payment is confirmed. Your current balance remains unchanged."}
               </p>
             )}
             {subscription?.cancelAtCycleEnd && (
@@ -684,7 +687,9 @@ export function WorkspaceShell({
                 ? ` · ${entitlement.reservedUnits} reserved`
                 : ""}
             </p>
-            <Link href="/pricing">Plan details</Link>
+            <Link href={pendingPaidPlan || subscription?.planKey ? "/pricing#subscription-management" : "/pricing"}>
+              {pendingPaidPlan || subscription?.planKey ? "Manage subscription" : "Plan details"}
+            </Link>
           </>
         ) : (
           <p>Monthly allowance has not been activated yet.</p>
