@@ -62,6 +62,33 @@ def test_razorpay_pack_catalog_is_strict_and_non_expiring():
     assert configured_razorpay_credit_packs(_settings(RAZORPAY_CREDIT_PACKS_JSON=expiring)) == {}
 
 
+def test_razorpay_pack_catalog_rejects_usd_and_mixed_currencies():
+    usd = json.dumps(
+        [{"key": "starter", "amountMinor": 199, "currency": "USD", "units": 5, "expiryDays": None}]
+    )
+    assert configured_razorpay_credit_packs(_settings(RAZORPAY_CREDIT_PACKS_JSON=usd)) == {}
+
+    mixed = json.dumps(
+        [
+            {
+                "key": "starter",
+                "amountMinor": 199,
+                "currency": "USD",
+                "units": 5,
+                "expiryDays": None,
+            },
+            {
+                "key": "domestic",
+                "amountMinor": 19900,
+                "currency": "INR",
+                "units": 5,
+                "expiryDays": None,
+            },
+        ]
+    )
+    assert configured_razorpay_credit_packs(_settings(RAZORPAY_CREDIT_PACKS_JSON=mixed)) == {}
+
+
 def test_credit_purchase_availability_fails_closed_for_each_policy_gate():
     assert razorpay_credit_topups_available(_settings())
     assert not razorpay_credit_topups_available(_settings(BILLING_RAZORPAY_ENABLED=False))
@@ -69,6 +96,14 @@ def test_credit_purchase_availability_fails_closed_for_each_policy_gate():
     assert not razorpay_credit_topups_available(_settings(BILLING_CREDIT_TERMS_APPROVED=False))
     assert not razorpay_credit_topups_available(_settings(BILLING_CREDIT_SPENDING_ENABLED=False))
     assert not razorpay_credit_topups_available(_settings(RAZORPAY_WEBHOOK_SECRET=None))
+
+
+def test_usd_credit_packs_remain_unavailable():
+    usd_packs = json.dumps(
+        [{"key": "starter", "amountMinor": 199, "currency": "USD", "units": 5, "expiryDays": None}]
+    )
+    assert not razorpay_credit_topups_available(_settings(RAZORPAY_CREDIT_PACKS_JSON=usd_packs))
+    assert not razorpay_credit_topups_available(_settings(RAZORPAY_CREDIT_PACKS_JSON=usd_packs))
 
 
 def test_authenticated_package_listing_hides_secrets_and_is_off_by_default(monkeypatch):
@@ -88,6 +123,47 @@ def test_authenticated_package_listing_hides_secrets_and_is_off_by_default(monke
     assert response.json() == {"enabled": False, "currency": "INR", "packs": []}
     assert "fixture-secret" not in response.text
     assert "keyId" not in response.text
+
+
+def test_authenticated_package_listing_reports_inr_currency(monkeypatch):
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[caller_dependency] = lambda: Caller(
+        tenant_id=uuid.uuid4(), user_id=uuid.uuid4()
+    )
+    inr_settings = _settings(
+        RAZORPAY_CREDIT_PACKS_JSON=json.dumps(
+            [
+                {
+                    "key": "starter",
+                    "amountMinor": 19900,
+                    "currency": "INR",
+                    "units": 5,
+                    "expiryDays": None,
+                }
+            ]
+        ),
+    )
+    monkeypatch.setattr("research_api.billing.api.get_settings", lambda: inr_settings)
+    monkeypatch.setattr(
+        "research_api.billing.api._razorpay_schema_ready", AsyncMock(return_value=True)
+    )
+    session = AsyncMock()
+
+    @asynccontextmanager
+    async def tenant_session(_tenant_id):
+        yield session
+
+    monkeypatch.setattr("research_api.billing.api.tenant_session", tenant_session)
+
+    response = TestClient(app).get("/billing/credit-packs")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "enabled": True,
+        "currency": "INR",
+        "packs": [{"key": "starter", "amountMinor": 19900, "units": 5, "expiryDays": None}],
+    }
 
 
 def test_credit_pack_listing_requires_authentication():

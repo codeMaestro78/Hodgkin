@@ -19,6 +19,13 @@ describe("pricing checkout availability", () => {
     expect(checkoutFailureMessage(500, "internal details")).toContain(
       "could not be opened",
     );
+    expect(
+      checkoutFailureMessage(429, "Finish an existing credit checkout before starting another"),
+    ).toBe("Finish an existing credit checkout before starting another");
+    expect(checkoutFailureMessage(429, { secrets: "do-not-display" })).toContain("rate-limited");
+    expect(
+      checkoutFailureMessage(429, "Too many requests. Please retry shortly.", "30"),
+    ).toBe("Too many requests. Please try again in 30 seconds.");
   });
 
   it("exposes only the paid plans explicitly enabled by the server", () => {
@@ -30,6 +37,7 @@ describe("pricing checkout availability", () => {
     ).toEqual({
       status: "available",
       plans: ["scholar", "investigator"],
+      billingPeriods: ["monthly"],
     });
   });
 

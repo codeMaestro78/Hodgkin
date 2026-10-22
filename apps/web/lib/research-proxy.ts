@@ -185,14 +185,24 @@ export async function forwardResearch(
       });
     }
     timing("response", started, response.status);
+    const forwardedHeaders = new Headers({
+      "content-type": "application/json",
+      "cache-control": "private, no-store",
+      "x-request-id": requestId,
+      "server-timing": serverTiming(),
+    });
+    for (const name of [
+      "retry-after",
+      "ratelimit-limit",
+      "ratelimit-remaining",
+      "ratelimit-reset",
+    ]) {
+      const value = response.headers.get(name);
+      if (value !== null) forwardedHeaders.set(name, value);
+    }
     return new Response(responseBody, {
       status: response.status,
-      headers: {
-        "content-type": "application/json",
-        "cache-control": "private, no-store",
-        "x-request-id": requestId,
-        "server-timing": serverTiming(),
-      },
+      headers: forwardedHeaders,
     });
   } catch {
     if (request.signal.aborted) {

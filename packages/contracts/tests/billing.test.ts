@@ -47,7 +47,7 @@ describe("billing entitlement response", () => {
 });
 
 describe("Razorpay Standard Checkout contracts", () => {
-  it("accepts only INR orders with a server-issued Razorpay order and public key", () => {
+  it("accepts INR orders and rejects USD with a server-issued Razorpay order", () => {
     expect(
       RazorpayCreditOrderSchema.safeParse({
         purchaseId: "3c5c0e8b-47f8-4552-b3a4-7c893d1e1e29",
@@ -57,6 +57,15 @@ describe("Razorpay Standard Checkout contracts", () => {
         keyId: "rzp_test_fixture123",
       }).success,
     ).toBe(true);
+    expect(
+      RazorpayCreditOrderSchema.safeParse({
+        purchaseId: "3c5c0e8b-47f8-4552-b3a4-7c893d1e1e29",
+        orderId: "order_fixture123",
+        amount: 199,
+        currency: "USD",
+        keyId: "rzp_test_fixture123",
+      }).success,
+    ).toBe(false);
     expect(
       RazorpayCreditOrderSchema.safeParse({
         purchaseId: "3c5c0e8b-47f8-4552-b3a4-7c893d1e1e29",

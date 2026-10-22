@@ -23,7 +23,8 @@ def _approved_catalog(version: str = "approved-catalog-v1"):
                 key: replace(
                     plan,
                     monthly_allowance_units=40 if key == "scholar" else 120,
-                    monthly_price_usd=Decimal("0"),
+                    currency="INR",
+                    monthly_price=Decimal("0"),
                 )
                 for key, plan in draft.plans.items()
             }

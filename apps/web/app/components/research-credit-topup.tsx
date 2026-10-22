@@ -2,6 +2,7 @@
 
 import Script from "next/script";
 import { useEffect, useRef, useState } from "react";
+import { checkoutFailureMessage } from "../../lib/billing-pricing";
 
 type Pack = { key: string; amountMinor: number; units: number; expiryDays: null };
 type Catalog = { enabled: boolean; currency: string; packs: Pack[] };
@@ -87,7 +88,16 @@ export function ResearchCreditTopUp({
         headers: { "Content-Type": "application/json", "Idempotency-Key": key },
         body: JSON.stringify({ packageKey: pack.key }),
       });
-      if (!response.ok) throw new Error("A secure payment order could not be created.");
+      if (!response.ok) {
+        const body = await response.json().catch(() => null) as { detail?: unknown } | null;
+        throw new Error(
+          checkoutFailureMessage(
+            response.status,
+            body?.detail,
+            response.headers.get("retry-after"),
+          ),
+        );
+      }
       const order = (await response.json()) as CheckoutOrder;
       if (
         !order.orderId.startsWith("order_") ||
@@ -150,8 +160,12 @@ export function ResearchCreditTopUp({
         setMessage(details.error?.description ?? "Payment failed. No units were added.");
       });
       checkout.open();
-    } catch {
-      setMessage("Checkout could not open. If an order was created, retrying uses the same order safely.");
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Checkout could not open. If an order was created, retrying uses the same order safely.",
+      );
       setBusy(null);
     }
   }

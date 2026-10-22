@@ -53,6 +53,7 @@ def test_verify_missing_callback_fields_returns_400(monkeypatch):
 
 
 def test_order_uses_server_pack_amount_and_returns_public_key_only(monkeypatch):
+    currency, amount_minor = "INR", 100
     purchase_id = uuid.uuid4()
     purchase = SimpleNamespace(
         id=purchase_id,
@@ -69,7 +70,7 @@ def test_order_uses_server_pack_amount_and_returns_public_key_only(monkeypatch):
         yield sessions.pop(0)
 
     pack = SimpleNamespace(
-        key="starter", amount_minor=100, currency="INR", units=5, expiry_days=None
+        key="starter", amount_minor=amount_minor, currency=currency, units=5, expiry_days=None
     )
     provider_create = AsyncMock(return_value={"id": "order_fixture123"})
     monkeypatch.setattr("research_api.billing.api.get_settings", _settings)
@@ -93,12 +94,12 @@ def test_order_uses_server_pack_amount_and_returns_public_key_only(monkeypatch):
     assert response.json() == {
         "purchaseId": str(purchase_id),
         "orderId": "order_fixture123",
-        "amount": 100,
-        "currency": "INR",
+        "amount": amount_minor,
+        "currency": currency,
         "keyId": "rzp_test_fixture123",
     }
     provider_create.assert_awaited_once_with(
-        _settings(), amount_minor=100, currency="INR", receipt=purchase_id.hex
+        _settings(), amount_minor=amount_minor, currency=currency, receipt=purchase_id.hex
     )
 
 
@@ -185,6 +186,7 @@ def test_invalid_webhook_signature_is_rejected_before_database_access(monkeypatc
 
 
 def test_signed_captured_webhook_grants_exact_pack_once(monkeypatch):
+    currency, amount_minor = "INR", 100
     purchase = SimpleNamespace(
         id=uuid.uuid4(),
         tenant_id=TENANT_ID,
@@ -193,8 +195,8 @@ def test_signed_captured_webhook_grants_exact_pack_once(monkeypatch):
         provider_order_state="created",
         provider_order_id="order_fixture123",
         provider_payment_id=None,
-        amount_minor=100,
-        currency="INR",
+        amount_minor=amount_minor,
+        currency=currency,
         unit_grant=5,
     )
     session = AsyncMock()
@@ -224,8 +226,8 @@ def test_signed_captured_webhook_grants_exact_pack_once(monkeypatch):
                     "entity": {
                         "id": "pay_fixture123",
                         "order_id": "order_fixture123",
-                        "amount": 100,
-                        "currency": "INR",
+                        "amount": amount_minor,
+                        "currency": currency,
                         "status": "captured",
                     }
                 }

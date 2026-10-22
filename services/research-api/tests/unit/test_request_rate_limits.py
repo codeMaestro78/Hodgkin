@@ -49,6 +49,10 @@ def rate_limited_app(redis: InMemoryRedis) -> FastAPI:
     async def create_run() -> dict[str, bool]:
         return {"ok": True}
 
+    @app.post("/billing/credit-checkout")
+    async def create_credit_checkout() -> dict[str, bool]:
+        return {"ok": True}
+
     @app.get("/health/live")
     async def live() -> dict[str, bool]:
         return {"ok": True}
@@ -93,6 +97,20 @@ def test_research_creation_uses_stricter_limit_than_reads() -> None:
 
     assert limited.status_code == 429
     assert limited.headers["ratelimit-limit"] == "2"
+
+
+def test_credit_checkout_has_five_per_minute_limit_and_retry_after() -> None:
+    client = TestClient(rate_limited_app(InMemoryRedis()))
+    headers = trusted_headers("00000000-0000-4000-8000-000000000009")
+
+    for _ in range(5):
+        assert client.post("/billing/credit-checkout", headers=headers).status_code == 200
+    limited = client.post("/billing/credit-checkout", headers=headers)
+
+    assert limited.status_code == 429
+    assert limited.json() == {"detail": "Too many requests. Please retry shortly."}
+    assert limited.headers["retry-after"] == "30"
+    assert limited.headers["ratelimit-limit"] == "5"
 
 
 def test_verified_accounts_have_independent_buckets() -> None:

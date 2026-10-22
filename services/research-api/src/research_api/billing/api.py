@@ -1,11 +1,12 @@
 """Billing read, operator and public signed-webhook endpoints."""
 
+import calendar
 import hashlib
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from hmac import compare_digest
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal, cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse
@@ -14,6 +15,7 @@ from sqlalchemy import func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 
 from research_api.auth import Caller, authenticated_caller
+from research_api.billing.catalog import BILLING_CATALOG
 from research_api.billing.credit_packs import (
     configured_razorpay_credit_packs,
     razorpay_credit_topups_available,
@@ -26,24 +28,48 @@ from research_api.billing.ledger import (
     BillingConfigurationUnavailable,
     adjust_units,
     ensure_default_free_period,
+    transition_period_state,
 )
 from research_api.billing.razorpay import (
+    SUPPORTED_CURRENCY_CODES,
     RazorpayUnavailable,
     configured_key_id,
     payment_signature_valid,
+    subscription_signature_valid,
     webhook_signature_valid,
+)
+from research_api.billing.razorpay import (
+    cancel_subscription as cancel_razorpay_subscription,
 )
 from research_api.billing.razorpay import (
     create_order as create_razorpay_order,
 )
 from research_api.billing.razorpay import (
+    create_subscription as create_razorpay_subscription,
+)
+from research_api.billing.razorpay import (
     fetch_payment as fetch_razorpay_payment,
+)
+from research_api.billing.razorpay import (
+    fetch_plan as fetch_razorpay_plan,
+)
+from research_api.billing.razorpay import (
+    fetch_subscription as fetch_razorpay_subscription,
+)
+from research_api.billing.subscriptions import (
+    RazorpaySubscriptionPlan,
+    razorpay_subscriptions_available,
+    subscription_plans,
 )
 from research_api.config import get_settings
 from research_api.db.models import (
     BillingAccount,
     BillingCreditEntry,
     BillingCreditPurchase,
+    BillingPeriod,
+    RazorpaySubscription,
+    RazorpaySubscriptionCheckoutAttempt,
+    RazorpaySubscriptionPayment,
     RazorpayWebhookEvent,
 )
 from research_api.db.session import system_session, tenant_session
@@ -94,10 +120,417 @@ class RazorpayPaymentVerification(BaseModel):
     razorpay_signature: str = Field(min_length=1, max_length=128)
 
 
+class SubscriptionCheckoutRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, populate_by_name=True)
+    plan_key: Literal["scholar", "investigator"] = Field(alias="planKey")
+    billing_period: Literal["monthly", "yearly"] = Field(alias="billingPeriod")
+
+
+class RazorpaySubscriptionVerification(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    razorpay_payment_id: str = Field(min_length=1, max_length=64)
+    razorpay_subscription_id: str = Field(min_length=1, max_length=64)
+    razorpay_signature: str = Field(min_length=1, max_length=128)
+
+
+class CancelPendingSubscriptionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, populate_by_name=True)
+    subscription_id: str = Field(alias="subscriptionId", min_length=8, max_length=64)
+
+
+async def _subscription_schema_ready(session: Any) -> bool:
+    return bool(
+        await session.scalar(
+            text("""
+            SELECT to_regclass('public.razorpay_subscriptions') IS NOT NULL
+               AND to_regclass('public.razorpay_subscription_checkout_attempts') IS NOT NULL
+               AND to_regclass('public.razorpay_subscription_payments') IS NOT NULL
+        """)
+        )
+    )
+
+
 @router.get("/checkout-availability")
 async def checkout_availability() -> dict[str, object]:
-    """Paid subscriptions are disabled until a Razorpay Subscriptions flow exists."""
-    return {"enabled": False, "plans": []}
+    """Expose only fully configured recurring plans; never expose provider secrets."""
+    settings = get_settings()
+    enabled = razorpay_subscriptions_available(settings)
+    if enabled:
+        async with system_session() as session:
+            enabled = await _subscription_schema_ready(session)
+    plans = subscription_plans(settings) if enabled else {}
+    return {
+        "enabled": enabled,
+        "plans": sorted({key for key, _period in plans}),
+        "billingPeriods": sorted({period for _key, period in plans}),
+    }
+
+
+def _checkout_response(
+    *, plan: RazorpaySubscriptionPlan, subscription_id: str, key_id: str
+) -> dict[str, object]:
+    return {
+        "subscriptionId": subscription_id,
+        "keyId": key_id,
+        "amountMinor": plan.amount_minor,
+        "currency": plan.currency,
+        "planKey": plan.key,
+        "billingPeriod": plan.period,
+        "name": "HogsKin",
+        "description": f"{plan.key.title()} research plan ({plan.period})",
+    }
+
+
+@router.post("/checkout", status_code=status.HTTP_201_CREATED)
+async def create_subscription_checkout(
+    payload: SubscriptionCheckoutRequest,
+    caller: CallerDep,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> dict[str, object]:
+    """Create one owner-bound Razorpay subscription; uncertain calls are not replayed."""
+    settings = get_settings()
+    if not razorpay_subscriptions_available(settings):
+        raise HTTPException(503, "Paid subscriptions are not available")
+    if (
+        not idempotency_key
+        or not 8 <= len(idempotency_key) <= 200
+        or any(ord(char) < 32 for char in idempotency_key)
+    ):
+        raise HTTPException(400, "A valid Idempotency-Key is required")
+    plan_key = payload.plan_key
+    billing_period = payload.billing_period
+    plan = subscription_plans(settings).get((plan_key, billing_period))
+    if plan is None:
+        raise HTTPException(422, "The selected plan is unavailable")
+    request_hash = hashlib.sha256(idempotency_key.encode()).hexdigest()
+    now = datetime.now(UTC)
+    attempt_id: uuid.UUID
+    async with tenant_session(str(caller.tenant_id)) as session:
+        await session.execute(
+            text("SELECT set_config('app.user_id', :id, true)"),
+            {"id": str(caller.user_id)},
+        )
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:owner, 0))"),
+            {"owner": f"razorpay-subscription:{caller.tenant_id}:{caller.user_id}"},
+        )
+        prior = await session.scalar(
+            select(RazorpaySubscriptionCheckoutAttempt).where(
+                RazorpaySubscriptionCheckoutAttempt.tenant_id == caller.tenant_id,
+                RazorpaySubscriptionCheckoutAttempt.user_id == caller.user_id,
+                RazorpaySubscriptionCheckoutAttempt.request_key_hash == request_hash,
+            )
+        )
+        if prior is not None:
+            if prior.plan_key != plan_key or prior.billing_period != billing_period:
+                raise HTTPException(
+                    409, "Idempotency key was already used for different plan terms"
+                )
+            if prior.state == "created" and prior.subscription_id:
+                return _checkout_response(
+                    plan=plan,
+                    subscription_id=prior.subscription_id,
+                    key_id=configured_key_id(settings),
+                )
+            raise HTTPException(
+                503,
+                "Subscription creation is uncertain. Do not retry with a new key; contact support.",
+            )
+        open_attempt = await session.scalar(
+            select(RazorpaySubscriptionCheckoutAttempt.id)
+            .where(
+                RazorpaySubscriptionCheckoutAttempt.tenant_id == caller.tenant_id,
+                RazorpaySubscriptionCheckoutAttempt.user_id == caller.user_id,
+                RazorpaySubscriptionCheckoutAttempt.state.in_(("creating", "created", "uncertain")),
+            )
+            .limit(1)
+        )
+        if open_attempt is not None:
+            raise HTTPException(
+                409, "Finish the existing subscription checkout before starting another"
+            )
+        existing = await session.scalar(
+            select(RazorpaySubscription.subscription_id)
+            .where(
+                RazorpaySubscription.tenant_id == caller.tenant_id,
+                RazorpaySubscription.user_id == caller.user_id,
+                RazorpaySubscription.status.in_(
+                    ("created", "authenticated", "active", "pending", "halted", "paused")
+                ),
+            )
+            .limit(1)
+        )
+        if existing is not None:
+            raise HTTPException(
+                409, "An existing subscription must be managed before changing plans"
+            )
+        account_id = await session.scalar(
+            select(BillingAccount.id).where(
+                BillingAccount.tenant_id == caller.tenant_id,
+                BillingAccount.user_id == caller.user_id,
+            )
+        )
+        if account_id is not None:
+            paid_period = await session.scalar(
+                select(BillingPeriod.id)
+                .where(
+                    BillingPeriod.tenant_id == caller.tenant_id,
+                    BillingPeriod.billing_account_id == account_id,
+                    BillingPeriod.plan_key.in_(("scholar", "investigator")),
+                    BillingPeriod.state == "active",
+                    BillingPeriod.starts_at <= now,
+                    BillingPeriod.ends_at > now,
+                )
+                .limit(1)
+            )
+            if paid_period is not None:
+                raise HTTPException(
+                    409, "Your current paid period must end before starting another subscription"
+                )
+        attempt = RazorpaySubscriptionCheckoutAttempt(
+            tenant_id=caller.tenant_id,
+            user_id=caller.user_id,
+            request_key_hash=request_hash,
+            provider_idempotency_key=f"hogskin-subscription-{uuid.uuid4()}",
+            plan_key=plan_key,
+            billing_period=billing_period,
+            state="creating",
+            expires_at=now + timedelta(minutes=15),
+        )
+        session.add(attempt)
+        await session.flush()
+        attempt_id = attempt.id
+
+    try:
+        provider_plan = await fetch_razorpay_plan(settings, plan.provider_plan_id)
+        item = provider_plan.get("item")
+        if (
+            provider_plan.get("id") != plan.provider_plan_id
+            or provider_plan.get("period") != plan.period
+            or provider_plan.get("interval") != 1
+            or not isinstance(item, dict)
+            or item.get("amount") != plan.amount_minor
+            or item.get("currency") != plan.currency
+        ):
+            raise RazorpayUnavailable("Configured Razorpay plan terms do not match the application")
+    except RazorpayUnavailable as exc:
+        async with tenant_session(str(caller.tenant_id)) as session:
+            await session.execute(
+                text("SELECT set_config('app.user_id', :id, true)"), {"id": str(caller.user_id)}
+            )
+            await session.execute(
+                update(RazorpaySubscriptionCheckoutAttempt)
+                .where(RazorpaySubscriptionCheckoutAttempt.id == attempt_id)
+                .values(state="failed")
+            )
+        raise HTTPException(503, "The configured Razorpay plan could not be verified") from exc
+
+    try:
+        provider_subscription = await create_razorpay_subscription(
+            settings,
+            plan_id=plan.provider_plan_id,
+            total_count=120 if billing_period == "monthly" else 10,
+            notes={"checkout_attempt": str(attempt_id)},
+        )
+    except (RazorpayUnavailable, ValueError) as exc:
+        async with tenant_session(str(caller.tenant_id)) as session:
+            await session.execute(
+                text("SELECT set_config('app.user_id', :id, true)"), {"id": str(caller.user_id)}
+            )
+            await session.execute(
+                update(RazorpaySubscriptionCheckoutAttempt)
+                .where(RazorpaySubscriptionCheckoutAttempt.id == attempt_id)
+                .values(state="uncertain")
+            )
+        raise HTTPException(
+            503, "Razorpay subscription status is uncertain; contact support before retrying"
+        ) from exc
+
+    subscription_id = str(provider_subscription["id"])
+    async with tenant_session(str(caller.tenant_id)) as session:
+        await session.execute(
+            text("SELECT set_config('app.user_id', :id, true)"), {"id": str(caller.user_id)}
+        )
+        session.add(
+            RazorpaySubscription(
+                subscription_id=subscription_id,
+                tenant_id=caller.tenant_id,
+                user_id=caller.user_id,
+                plan_key=plan_key,
+                billing_period=billing_period,
+                catalog_version=BILLING_CATALOG.version,
+                provider_plan_id=plan.provider_plan_id,
+                status=str(provider_subscription["status"]),
+            )
+        )
+        await session.execute(
+            update(RazorpaySubscriptionCheckoutAttempt)
+            .where(RazorpaySubscriptionCheckoutAttempt.id == attempt_id)
+            .values(state="created", subscription_id=subscription_id)
+        )
+    return _checkout_response(
+        plan=plan, subscription_id=subscription_id, key_id=configured_key_id(settings)
+    )
+
+
+@router.post("/verify-subscription")
+async def verify_subscription_checkout(
+    payload: RazorpaySubscriptionVerification, caller: CallerDep
+) -> dict[str, str]:
+    """Verify Checkout callback identity; entitlements wait for captured-charge webhook."""
+    settings = get_settings()
+    if not razorpay_subscriptions_available(settings):
+        raise HTTPException(503, "Paid subscriptions are not available")
+    async with tenant_session(str(caller.tenant_id)) as session:
+        await session.execute(
+            text("SELECT set_config('app.user_id', :id, true)"), {"id": str(caller.user_id)}
+        )
+        subscription = await session.scalar(
+            select(RazorpaySubscription).where(
+                RazorpaySubscription.subscription_id == payload.razorpay_subscription_id,
+                RazorpaySubscription.tenant_id == caller.tenant_id,
+                RazorpaySubscription.user_id == caller.user_id,
+            )
+        )
+        if subscription is None:
+            raise HTTPException(404, "Subscription checkout was not found")
+        if not subscription_signature_valid(
+            subscription_id=subscription.subscription_id,
+            payment_id=payload.razorpay_payment_id,
+            signature=payload.razorpay_signature,
+            secret=settings.RAZORPAY_KEY_SECRET,
+        ):
+            raise HTTPException(400, "Razorpay payment signature is invalid")
+    try:
+        remote = await fetch_razorpay_subscription(settings, subscription.subscription_id)
+    except RazorpayUnavailable as exc:
+        raise HTTPException(503, "Subscription verification is temporarily unavailable") from exc
+    expected_cycles = 120 if subscription.billing_period == "monthly" else 10
+    if (
+        remote.get("id") != subscription.subscription_id
+        or remote.get("plan_id") != subscription.provider_plan_id
+        or remote.get("total_count") != expected_cycles
+        or remote.get("quantity") != 1
+    ):
+        raise HTTPException(409, "Razorpay subscription terms do not match this checkout")
+    remote_status = remote.get("status")
+    if remote_status not in {
+        "created",
+        "authenticated",
+        "active",
+        "pending",
+        "halted",
+        "paused",
+        "cancelled",
+        "completed",
+        "expired",
+    }:
+        raise HTTPException(503, "Razorpay returned an unsupported subscription status")
+    async with tenant_session(str(caller.tenant_id)) as session:
+        await session.execute(
+            text("SELECT set_config('app.user_id', :id, true)"), {"id": str(caller.user_id)}
+        )
+        await session.execute(
+            update(RazorpaySubscription)
+            .where(RazorpaySubscription.subscription_id == subscription.subscription_id)
+            .values(status=remote_status)
+        )
+        await session.execute(
+            update(RazorpaySubscriptionCheckoutAttempt)
+            .where(
+                RazorpaySubscriptionCheckoutAttempt.subscription_id == subscription.subscription_id
+            )
+            .values(state="completed")
+        )
+    return {"status": "verified", "entitlementStatus": "pending_webhook"}
+
+
+@router.post("/checkout/cancel")
+async def cancel_pending_subscription_checkout(
+    payload: CancelPendingSubscriptionRequest, caller: CallerDep
+) -> dict[str, str]:
+    """Cancel an abandoned pre-activation checkout so the owner may retry safely."""
+    settings = get_settings()
+    if not razorpay_subscriptions_available(settings):
+        raise HTTPException(503, "Paid subscriptions are not available")
+    async with tenant_session(str(caller.tenant_id)) as session:
+        await session.execute(
+            text("SELECT set_config('app.user_id', :id, true)"),
+            {"id": str(caller.user_id)},
+        )
+        subscription = await session.scalar(
+            select(RazorpaySubscription)
+            .where(
+                RazorpaySubscription.subscription_id == payload.subscription_id,
+                RazorpaySubscription.tenant_id == caller.tenant_id,
+                RazorpaySubscription.user_id == caller.user_id,
+            )
+            .with_for_update()
+        )
+        if subscription is None:
+            raise HTTPException(404, "Subscription checkout was not found")
+        if subscription.status not in {"created", "authenticated", "pending"}:
+            raise HTTPException(
+                409, "This subscription cannot be cancelled as an abandoned checkout"
+            )
+    try:
+        result = await cancel_razorpay_subscription(
+            settings,
+            subscription_id=payload.subscription_id,
+            cancel_at_cycle_end=False,
+        )
+    except RazorpayUnavailable as exc:
+        raise HTTPException(
+            503, "Checkout cancellation is uncertain; check status before retrying"
+        ) from exc
+    if result.get("status") not in {"cancelled", "completed", "expired"}:
+        raise HTTPException(503, "Razorpay has not confirmed checkout cancellation")
+    async with tenant_session(str(caller.tenant_id)) as session:
+        await session.execute(
+            text("SELECT set_config('app.user_id', :id, true)"),
+            {"id": str(caller.user_id)},
+        )
+        await session.execute(
+            update(RazorpaySubscription)
+            .where(RazorpaySubscription.subscription_id == payload.subscription_id)
+            .values(status=result["status"])
+        )
+        await session.execute(
+            update(RazorpaySubscriptionCheckoutAttempt)
+            .where(RazorpaySubscriptionCheckoutAttempt.subscription_id == payload.subscription_id)
+            .values(state="failed")
+        )
+    return {"status": result["status"]}
+
+
+@router.get("/subscription")
+async def get_caller_subscription(caller: CallerDep) -> dict[str, object]:
+    async with tenant_session(str(caller.tenant_id)) as session:
+        await session.execute(
+            text("SELECT set_config('app.user_id', :id, true)"), {"id": str(caller.user_id)}
+        )
+        subscription = await session.scalar(
+            select(RazorpaySubscription)
+            .where(
+                RazorpaySubscription.tenant_id == caller.tenant_id,
+                RazorpaySubscription.user_id == caller.user_id,
+            )
+            .order_by(RazorpaySubscription.created_at.desc())
+            .limit(1)
+        )
+        if subscription is None:
+            return {"subscription": None}
+        return {
+            "subscription": {
+                "id": subscription.subscription_id,
+                "planKey": subscription.plan_key,
+                "billingPeriod": subscription.billing_period,
+                "status": subscription.status,
+                "currentPeriodStart": subscription.current_period_start,
+                "currentPeriodEnd": subscription.current_period_end,
+                "cancelAtCycleEnd": subscription.cancel_at_cycle_end,
+            }
+        }
 
 
 @router.get("/credit-packs")
@@ -111,7 +544,7 @@ async def list_credit_packs(caller: CallerDep) -> dict[str, object]:
     packs = configured_razorpay_credit_packs(settings) if enabled else {}
     return {
         "enabled": enabled,
-        "currency": "INR",
+        "currency": next(iter(packs.values())).currency if packs else "INR",
         "packs": [
             {
                 "key": item.key,
@@ -201,9 +634,10 @@ async def _begin_credit_purchase(
 ) -> BillingCreditPurchase:
     """Persist immutable purchase terms before contacting the configured provider."""
     key_hash = hashlib.sha256(request_key.encode("utf-8")).hexdigest()
-    stable_key = "research-billing-v1:razorpay-credit-checkout:" + hashlib.sha256(
-        f"{caller.tenant_id}:{caller.user_id}:{request_key}".encode()
-    ).hexdigest()
+    stable_key = (
+        "research-billing-v1:razorpay-credit-checkout:"
+        + hashlib.sha256(f"{caller.tenant_id}:{caller.user_id}:{request_key}".encode()).hexdigest()
+    )
     async with tenant_session(str(caller.tenant_id)) as session:
         await session.execute(
             text("SELECT set_config('app.user_id', :id, true)"),
@@ -337,7 +771,7 @@ async def create_razorpay_credit_order(
     caller: CallerDep,
     idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=8, max_length=200)],
 ) -> dict[str, str | int]:
-    """Create/reuse a Razorpay order from an immutable, server-owned INR pack."""
+    """Create/reuse a Razorpay order from an immutable server-owned credit pack."""
     settings = get_settings()
     if not razorpay_credit_topups_available(settings):
         raise HTTPException(503, "Research-credit purchases are not available")
@@ -552,16 +986,52 @@ async def verify_razorpay_credit_payment(
     return {"status": "paid"}
 
 
-@router.post("/checkout")
-async def create_checkout_session() -> None:
-    """Subscription checkout has no active provider implementation."""
-    raise HTTPException(status.HTTP_410_GONE, "Monthly plan checkout is unavailable")
-
-
 @router.post("/portal")
-async def create_portal_session() -> None:
-    """Subscription self-service has no active provider implementation."""
-    raise HTTPException(status.HTTP_410_GONE, "Subscription management is unavailable")
+async def cancel_caller_subscription(caller: CallerDep) -> dict[str, object]:
+    """Schedule cancellation at the current paid cycle end; immediate revoke is unsupported."""
+    settings = get_settings()
+    if not razorpay_subscriptions_available(settings):
+        raise HTTPException(503, "Paid subscriptions are not available")
+    async with tenant_session(str(caller.tenant_id)) as session:
+        await session.execute(
+            text("SELECT set_config('app.user_id', :id, true)"), {"id": str(caller.user_id)}
+        )
+        subscription = await session.scalar(
+            select(RazorpaySubscription)
+            .where(
+                RazorpaySubscription.tenant_id == caller.tenant_id,
+                RazorpaySubscription.user_id == caller.user_id,
+                RazorpaySubscription.status.in_(
+                    ("authenticated", "active", "pending", "halted", "paused")
+                ),
+            )
+            .order_by(RazorpaySubscription.created_at.desc())
+            .limit(1)
+        )
+        if subscription is None:
+            raise HTTPException(404, "An active subscription was not found")
+        subscription_id = subscription.subscription_id
+    try:
+        result = await cancel_razorpay_subscription(
+            settings, subscription_id=subscription_id, cancel_at_cycle_end=True
+        )
+    except RazorpayUnavailable as exc:
+        raise HTTPException(
+            503, "Cancellation status is uncertain; check subscription status before retrying"
+        ) from exc
+    async with tenant_session(str(caller.tenant_id)) as session:
+        await session.execute(
+            text("SELECT set_config('app.user_id', :id, true)"), {"id": str(caller.user_id)}
+        )
+        await session.execute(
+            update(RazorpaySubscription)
+            .where(RazorpaySubscription.subscription_id == subscription_id)
+            .values(
+                status=result.get("status", "active"),
+                cancel_at_cycle_end=bool(result.get("cancel_at_cycle_end", True)),
+            )
+        )
+    return {"status": result.get("status", "active"), "cancelAtCycleEnd": True}
 
 
 async def read_caller_entitlement(caller: Caller) -> BillingEntitlement:
@@ -677,6 +1147,173 @@ async def create_billing_adjustment(
 
 
 MAX_RAZORPAY_EVENT_BYTES = 1_000_000
+_SUBSCRIPTION_EVENTS = {
+    "subscription.authenticated": "authenticated",
+    "subscription.activated": "active",
+    "subscription.charged": "active",
+    "subscription.pending": "pending",
+    "subscription.halted": "halted",
+    "subscription.cancelled": "cancelled",
+    "subscription.paused": "paused",
+    "subscription.resumed": "active",
+    "subscription.completed": "completed",
+}
+
+
+def _provider_timestamp(value: object) -> datetime | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        return datetime.fromtimestamp(value, tz=UTC)
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def _add_calendar_months(value: datetime, months: int) -> datetime:
+    month_index = value.month - 1 + months
+    year = value.year + month_index // 12
+    month = month_index % 12 + 1
+    day = min(value.day, calendar.monthrange(year, month)[1])
+    return value.replace(year=year, month=month, day=day)
+
+
+def _monthly_period_bounds(
+    billing_period: str, cycle_start: datetime, cycle_end: datetime
+) -> list[tuple[datetime, datetime]] | None:
+    if cycle_start.tzinfo is None or cycle_end.tzinfo is None or cycle_start >= cycle_end:
+        return None
+    if billing_period == "monthly":
+        return [(cycle_start, cycle_end)]
+    if billing_period != "yearly" or _add_calendar_months(cycle_start, 12) != cycle_end:
+        return None
+    periods = []
+    for month in range(12):
+        start = _add_calendar_months(cycle_start, month)
+        end = cycle_end if month == 11 else _add_calendar_months(cycle_start, month + 1)
+        periods.append((start, end))
+    return periods
+
+
+async def _grant_subscription_cycle(
+    session: Any,
+    *,
+    subscription: RazorpaySubscription,
+    payment: dict[str, Any],
+    cycle_start: datetime,
+    cycle_end: datetime,
+) -> str:
+    """Grant current/future monthly periods from a captured billing cycle, once."""
+    if subscription.plan_key not in ("scholar", "investigator"):
+        return "reconciliation_required"
+    plan_key = cast(Literal["scholar", "investigator"], subscription.plan_key)
+    terms = BILLING_CATALOG.plans[plan_key]
+    expected_price = (
+        terms.monthly_price
+        if subscription.billing_period == "monthly"
+        else terms.annual_price
+    )
+    expected_minor = int(expected_price * 100) if expected_price is not None else -1
+    if (
+        payment.get("status") != "captured"
+        or payment.get("subscription_id") not in (None, subscription.subscription_id)
+        or isinstance(payment.get("amount"), bool)
+        or payment.get("amount") != expected_minor
+        or payment.get("currency") != "INR"
+        or cycle_start.tzinfo is None
+        or cycle_end.tzinfo is None
+        or cycle_start >= cycle_end
+    ):
+        return "reconciliation_required"
+
+    await session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"),
+        {"lock_key": f"billing-account-v1:{subscription.tenant_id}:{subscription.user_id}"},
+    )
+    account_id = await session.scalar(
+        select(BillingAccount.id).where(
+            BillingAccount.tenant_id == subscription.tenant_id,
+            BillingAccount.user_id == subscription.user_id,
+        )
+    )
+    if account_id is None:
+        return "reconciliation_required"
+
+    existing_payment = await session.scalar(
+        select(RazorpaySubscriptionPayment).where(
+            RazorpaySubscriptionPayment.payment_id == payment["id"]
+        )
+    )
+    if existing_payment is not None:
+        return str(existing_payment.status)
+
+    starts = _monthly_period_bounds(subscription.billing_period, cycle_start, cycle_end)
+    if starts is None:
+        return "reconciliation_required"
+
+    # A renewal can overlap a still-active row only at its exact boundary. End
+    # any prior monthly grant at the new provider-confirmed cycle boundary.
+    overlap_rows = (
+        await session.scalars(
+            select(BillingPeriod)
+            .where(
+                BillingPeriod.tenant_id == subscription.tenant_id,
+                BillingPeriod.billing_account_id == account_id,
+                BillingPeriod.state == "active",
+                BillingPeriod.starts_at < cycle_end,
+                BillingPeriod.ends_at > cycle_start,
+            )
+            .with_for_update()
+        )
+    ).all()
+    await session.execute(
+        text(
+            "SELECT set_config('app.tenant_id', :tenant, true), "
+            "set_config('app.user_id', :user, true)"
+        ),
+        {"tenant": str(subscription.tenant_id), "user": str(subscription.user_id)},
+    )
+    for row in overlap_rows:
+        if row.plan_key != "free" and (
+            row.plan_key != subscription.plan_key or row.starts_at >= cycle_start
+        ):
+            return "reconciliation_required"
+        if cycle_start <= datetime.now(UTC):
+            await transition_period_state(
+                session,
+                tenant_id=subscription.tenant_id,
+                user_id=subscription.user_id,
+                period=row,
+                next_state="ended",
+                effective_at=cycle_start,
+            )
+
+    for start, end in starts:
+        state = (
+            "ended"
+            if end <= datetime.now(UTC)
+            else ("active" if start <= datetime.now(UTC) < end else "pending")
+        )
+        period_row = BillingPeriod(
+            tenant_id=subscription.tenant_id,
+            billing_account_id=account_id,
+            plan_key=subscription.plan_key,
+            catalog_version=subscription.catalog_version,
+            state=state,
+            allowance_units=terms.monthly_allowance_units,
+            starts_at=start,
+            ends_at=end,
+        )
+        session.add(period_row)
+    session.add(
+        RazorpaySubscriptionPayment(
+            payment_id=payment["id"],
+            subscription_id=subscription.subscription_id,
+            amount_minor=expected_minor,
+            currency="INR",
+            status="processed",
+        )
+    )
+    return "processed"
 
 
 @router.post("/webhooks/razorpay", response_model=None)
@@ -710,22 +1347,34 @@ async def receive_razorpay_webhook(request: Request) -> dict[str, object] | JSON
     event_type = event.get("event")
     payload = event.get("payload")
     payment_container = payload.get("payment") if isinstance(payload, dict) else None
-    entity = payment_container.get("entity") if isinstance(payment_container, dict) else None
+    payment_entity = (
+        payment_container.get("entity") if isinstance(payment_container, dict) else None
+    )
+    subscription_container = payload.get("subscription") if isinstance(payload, dict) else None
+    subscription_entity = (
+        subscription_container.get("entity") if isinstance(subscription_container, dict) else None
+    )
     if not isinstance(event_type, str) or not 1 <= len(event_type) <= 160:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "invalid Razorpay event type")
     if event_type == "payment.captured":
         if (
-            not isinstance(entity, dict)
-            or not isinstance(entity.get("id"), str)
-            or not isinstance(entity.get("order_id"), str)
-            or isinstance(entity.get("amount"), bool)
-            or not isinstance(entity.get("amount"), int)
-            or entity.get("currency") != "INR"
-            or entity.get("status") != "captured"
+            not isinstance(payment_entity, dict)
+            or not isinstance(payment_entity.get("id"), str)
+            or not isinstance(payment_entity.get("order_id"), str)
+            or isinstance(payment_entity.get("amount"), bool)
+            or not isinstance(payment_entity.get("amount"), int)
+            or payment_entity.get("currency") not in SUPPORTED_CURRENCY_CODES
+            or payment_entity.get("status") != "captured"
         ):
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "invalid captured payment event")
+    if event_type in _SUBSCRIPTION_EVENTS and (
+        not isinstance(subscription_entity, dict)
+        or not isinstance(subscription_entity.get("id"), str)
+        or not subscription_entity["id"].startswith("sub_")
+    ):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "invalid Razorpay subscription event")
 
-    payment_id = entity.get("id") if isinstance(entity, dict) else None
+    payment_id = payment_entity.get("id") if isinstance(payment_entity, dict) else None
     reconciliation_required = False
     duplicate = False
     async with system_session() as session:
@@ -736,7 +1385,9 @@ async def receive_razorpay_webhook(request: Request) -> dict[str, object] | JSON
                 event_id=event_id,
                 event_type=event_type,
                 payment_id=payment_id if isinstance(payment_id, str) else None,
-                processing_status="received" if event_type == "payment.captured" else "ignored",
+                processing_status="received"
+                if event_type == "payment.captured" or event_type in _SUBSCRIPTION_EVENTS
+                else "ignored",
             )
             .on_conflict_do_nothing(index_elements=[RazorpayWebhookEvent.event_id])
             .returning(RazorpayWebhookEvent.event_id)
@@ -748,25 +1399,22 @@ async def receive_razorpay_webhook(request: Request) -> dict[str, object] | JSON
             )
             if previous is None or previous.processing_status != "received":
                 return {"received": True, "duplicate": True}
-        if event_type == "payment.captured" and isinstance(entity, dict):
+        if event_type == "payment.captured" and isinstance(payment_entity, dict):
             purchase = await session.scalar(
                 select(BillingCreditPurchase)
                 .where(
                     BillingCreditPurchase.payment_provider == "razorpay",
-                    BillingCreditPurchase.provider_order_id == entity["order_id"],
+                    BillingCreditPurchase.provider_order_id == payment_entity["order_id"],
                 )
                 .with_for_update()
             )
             if purchase is None:
                 processing_status = "ignored"
-            elif (
-                entity["id"] == purchase.provider_payment_id
-                and purchase.state == "paid"
-            ):
+            elif payment_entity["id"] == purchase.provider_payment_id and purchase.state == "paid":
                 processing_status = "processed"
             elif (
-                entity["amount"] != purchase.amount_minor
-                or entity["currency"] != purchase.currency
+                payment_entity["amount"] != purchase.amount_minor
+                or payment_entity["currency"] != purchase.currency
                 or purchase.state != "pending"
                 or purchase.provider_order_state != "created"
                 or purchase.provider_payment_id is not None
@@ -776,7 +1424,7 @@ async def receive_razorpay_webhook(request: Request) -> dict[str, object] | JSON
                 processing_status = "reconciliation_required"
                 reconciliation_required = True
             else:
-                purchase.provider_payment_id = entity["id"]
+                purchase.provider_payment_id = payment_entity["id"]
                 purchase.state = "paid"
                 session.add(
                     BillingCreditEntry(
@@ -790,6 +1438,91 @@ async def receive_razorpay_webhook(request: Request) -> dict[str, object] | JSON
                     )
                 )
                 processing_status = "processed"
+            await session.execute(
+                update(RazorpayWebhookEvent)
+                .where(RazorpayWebhookEvent.event_id == event_id)
+                .values(processing_status=processing_status)
+            )
+        elif event_type in _SUBSCRIPTION_EVENTS and isinstance(subscription_entity, dict):
+            subscription = await session.scalar(
+                select(RazorpaySubscription)
+                .where(RazorpaySubscription.subscription_id == subscription_entity["id"])
+                .with_for_update()
+            )
+            processing_status = "reconciliation_required"
+            if subscription is not None:
+                event_created = _provider_timestamp(event.get("created_at"))
+                provider_plan_id = subscription_entity.get("plan_id")
+                if provider_plan_id != subscription.provider_plan_id:
+                    subscription.status = "reconciliation_required"
+                    reconciliation_required = True
+                elif (
+                    event_created is not None
+                    and subscription.last_event_created is not None
+                    and event_created < subscription.last_event_created
+                ):
+                    processing_status = "ignored"
+                else:
+                    next_status = _SUBSCRIPTION_EVENTS[event_type]
+                    start = _provider_timestamp(subscription_entity.get("current_start"))
+                    end = _provider_timestamp(subscription_entity.get("current_end"))
+                    if start is not None:
+                        subscription.current_period_start = start
+                    if end is not None:
+                        subscription.current_period_end = end
+                    expected_price = None
+                    if subscription.plan_key in {"scholar", "investigator"}:
+                        plan_key = cast(
+                            Literal["scholar", "investigator"],
+                            subscription.plan_key,
+                        )
+                        plan_terms = BILLING_CATALOG.plans[plan_key]
+                        expected_price = (
+                            plan_terms.monthly_price
+                            if subscription.billing_period == "monthly"
+                            else plan_terms.annual_price
+                        )
+                    expected_minor = int(expected_price * 100) if expected_price is not None else -1
+                    confirmed_full_charge = (
+                        isinstance(payment_entity, dict)
+                        and payment_entity.get("status") == "captured"
+                        and payment_entity.get("amount") == expected_minor
+                        and payment_entity.get("currency") == "INR"
+                    )
+                    if event_type == "subscription.charged" or (
+                        event_type == "subscription.activated" and confirmed_full_charge
+                    ):
+                        if (
+                            confirmed_full_charge
+                            and isinstance(payment_entity, dict)
+                            and isinstance(payment_entity.get("id"), str)
+                            and start is not None
+                            and end is not None
+                        ):
+                            processing_status = await _grant_subscription_cycle(
+                                session,
+                                subscription=subscription,
+                                payment=payment_entity,
+                                cycle_start=start,
+                                cycle_end=end,
+                            )
+                        else:
+                            processing_status = "reconciliation_required"
+                        if processing_status == "reconciliation_required":
+                            subscription.status = "reconciliation_required"
+                            reconciliation_required = True
+                        else:
+                            subscription.status = "active"
+                    else:
+                        subscription.status = next_status
+                        if event_type == "subscription.cancelled":
+                            subscription.cancel_at_cycle_end = bool(
+                                subscription_entity.get("cancel_at_cycle_end", False)
+                            )
+                        processing_status = "processed"
+                    if event_created is not None:
+                        subscription.last_event_created = event_created
+                    subscription.last_event_id = event_id
             await session.execute(
                 update(RazorpayWebhookEvent)
                 .where(RazorpayWebhookEvent.event_id == event_id)

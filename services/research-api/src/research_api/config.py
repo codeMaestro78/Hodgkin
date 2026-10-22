@@ -113,10 +113,15 @@ class Settings(BaseSettings):
     BILLING_OPERATOR_TOKENS: SecretStr | None = None
     # Razorpay Standard Checkout is fail-closed until account and commercial gates pass.
     BILLING_RAZORPAY_ENABLED: bool = False
+    BILLING_SUBSCRIPTIONS_ENABLED: bool = False
     RAZORPAY_KEY_ID: str | None = Field(default=None, min_length=1, max_length=128)
     RAZORPAY_KEY_SECRET: SecretStr | None = None
     RAZORPAY_WEBHOOK_SECRET: SecretStr | None = None
     RAZORPAY_LIVEMODE: bool = False
+    RAZORPAY_PLAN_SCHOLAR_MONTHLY: str | None = Field(default=None, max_length=128)
+    RAZORPAY_PLAN_INVESTIGATOR_MONTHLY: str | None = Field(default=None, max_length=128)
+    RAZORPAY_PLAN_SCHOLAR_YEARLY: str | None = Field(default=None, max_length=128)
+    RAZORPAY_PLAN_INVESTIGATOR_YEARLY: str | None = Field(default=None, max_length=128)
     RAZORPAY_CREDIT_PACKS_JSON: str = Field(default="[]", max_length=20_000)
     # Separate operator approval required before any live payment provider is enabled.
     BILLING_LIVE_LAUNCH_APPROVED: bool = False

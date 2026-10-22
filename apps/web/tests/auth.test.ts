@@ -409,6 +409,48 @@ describe("research BFF identity", () => {
       (fetch.mock.calls[0]![1].headers as Headers).has("x-research-account-id"),
     ).toBe(false);
   });
+  it("forwards safe checkout rate-limit headers from the research API", async () => {
+    auth.getUser.mockResolvedValue({
+      data: { user: { id: "verified", email_confirmed_at: "2026-01-01" } },
+      error: null,
+    });
+    auth.getSession.mockResolvedValue({
+      data: {
+        session: { user: { id: "verified" }, access_token: "fixture-access" },
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ detail: "Too many requests. Please retry shortly." }), {
+          status: 429,
+          headers: {
+            "content-type": "application/json",
+            "retry-after": "30",
+            "ratelimit-limit": "5",
+            "ratelimit-remaining": "0",
+            "ratelimit-reset": "30",
+          },
+        }),
+      ),
+    );
+    const response = await forwardResearch(
+      new NextRequest("http://localhost:3000/api/billing/credit-checkout", {
+        method: "POST",
+        headers: { origin: "http://localhost:3000", "content-type": "application/json" },
+        body: JSON.stringify({ packageKey: "starter" }),
+      }),
+      "/billing/credit-checkout",
+      "POST",
+    );
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("retry-after")).toBe("30");
+    expect(response.headers.get("ratelimit-limit")).toBe("5");
+    expect(await response.json()).toEqual({
+      detail: "Too many requests. Please retry shortly.",
+    });
+  });
   it("treats an aborted browser request as disconnect rather than upstream failure", async () => {
     auth.getUser.mockResolvedValue({
       data: { user: { id: "verified", email_confirmed_at: "2026-01-01" } },

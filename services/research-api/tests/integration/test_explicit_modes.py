@@ -406,7 +406,10 @@ async def test_repository_resolves_absent_explicit_budget(identity):
             max_provider_operations=7,
         ),
         replace(mode_policy.resolve_mode_budget("focused"), max_search_calls=5),
-        replace(mode_policy.resolve_mode_budget("focused"), max_wall_clock_ms=180_001),
+        replace(
+            mode_policy.resolve_mode_budget("focused"),
+            max_wall_clock_ms=mode_policy.resolve_mode_budget("focused").max_wall_clock_ms + 1,
+        ),
     ],
 )
 async def test_repository_rejects_incomplete_or_over_policy_snapshot(identity, invalid):

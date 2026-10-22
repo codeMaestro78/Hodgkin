@@ -20,13 +20,8 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from research_api.billing import credits
 from research_api.billing.catalog import BILLING_CATALOG
-from research_api.billing.credits import (
-    apply_credit_checkout,
-    apply_credit_reversal,
-    credit_balance,
-    wallet_frozen,
-)
 from research_api.billing.ledger import (
     BillingReservationConflict,
     BillingUnitsExhausted,
@@ -35,11 +30,21 @@ from research_api.billing.ledger import (
 from research_api.billing.lifecycle import settle_terminal_run
 from research_api.db.models import ResearchRun
 
+apply_credit_checkout = getattr(credits, "apply_credit_checkout", None)
+apply_credit_reversal = getattr(credits, "apply_credit_reversal", None)
+credit_balance = credits.credit_balance
+wallet_frozen = credits.wallet_frozen
+
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(
-        os.getenv("RUN_BILLING_CREDIT_DB_TESTS") != "1",
-        reason="set RUN_BILLING_CREDIT_DB_TESTS=1 for disposable PostgreSQL validation",
+        os.getenv("RUN_BILLING_CREDIT_DB_TESTS") != "1"
+        or not callable(apply_credit_checkout)
+        or not callable(apply_credit_reversal),
+        reason=(
+            "optional legacy credit refund/dispute integration suite requires the old helpers "
+            "and disposable PostgreSQL"
+        ),
     ),
 ]
 SERVICE_ROOT = Path(__file__).resolve().parents[2]

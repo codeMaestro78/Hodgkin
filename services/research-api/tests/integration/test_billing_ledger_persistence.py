@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import create_engine, func, select, text
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -365,7 +365,9 @@ async def test_billing_ledger_serializes_last_unit_and_replays_terminal_work() -
                 ends_at=now + timedelta(days=29),
             )
             await session.flush()
-            projection = await read_entitlement(session, tenant_id=tenant, user_id=users[2], now=now)
+            projection = await read_entitlement(
+                session, tenant_id=tenant, user_id=users[2], now=now
+            )
             assert projection.plan_key == "scholar"
             assert projection.period_start == paid_period.starts_at
             assert projection.period_end == paid_period.ends_at

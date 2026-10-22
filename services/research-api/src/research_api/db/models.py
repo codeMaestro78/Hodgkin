@@ -428,9 +428,7 @@ class BillingCreditPurchase(Base, TenantScopedMixin):
     provider_order_id: Mapped[str | None] = mapped_column(String(255))
     provider_payment_id: Mapped[str | None] = mapped_column(String(255))
     # Legacy database column retained for already-written provider history.
-    legacy_provider_price_id: Mapped[str | None] = mapped_column(
-        "stripe_price_id", String(255)
-    )
+    legacy_provider_price_id: Mapped[str | None] = mapped_column("stripe_price_id", String(255))
     request_key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     # Existing schema column is kept mapped until a separate archival migration.
     provider_idempotency_key: Mapped[str] = mapped_column(
@@ -541,7 +539,7 @@ class BillingShadowObservation(Base):
             "(decision_status = 'provisional' "
             "AND policy_version = 'approved-mode-weights-1-2-4-v1' "
             "AND catalog_version IN ('research-units-v1-2026-10-19', "
-            "'research-units-v2-2026-10-19') AND "
+            "'research-units-v2-2026-10-19', 'research-units-v3-2026-10-22') AND "
             "((mode = 'focused' AND proposed_units = 1) OR "
             "(mode = 'balanced' AND proposed_units = 2) OR "
             "(mode = 'deep' AND proposed_units = 4))) OR "
@@ -603,6 +601,107 @@ class RazorpayWebhookEvent(Base):
     event_type: Mapped[str] = mapped_column(String(160), nullable=False)
     payment_id: Mapped[str | None] = mapped_column(String(255))
     processing_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class RazorpaySubscription(Base):
+    """Minimal server-owned projection of a Razorpay recurring subscription."""
+
+    __tablename__ = "razorpay_subscriptions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "user_id"],
+            ["users.tenant_id", "users.id"],
+            name="fk_razorpay_subscription_owner",
+        ),
+        CheckConstraint("plan_key IN ('scholar','investigator')"),
+        CheckConstraint("billing_period IN ('monthly','yearly')"),
+        CheckConstraint(
+            "status IN ('created','authenticated','active','pending','halted','paused',"
+            "'cancelled','completed','expired','reconciliation_required')"
+        ),
+        CheckConstraint(
+            "current_period_start IS NULL OR current_period_end IS NULL OR "
+            "current_period_start < current_period_end"
+        ),
+        Index("ix_razorpay_subscriptions_owner", "tenant_id", "user_id"),
+    )
+
+    subscription_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    plan_key: Mapped[str] = mapped_column(String(24), nullable=False)
+    billing_period: Mapped[str] = mapped_column(String(16), nullable=False)
+    catalog_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    provider_plan_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    current_period_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancel_at_cycle_end: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    last_event_created: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_event_id: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class RazorpaySubscriptionCheckoutAttempt(Base):
+    """Owner-scoped idempotency record; uncertain provider calls are never replayed."""
+
+    __tablename__ = "razorpay_subscription_checkout_attempts"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "user_id"],
+            ["users.tenant_id", "users.id"],
+            name="fk_razorpay_subscription_checkout_owner",
+        ),
+        CheckConstraint("plan_key IN ('scholar','investigator')"),
+        CheckConstraint("billing_period IN ('monthly','yearly')"),
+        CheckConstraint("state IN ('creating','created','uncertain','completed','failed')"),
+        UniqueConstraint(
+            "tenant_id", "user_id", "request_key_hash", name="uq_razorpay_subscription_request"
+        ),
+        UniqueConstraint("subscription_id", name="uq_razorpay_subscription_attempt_provider_id"),
+        Index(
+            "uq_razorpay_subscription_one_open_per_owner",
+            "tenant_id",
+            "user_id",
+            unique=True,
+            postgresql_where=text("state IN ('creating','created','uncertain')"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    request_key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    provider_idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    subscription_id: Mapped[str | None] = mapped_column(String(255))
+    plan_key: Mapped[str] = mapped_column(String(24), nullable=False)
+    billing_period: Mapped[str] = mapped_column(String(16), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class RazorpaySubscriptionPayment(Base):
+    """Unique charge receipt prevents multiple webhook events granting one cycle twice."""
+
+    __tablename__ = "razorpay_subscription_payments"
+    __table_args__ = (
+        ForeignKeyConstraint(["subscription_id"], ["razorpay_subscriptions.subscription_id"]),
+        CheckConstraint("amount_minor > 0 AND currency ~ '^[A-Z]{3}$'"),
+        CheckConstraint("status IN ('processed','reconciliation_required')"),
+    )
+
+    payment_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    subscription_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    amount_minor: Mapped[int] = mapped_column(Integer, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
     received_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

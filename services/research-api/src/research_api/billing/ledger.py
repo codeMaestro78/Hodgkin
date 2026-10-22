@@ -300,9 +300,50 @@ async def ensure_default_free_period(
         current = current_periods[0]
         _approved_plan(approved_catalogs, current.catalog_version, current.plan_key)
         if current.plan_key == "free" or current.catalog_version not in APPROVED_CATALOGS:
+            if current.plan_key == "free":
+                due_paid_periods = (
+                    await session.scalars(
+                        select(BillingPeriod)
+                        .where(
+                            BillingPeriod.tenant_id == tenant_id,
+                            BillingPeriod.billing_account_id == account.id,
+                            BillingPeriod.state == "pending",
+                            BillingPeriod.plan_key.in_(("scholar", "investigator")),
+                            BillingPeriod.starts_at <= instant,
+                            BillingPeriod.ends_at > instant,
+                        )
+                        .limit(2)
+                    )
+                ).all()
+                if len(due_paid_periods) > 1:
+                    raise BillingConfigurationUnavailable("multiple scheduled paid periods")
+                if due_paid_periods:
+                    await transition_period_state(
+                        session,
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        period=current,
+                        next_state="ended",
+                        effective_at=instant,
+                    )
+                    scheduled_period = due_paid_periods[0]
+                    _approved_plan(
+                        approved_catalogs,
+                        scheduled_period.catalog_version,
+                        scheduled_period.plan_key,
+                    )
+                    await transition_period_state(
+                        session,
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        period=scheduled_period,
+                        next_state="active",
+                        effective_at=instant,
+                    )
+                    return scheduled_period
             return current
-        # Paid periods are immutable grants. With subscription checkout removed,
-        # honor an already-recorded period through its end; renewal is not implied.
+        # Preserve the current paid grant until its recorded end; renewal is granted
+        # only after a provider-confirmed subscription charge.
         return current
 
     expired_periods = (
@@ -324,6 +365,37 @@ async def ensure_default_free_period(
             next_state="ended",
             effective_at=instant,
         )
+
+    scheduled = (
+        await session.scalars(
+            select(BillingPeriod)
+            .where(
+                BillingPeriod.tenant_id == tenant_id,
+                BillingPeriod.billing_account_id == account.id,
+                BillingPeriod.state == "pending",
+                BillingPeriod.starts_at <= instant,
+                BillingPeriod.ends_at > instant,
+                BillingPeriod.plan_key.in_(("scholar", "investigator")),
+            )
+            .limit(2)
+        )
+    ).all()
+    if len(scheduled) > 1:
+        raise BillingConfigurationUnavailable("multiple scheduled paid periods")
+    if scheduled:
+        scheduled_period = scheduled[0]
+        _approved_plan(
+            approved_catalogs, scheduled_period.catalog_version, scheduled_period.plan_key
+        )
+        await transition_period_state(
+            session,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            period=scheduled_period,
+            next_state="active",
+            effective_at=instant,
+        )
+        return scheduled_period
 
     catalog, _ = _approved_plan(approved_catalogs, BILLING_CATALOG.version, "free")
     starts = datetime(instant.year, instant.month, 1, tzinfo=UTC)

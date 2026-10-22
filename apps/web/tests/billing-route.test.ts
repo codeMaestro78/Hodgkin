@@ -9,6 +9,9 @@ import { POST as portal } from "../app/api/billing/portal/route";
 import { GET as availability } from "../app/api/billing/checkout-availability/route";
 import { GET as creditPacks } from "../app/api/billing/credit-packs/route";
 import { POST as creditCheckout } from "../app/api/billing/credit-checkout/route";
+import { POST as verifySubscription } from "../app/api/billing/verify-subscription/route";
+import { GET as subscription } from "../app/api/billing/subscription/route";
+import { POST as cancelCheckout } from "../app/api/billing/checkout/cancel/route";
 
 beforeEach(() => {
   proxy.mockReset();
@@ -88,6 +91,34 @@ it("forwards Checkout, Portal, and purchase availability through the authenticat
   expect(proxy).toHaveBeenLastCalledWith(
     creditCheckoutRequest,
     "/billing/credit-checkout",
+    "POST",
+  );
+});
+
+it("forwards subscription verification, status, and abandoned-checkout cancellation via BFF", async () => {
+  const verificationRequest = new NextRequest(
+    "http://localhost/api/billing/verify-subscription",
+    { method: "POST", body: JSON.stringify({ razorpay_subscription_id: "sub_fixture123" }) },
+  );
+  await verifySubscription(verificationRequest);
+  expect(proxy).toHaveBeenLastCalledWith(
+    verificationRequest,
+    "/billing/verify-subscription",
+    "POST",
+  );
+
+  const subscriptionRequest = new NextRequest("http://localhost/api/billing/subscription");
+  await subscription(subscriptionRequest);
+  expect(proxy).toHaveBeenLastCalledWith(subscriptionRequest, "/billing/subscription");
+
+  const cancelRequest = new NextRequest("http://localhost/api/billing/checkout/cancel", {
+    method: "POST",
+    body: JSON.stringify({ subscriptionId: "sub_fixture123" }),
+  });
+  await cancelCheckout(cancelRequest);
+  expect(proxy).toHaveBeenLastCalledWith(
+    cancelRequest,
+    "/billing/checkout/cancel",
     "POST",
   );
 });

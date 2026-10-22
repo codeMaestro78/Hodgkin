@@ -46,7 +46,7 @@ async (page) => {
     if (path === "/api/billing/credit-packs")
       return reply({
         enabled: true,
-        currency: "USD",
+        currency: "INR",
         packs: [{ key: "small", amountMinor: 199, units: 5, expiryDays: null }],
       });
     if (path === "/api/billing/credit-balance")

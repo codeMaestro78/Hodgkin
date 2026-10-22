@@ -1,4 +1,4 @@
-"""Versioned research-unit catalogs; v2 is the proposed lower-price catalog."""
+"""Versioned research-unit catalogs with historical currency and price terms."""
 
 from __future__ import annotations
 
@@ -19,8 +19,9 @@ class PlanTerms:
     key: PlanKey
     monthly_allowance_units: int
     allowed_modes: tuple[ResearchMode, ...]
-    monthly_price_usd: Decimal
-    annual_price_usd: Decimal | None
+    currency: Literal["USD", "INR"]
+    monthly_price: Decimal
+    annual_price: Decimal | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,28 +52,31 @@ LEGACY_BILLING_CATALOG = BillingCatalog(
                 key="free",
                 monthly_allowance_units=5,
                 allowed_modes=("focused",),
-                monthly_price_usd=Decimal("0"),
-                annual_price_usd=None,
+                currency="USD",
+                monthly_price=Decimal("0"),
+                annual_price=None,
             ),
             "scholar": PlanTerms(
                 key="scholar",
                 monthly_allowance_units=40,
                 allowed_modes=("focused", "balanced", "deep"),
-                monthly_price_usd=Decimal("14"),
-                annual_price_usd=Decimal("132"),
+                currency="USD",
+                monthly_price=Decimal("14"),
+                annual_price=Decimal("132"),
             ),
             "investigator": PlanTerms(
                 key="investigator",
                 monthly_allowance_units=120,
                 allowed_modes=("focused", "balanced", "deep"),
-                monthly_price_usd=Decimal("36"),
-                annual_price_usd=Decimal("348"),
+                currency="USD",
+                monthly_price=Decimal("36"),
+                annual_price=Decimal("348"),
             ),
         }
     ),
 )
 
-BILLING_CATALOG = BillingCatalog(
+USD_BILLING_CATALOG = BillingCatalog(
     version="research-units-v2-2026-10-19",
     status="active",
     mode_unit_prices=MODE_UNIT_PRICES,
@@ -82,22 +86,59 @@ BILLING_CATALOG = BillingCatalog(
                 key="free",
                 monthly_allowance_units=5,
                 allowed_modes=("focused",),
-                monthly_price_usd=Decimal("0"),
-                annual_price_usd=None,
+                currency="USD",
+                monthly_price=Decimal("0"),
+                annual_price=None,
             ),
             "scholar": PlanTerms(
                 key="scholar",
                 monthly_allowance_units=20,
                 allowed_modes=("focused", "balanced"),
-                monthly_price_usd=Decimal("5.99"),
-                annual_price_usd=Decimal("59.99"),
+                currency="USD",
+                monthly_price=Decimal("5.99"),
+                annual_price=Decimal("59.99"),
             ),
             "investigator": PlanTerms(
                 key="investigator",
                 monthly_allowance_units=40,
                 allowed_modes=("focused", "balanced", "deep"),
-                monthly_price_usd=Decimal("12.99"),
-                annual_price_usd=Decimal("129.99"),
+                currency="USD",
+                monthly_price=Decimal("12.99"),
+                annual_price=Decimal("129.99"),
+            ),
+        }
+    ),
+)
+
+BILLING_CATALOG = BillingCatalog(
+    version="research-units-v3-2026-10-22",
+    status="active",
+    mode_unit_prices=MODE_UNIT_PRICES,
+    plans=MappingProxyType(
+        {
+            "free": PlanTerms(
+                key="free",
+                monthly_allowance_units=5,
+                allowed_modes=("focused",),
+                currency="INR",
+                monthly_price=Decimal("0"),
+                annual_price=None,
+            ),
+            "scholar": PlanTerms(
+                key="scholar",
+                monthly_allowance_units=20,
+                allowed_modes=("focused", "balanced"),
+                currency="INR",
+                monthly_price=Decimal("599"),
+                annual_price=Decimal("5999"),
+            ),
+            "investigator": PlanTerms(
+                key="investigator",
+                monthly_allowance_units=40,
+                allowed_modes=("focused", "balanced", "deep"),
+                currency="INR",
+                monthly_price=Decimal("1299"),
+                annual_price=Decimal("12999"),
             ),
         }
     ),
@@ -106,6 +147,7 @@ BILLING_CATALOG = BillingCatalog(
 APPROVED_CATALOGS: Mapping[str, BillingCatalog] = MappingProxyType(
     {
         LEGACY_BILLING_CATALOG.version: LEGACY_BILLING_CATALOG,
+        USD_BILLING_CATALOG.version: USD_BILLING_CATALOG,
         BILLING_CATALOG.version: BILLING_CATALOG,
     }
 )

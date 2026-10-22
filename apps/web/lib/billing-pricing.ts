@@ -1,7 +1,7 @@
 export type PaidPlanKey = "scholar" | "investigator";
 
 export type CheckoutAvailability =
-  | { status: "available"; plans: PaidPlanKey[] }
+  | { status: "available"; plans: PaidPlanKey[]; billingPeriods: ("monthly" | "yearly")[] }
   | { status: "disabled" | "error"; plans: [] };
 
 const PAID_PLAN_KEYS = new Set<PaidPlanKey>(["scholar", "investigator"]);
@@ -14,7 +14,7 @@ export function parseCheckoutAvailability(
     return { status: "error", plans: [] };
   }
 
-  const value = payload as { enabled?: unknown; plans?: unknown };
+  const value = payload as { enabled?: unknown; plans?: unknown; billingPeriods?: unknown };
   if (typeof value.enabled !== "boolean" || !Array.isArray(value.plans)) {
     return { status: "error", plans: [] };
   }
@@ -24,14 +24,48 @@ export function parseCheckoutAvailability(
     (plan): plan is PaidPlanKey =>
       typeof plan === "string" && PAID_PLAN_KEYS.has(plan as PaidPlanKey),
   );
-  return plans.length
-    ? { status: "available", plans }
+  const periods = Array.isArray(value.billingPeriods)
+    ? [...new Set(value.billingPeriods)].filter(
+        (period): period is "monthly" | "yearly" => period === "monthly" || period === "yearly",
+      )
+    : ["monthly" as const];
+  return plans.length && periods.length
+    ? { status: "available", plans, billingPeriods: periods }
     : { status: "disabled", plans: [] };
 }
 
-export function checkoutFailureMessage(status: number, detail: unknown): string {
+export function checkoutFailureMessage(
+  status: number,
+  detail: unknown,
+  retryAfterSeconds?: string | null,
+): string {
+  const safeDetails = new Set([
+    "Too many requests. Please retry shortly.",
+    "Daily research-credit purchase limit reached",
+    "Finish an existing credit checkout before starting another",
+    "Payment order status is uncertain. Do not retry checkout; contact support.",
+    "Research-credit purchases are not available",
+    "Credit checkout is temporarily unavailable",
+    "Research-credit checkout is temporarily unavailable",
+  ]);
   if (status === 409 && typeof detail === "string" && detail.length <= 240) {
     return detail;
+  }
+  if (status === 429 && detail === "Too many requests. Please retry shortly." && retryAfterSeconds) {
+    const seconds = Number(retryAfterSeconds);
+    if (Number.isInteger(seconds) && seconds > 0 && seconds <= 3600) {
+      return `Too many requests. Please try again in ${seconds} seconds.`;
+    }
+  }
+  if (
+    (status === 429 || status === 503) &&
+    typeof detail === "string" &&
+    safeDetails.has(detail)
+  ) {
+    return detail;
+  }
+  if (status === 429) {
+    return "Checkout is rate-limited. Please wait briefly before trying again.";
   }
   if (status === 503) {
     return "Checkout is temporarily unavailable. Please try again shortly.";

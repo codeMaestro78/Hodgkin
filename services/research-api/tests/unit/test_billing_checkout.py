@@ -16,24 +16,24 @@ def _client() -> TestClient:
     return TestClient(app)
 
 
-def test_monthly_checkout_advertises_disabled_until_razorpay_subscriptions_exist():
+def test_subscription_checkout_advertises_disabled_until_razorpay_subscriptions_exist():
     response = _client().get("/billing/checkout-availability")
 
     assert response.status_code == 200
-    assert response.json() == {"enabled": False, "plans": []}
+    assert response.json() == {"enabled": False, "plans": [], "billingPeriods": []}
 
 
-def test_monthly_checkout_is_retired():
+def test_subscription_checkout_is_closed_when_razorpay_billing_is_disabled():
     response = _client().post(
         "/billing/checkout",
         headers={"Idempotency-Key": "retired-route-request"},
-        json={"planKey": "scholar", "interval": "monthly"},
+        json={"planKey": "scholar", "billingPeriod": "monthly"},
     )
 
-    assert response.status_code == 410
+    assert response.status_code == 503
 
 
-def test_subscription_management_is_retired():
+def test_subscription_management_is_closed_when_razorpay_billing_is_disabled():
     response = _client().post("/billing/portal")
 
-    assert response.status_code == 410
+    assert response.status_code == 503

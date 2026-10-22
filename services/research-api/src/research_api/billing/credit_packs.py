@@ -6,6 +6,7 @@ import json
 import re
 from dataclasses import dataclass
 
+from research_api.billing.razorpay import SUPPORTED_CURRENCY_CODES
 from research_api.config import Settings
 
 _PACKAGE_KEY = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
@@ -26,7 +27,7 @@ class RazorpayCreditPack:
 
 
 def configured_razorpay_credit_packs(settings: Settings) -> dict[str, RazorpayCreditPack]:
-    """Read a server-only INR catalog; package keys never encode client prices."""
+    """Read a server-only single-currency catalog; clients never set prices."""
     try:
         raw = json.loads(settings.RAZORPAY_CREDIT_PACKS_JSON)
     except (TypeError, json.JSONDecodeError):
@@ -34,6 +35,7 @@ def configured_razorpay_credit_packs(settings: Settings) -> dict[str, RazorpayCr
     if not isinstance(raw, list) or not 1 <= len(raw) <= 10:
         return {}
     packs: dict[str, RazorpayCreditPack] = {}
+    catalog_currency: str | None = None
     for item in raw:
         if not isinstance(item, dict) or set(item) != {
             "key",
@@ -57,13 +59,16 @@ def configured_razorpay_credit_packs(settings: Settings) -> dict[str, RazorpayCr
             or isinstance(amount, bool)
             or not isinstance(amount, int)
             or not 100 <= amount <= 2_147_483_647
-            or currency != "INR"
+            or currency not in SUPPORTED_CURRENCY_CODES
             or isinstance(units, bool)
             or not isinstance(units, int)
             or not 1 <= units <= 1_000_000
             or expiry is not None
         ):
             return {}
+        if catalog_currency is not None and currency != catalog_currency:
+            return {}
+        catalog_currency = currency
         packs[key] = RazorpayCreditPack(key, amount, currency, units, expiry)
     return packs
 
@@ -76,6 +81,7 @@ def razorpay_credit_topups_available(settings: Settings) -> bool:
         configured_key_id(settings)
     except RazorpayUnavailable:
         return False
+    packs = configured_razorpay_credit_packs(settings)
     return bool(
         settings.BILLING_RAZORPAY_ENABLED
         and settings.BILLING_ENFORCEMENT_ENABLED
@@ -86,5 +92,6 @@ def razorpay_credit_topups_available(settings: Settings) -> bool:
         and settings.BILLING_CREDIT_SPENDING_ENABLED
         and settings.BILLING_CREDIT_MAX_WALLET_UNITS > 0
         and settings.RAZORPAY_WEBHOOK_SECRET is not None
-        and configured_razorpay_credit_packs(settings)
+        and packs
+        and all(pack.currency == "INR" for pack in packs.values())
     )

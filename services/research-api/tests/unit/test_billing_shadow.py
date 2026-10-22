@@ -31,7 +31,7 @@ def test_shadow_constraint_accepts_the_current_catalog_snapshot():
         if item.name == "ck_billing_shadow_decision_shape"
     )
     assert "research-units-v1-2026-10-19" in str(constraint.sqltext)
-    assert "research-units-v2-2026-10-19" in str(constraint.sqltext)
+    assert "research-units-v3-2026-10-22" in str(constraint.sqltext)
 
 
 @pytest.mark.parametrize(
@@ -56,7 +56,7 @@ def test_shadow_observation_is_a_non_authoritative_mode_snapshot(
     assert row.decision_status == status
     assert row.proposed_units == units
     assert row.policy_version == policy_version
-    assert row.catalog_version == ("research-units-v2-2026-10-19" if mode is not None else None)
+    assert row.catalog_version == ("research-units-v3-2026-10-22" if mode is not None else None)
 
 
 @pytest.mark.parametrize("enabled", [False, True])
@@ -109,7 +109,7 @@ async def test_run_creation_records_shadow_once_only_when_enabled(monkeypatch, e
     if enabled:
         assert observations[0].run_id == additions[0].run_id
         assert observations[0].proposed_units == 2
-        assert observations[0].catalog_version == "research-units-v2-2026-10-19"
+        assert observations[0].catalog_version == "research-units-v3-2026-10-22"
         assert session.flush.await_args_list[1].args == ([observations[0]],)
         assert session.flush.await_count == 2
     else:

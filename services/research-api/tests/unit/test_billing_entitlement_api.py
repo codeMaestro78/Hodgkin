@@ -105,7 +105,7 @@ async def test_entitlement_read_binds_authenticated_identity_to_rls(monkeypatch)
     read_projection.assert_awaited_once_with(session, tenant_id=tenant_id, user_id=user_id)
 
 
-def test_catalog_exposes_the_lower_price_v2_proposal_and_preserves_v1_terms():
+def test_catalog_exposes_inr_v3_proposal_and_preserves_prior_catalog_terms():
     from research_api.billing.catalog import (
         APPROVED_CATALOGS,
         BILLING_CATALOG,
@@ -113,23 +113,28 @@ def test_catalog_exposes_the_lower_price_v2_proposal_and_preserves_v1_terms():
     )
 
     assert BILLING_CATALOG.status == "active"
-    assert BILLING_CATALOG.version == "research-units-v2-2026-10-19"
+    assert BILLING_CATALOG.version == "research-units-v3-2026-10-22"
     assert BILLING_CATALOG.monthly_allowances == {
         "free": 5,
         "scholar": 20,
         "investigator": 40,
     }
-    assert BILLING_CATALOG.plans["scholar"].monthly_price_usd == Decimal("5.99")
-    assert BILLING_CATALOG.plans["scholar"].annual_price_usd == Decimal("59.99")
+    assert BILLING_CATALOG.plans["scholar"].currency == "INR"
+    assert BILLING_CATALOG.plans["scholar"].monthly_price == Decimal("599")
+    assert BILLING_CATALOG.plans["scholar"].annual_price == Decimal("5999")
     assert BILLING_CATALOG.plans["scholar"].allowed_modes == ("focused", "balanced")
-    assert BILLING_CATALOG.plans["investigator"].monthly_price_usd == Decimal("12.99")
-    assert BILLING_CATALOG.plans["investigator"].annual_price_usd == Decimal("129.99")
+    assert BILLING_CATALOG.plans["investigator"].currency == "INR"
+    assert BILLING_CATALOG.plans["investigator"].monthly_price == Decimal("1299")
+    assert BILLING_CATALOG.plans["investigator"].annual_price == Decimal("12999")
     assert BILLING_CATALOG.plans["investigator"].allowed_modes == (
         "focused",
         "balanced",
         "deep",
     )
     assert "research-units-v1-2026-10-19" in APPROVED_CATALOGS
+    assert APPROVED_CATALOGS["research-units-v2-2026-10-19"].plans[
+        "scholar"
+    ].monthly_price == Decimal("5.99")
     assert APPROVED_CATALOGS["research-units-v1-2026-10-19"].monthly_allowances == {
         "free": 5,
         "scholar": 40,
