@@ -6,6 +6,7 @@ import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from hmac import compare_digest
+from time import monotonic
 from typing import Annotated, Any, Literal, cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
@@ -74,6 +75,7 @@ from research_api.db.models import (
 )
 from research_api.db.session import system_session, tenant_session
 from research_api.schemas.generated.billing_entitlement import BillingEntitlement
+from research_api.telemetry import operation_event
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
@@ -205,6 +207,7 @@ async def create_subscription_checkout(
     request_hash = hashlib.sha256(idempotency_key.encode()).hexdigest()
     now = datetime.now(UTC)
     attempt_id: uuid.UUID
+    open_subscription_id: str | None = None
     async with tenant_session(str(caller.tenant_id)) as session:
         await session.execute(
             text("SELECT set_config('app.user_id', :id, true)"),
@@ -221,85 +224,200 @@ async def create_subscription_checkout(
                 RazorpaySubscriptionCheckoutAttempt.request_key_hash == request_hash,
             )
         )
+        open_attempt: RazorpaySubscriptionCheckoutAttempt | None
         if prior is not None:
             if prior.plan_key != plan_key or prior.billing_period != billing_period:
                 raise HTTPException(
                     409, "Idempotency key was already used for different plan terms"
                 )
-            if prior.state == "created" and prior.subscription_id:
-                return _checkout_response(
-                    plan=plan,
-                    subscription_id=prior.subscription_id,
-                    key_id=configured_key_id(settings),
+            if prior.state not in {"creating", "created", "uncertain"}:
+                raise HTTPException(
+                    409,
+                    "This checkout attempt is already terminal. Start a new checkout deliberately.",
                 )
-            raise HTTPException(
-                503,
-                "Subscription creation is uncertain. Do not retry with a new key; contact support.",
-            )
-        open_attempt = await session.scalar(
-            select(RazorpaySubscriptionCheckoutAttempt.id)
-            .where(
-                RazorpaySubscriptionCheckoutAttempt.tenant_id == caller.tenant_id,
-                RazorpaySubscriptionCheckoutAttempt.user_id == caller.user_id,
-                RazorpaySubscriptionCheckoutAttempt.state.in_(("creating", "created", "uncertain")),
-            )
-            .limit(1)
-        )
-        if open_attempt is not None:
-            raise HTTPException(
-                409, "Finish the existing subscription checkout before starting another"
-            )
-        existing = await session.scalar(
-            select(RazorpaySubscription.subscription_id)
-            .where(
-                RazorpaySubscription.tenant_id == caller.tenant_id,
-                RazorpaySubscription.user_id == caller.user_id,
-                RazorpaySubscription.status.in_(
-                    ("created", "authenticated", "active", "pending", "halted", "paused")
-                ),
-            )
-            .limit(1)
-        )
-        if existing is not None:
-            raise HTTPException(
-                409, "An existing subscription must be managed before changing plans"
-            )
-        account_id = await session.scalar(
-            select(BillingAccount.id).where(
-                BillingAccount.tenant_id == caller.tenant_id,
-                BillingAccount.user_id == caller.user_id,
-            )
-        )
-        if account_id is not None:
-            paid_period = await session.scalar(
-                select(BillingPeriod.id)
+            open_attempt = prior
+        else:
+            open_attempt = await session.scalar(
+                select(RazorpaySubscriptionCheckoutAttempt)
                 .where(
-                    BillingPeriod.tenant_id == caller.tenant_id,
-                    BillingPeriod.billing_account_id == account_id,
-                    BillingPeriod.plan_key.in_(("scholar", "investigator")),
-                    BillingPeriod.state == "active",
-                    BillingPeriod.starts_at <= now,
-                    BillingPeriod.ends_at > now,
+                    RazorpaySubscriptionCheckoutAttempt.tenant_id == caller.tenant_id,
+                    RazorpaySubscriptionCheckoutAttempt.user_id == caller.user_id,
+                    RazorpaySubscriptionCheckoutAttempt.state.in_(
+                        ("creating", "created", "uncertain")
+                    ),
                 )
                 .limit(1)
             )
-            if paid_period is not None:
+        if open_attempt is not None:
+            if open_attempt.plan_key != plan_key or open_attempt.billing_period != billing_period:
                 raise HTTPException(
-                    409, "Your current paid period must end before starting another subscription"
+                    409,
+                    "A different plan checkout is already open. Resume or resolve it "
+                    "before changing plans.",
                 )
-        attempt = RazorpaySubscriptionCheckoutAttempt(
-            tenant_id=caller.tenant_id,
-            user_id=caller.user_id,
-            request_key_hash=request_hash,
-            provider_idempotency_key=f"hogskin-subscription-{uuid.uuid4()}",
-            plan_key=plan_key,
-            billing_period=billing_period,
-            state="creating",
-            expires_at=now + timedelta(minutes=15),
+            if open_attempt.state == "creating":
+                raise HTTPException(
+                    409, "Your checkout is still being created. Check its status before retrying."
+                )
+            if not open_attempt.subscription_id:
+                raise HTTPException(
+                    503,
+                    "Checkout creation is uncertain and has no provider ID to verify. "
+                    "Contact support before retrying.",
+                )
+            attempt_id = open_attempt.id
+            open_subscription_id = open_attempt.subscription_id
+        else:
+            existing = await session.scalar(
+                select(RazorpaySubscription.subscription_id)
+                .where(
+                    RazorpaySubscription.tenant_id == caller.tenant_id,
+                    RazorpaySubscription.user_id == caller.user_id,
+                    RazorpaySubscription.status.in_(
+                        ("created", "authenticated", "active", "pending", "halted", "paused")
+                    ),
+                )
+                .limit(1)
+            )
+            if existing is not None:
+                raise HTTPException(
+                    409, "An existing subscription must be managed before changing plans"
+                )
+            account_id = await session.scalar(
+                select(BillingAccount.id).where(
+                    BillingAccount.tenant_id == caller.tenant_id,
+                    BillingAccount.user_id == caller.user_id,
+                )
+            )
+            if account_id is not None:
+                paid_period = await session.scalar(
+                    select(BillingPeriod.id)
+                    .where(
+                        BillingPeriod.tenant_id == caller.tenant_id,
+                        BillingPeriod.billing_account_id == account_id,
+                        BillingPeriod.plan_key.in_(("scholar", "investigator")),
+                        BillingPeriod.state == "active",
+                        BillingPeriod.starts_at <= now,
+                        BillingPeriod.ends_at > now,
+                    )
+                    .limit(1)
+                )
+                if paid_period is not None:
+                    raise HTTPException(
+                        409,
+                        "Your current paid period must end before starting another subscription",
+                    )
+            attempt = RazorpaySubscriptionCheckoutAttempt(
+                tenant_id=caller.tenant_id,
+                user_id=caller.user_id,
+                request_key_hash=request_hash,
+                provider_idempotency_key=f"hogskin-subscription-{uuid.uuid4()}",
+                plan_key=plan_key,
+                billing_period=billing_period,
+                state="creating",
+                expires_at=now + timedelta(minutes=15),
+            )
+            session.add(attempt)
+            await session.flush()
+            attempt_id = attempt.id
+
+    if open_subscription_id is not None:
+        reconcile_started = monotonic()
+        try:
+            provider_subscription = await fetch_razorpay_subscription(
+                settings, open_subscription_id
+            )
+        except RazorpayUnavailable as exc:
+            operation_event(
+                "razorpay.subscription.reconcile",
+                started=reconcile_started,
+                outcome="uncertain",
+                error=exc,
+                providerStatus=exc.status_code,
+                providerCode=exc.provider_code,
+                providerRequestId=exc.provider_request_id,
+            )
+            raise HTTPException(
+                503,
+                "The existing checkout could not be verified. It is preserved; retry "
+                "status check before creating another.",
+            ) from exc
+        provider_status = provider_subscription.get("status")
+        if (
+            provider_subscription.get("id") != open_subscription_id
+            or provider_subscription.get("plan_id") != plan.provider_plan_id
+            or provider_status
+            not in {
+                "created",
+                "authenticated",
+                "active",
+                "pending",
+                "halted",
+                "paused",
+                "cancelled",
+                "completed",
+                "expired",
+            }
+        ):
+            operation_event(
+                "razorpay.subscription.reconcile",
+                started=reconcile_started,
+                outcome="reconciliation_required",
+                error=RazorpayUnavailable("provider subscription terms/status mismatch"),
+                providerStatus=(provider_status if isinstance(provider_status, str) else None),
+            )
+            raise HTTPException(
+                503, "The existing checkout needs reconciliation; no replacement was created."
+            )
+        terminal_status = provider_status in {"cancelled", "completed", "expired"}
+        async with tenant_session(str(caller.tenant_id)) as session:
+            await session.execute(
+                text("SELECT set_config('app.user_id', :id, true)"),
+                {"id": str(caller.user_id)},
+            )
+            await session.execute(
+                update(RazorpaySubscription)
+                .where(
+                    RazorpaySubscription.subscription_id == open_subscription_id,
+                    RazorpaySubscription.tenant_id == caller.tenant_id,
+                    RazorpaySubscription.user_id == caller.user_id,
+                )
+                .values(status=provider_status)
+            )
+            await session.execute(
+                update(RazorpaySubscriptionCheckoutAttempt)
+                .where(
+                    RazorpaySubscriptionCheckoutAttempt.id == attempt_id,
+                    RazorpaySubscriptionCheckoutAttempt.tenant_id == caller.tenant_id,
+                    RazorpaySubscriptionCheckoutAttempt.user_id == caller.user_id,
+                )
+                .values(state="failed" if terminal_status else "created")
+            )
+        operation_event(
+            "razorpay.subscription.reconcile",
+            started=reconcile_started,
+            outcome="succeeded" if provider_status == "created" else "reconciled",
+            providerStatus=provider_status,
+            resumed=provider_status == "created",
         )
-        session.add(attempt)
-        await session.flush()
-        attempt_id = attempt.id
+        if provider_status == "created":
+            return _checkout_response(
+                plan=plan,
+                subscription_id=open_subscription_id,
+                key_id=configured_key_id(settings),
+            )
+        if not terminal_status:
+            raise HTTPException(
+                409,
+                "This subscription is already processing. Check its status; another "
+                "checkout was not created.",
+            )
+        # Require a fresh, explicit checkout action after status reconciliation. This
+        # also ensures concurrent retries cannot both create a replacement subscription.
+        raise HTTPException(
+            409,
+            "The previous checkout is confirmed terminal. Start a new checkout to continue.",
+        )
 
     try:
         provider_plan = await fetch_razorpay_plan(settings, plan.provider_plan_id)
@@ -473,6 +591,7 @@ async def cancel_pending_subscription_checkout(
             raise HTTPException(
                 409, "This subscription cannot be cancelled as an abandoned checkout"
             )
+    cancel_started = monotonic()
     try:
         result = await cancel_razorpay_subscription(
             settings,
@@ -480,11 +599,51 @@ async def cancel_pending_subscription_checkout(
             cancel_at_cycle_end=False,
         )
     except RazorpayUnavailable as exc:
-        raise HTTPException(
-            503, "Checkout cancellation is uncertain; check status before retrying"
-        ) from exc
+        operation_event(
+            "razorpay.subscription.cancel",
+            started=cancel_started,
+            outcome="uncertain",
+            error=exc,
+            providerStatus=exc.status_code,
+            providerCode=exc.provider_code,
+            providerRequestId=exc.provider_request_id,
+        )
+        reconcile_started = monotonic()
+        try:
+            result = await fetch_razorpay_subscription(settings, payload.subscription_id)
+        except RazorpayUnavailable as status_exc:
+            operation_event(
+                "razorpay.subscription.cancel_reconcile",
+                started=reconcile_started,
+                outcome="uncertain",
+                error=status_exc,
+                providerStatus=status_exc.status_code,
+                providerCode=status_exc.provider_code,
+                providerRequestId=status_exc.provider_request_id,
+            )
+            raise HTTPException(
+                503,
+                "Cancellation could not be confirmed. The checkout is preserved for a "
+                "safe status check.",
+            ) from status_exc
+    if result.get("id") != payload.subscription_id:
+        operation_event(
+            "razorpay.subscription.cancel_reconcile",
+            started=monotonic(),
+            outcome="reconciliation_required",
+            providerStatus=result.get("status"),
+        )
+        raise HTTPException(503, "Razorpay returned a different subscription during cancellation")
     if result.get("status") not in {"cancelled", "completed", "expired"}:
-        raise HTTPException(503, "Razorpay has not confirmed checkout cancellation")
+        operation_event(
+            "razorpay.subscription.cancel_reconcile",
+            started=monotonic(),
+            outcome="uncertain",
+            providerStatus=result.get("status"),
+        )
+        raise HTTPException(
+            503, "Razorpay has not confirmed a terminal checkout state; the attempt remains open."
+        )
     async with tenant_session(str(caller.tenant_id)) as session:
         await session.execute(
             text("SELECT set_config('app.user_id', :id, true)"),
@@ -1208,9 +1367,7 @@ async def _grant_subscription_cycle(
     plan_key = cast(Literal["scholar", "investigator"], subscription.plan_key)
     terms = BILLING_CATALOG.plans[plan_key]
     expected_price = (
-        terms.monthly_price
-        if subscription.billing_period == "monthly"
-        else terms.annual_price
+        terms.monthly_price if subscription.billing_period == "monthly" else terms.annual_price
     )
     expected_minor = int(expected_price * 100) if expected_price is not None else -1
     if (

@@ -27,6 +27,42 @@ SUPPORTED_CURRENCY_CODES = frozenset({"INR"})
 class RazorpayUnavailable(RuntimeError):
     """Razorpay is not configured or did not return a valid response."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        provider_code: str | None = None,
+        provider_request_id: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.provider_code = provider_code
+        self.provider_request_id = provider_request_id
+
+
+_SAFE_PROVIDER_CODE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+_SAFE_PROVIDER_REQUEST_ID = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
+
+
+def _safe_error_facts(response: httpx.Response) -> tuple[int, str | None, str | None]:
+    """Extract only bounded provider status/code/request-id; never retain its body."""
+    provider_code: str | None = None
+    try:
+        payload = response.json()
+        error = payload.get("error") if isinstance(payload, dict) else None
+        code = error.get("code") if isinstance(error, dict) else None
+        if isinstance(code, str) and _SAFE_PROVIDER_CODE.fullmatch(code):
+            provider_code = code
+    except ValueError:
+        pass
+    request_id = response.headers.get("x-razorpay-request-id") or response.headers.get(
+        "x-request-id"
+    )
+    if not isinstance(request_id, str) or not _SAFE_PROVIDER_REQUEST_ID.fullmatch(request_id):
+        request_id = None
+    return response.status_code, provider_code, request_id
+
 
 def payment_signature_valid(
     *, order_id: str, payment_id: str, signature: str, secret: SecretStr | None
@@ -113,7 +149,13 @@ async def razorpay_request(
     except httpx.HTTPError as exc:
         raise RazorpayUnavailable("Razorpay request failed") from exc
     if response.is_redirect or response.status_code >= 400:
-        raise RazorpayUnavailable("Razorpay rejected the request")
+        status_code, provider_code, provider_request_id = _safe_error_facts(response)
+        raise RazorpayUnavailable(
+            "Razorpay rejected the request",
+            status_code=status_code,
+            provider_code=provider_code,
+            provider_request_id=provider_request_id,
+        )
     try:
         result = response.json()
     except ValueError as exc:

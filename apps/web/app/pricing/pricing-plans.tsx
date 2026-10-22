@@ -143,7 +143,9 @@ function PlanCard({
   signInRequired,
   busy,
   error,
+  canResume,
   onChoose,
+  onResume,
   onRetryAvailability,
 }: {
   plan: Plan;
@@ -155,7 +157,9 @@ function PlanCard({
   signInRequired: boolean;
   busy: string | null;
   error: string;
+  canResume: boolean;
   onChoose: (planKey: PaidPlanKey) => void;
+  onResume: (planKey: PaidPlanKey) => void;
   onRetryAvailability: () => void;
 }) {
   const price = billing === "yearly" ? plan.yearly : plan.monthly;
@@ -235,9 +239,20 @@ function PlanCard({
         </button>
       )}
       {error && (
-        <p className="pr-checkout-error" role="alert">
-          {error}
-        </p>
+        <div className="pr-checkout-error" role="alert">
+          <p>{error}</p>
+          {canResume && plan.id !== "free" && (
+            <button
+              type="button"
+              disabled={busy !== null}
+              onClick={() => {
+                if (plan.id !== "free") onResume(plan.id);
+              }}
+            >
+              {busy === plan.id ? "Checking checkout…" : "Check status / Resume checkout"}
+            </button>
+          )}
+        </div>
       )}
       <ul className="pr-plan-features">
         {plan.features.map((feature) => (
@@ -265,6 +280,7 @@ export function PricingPlans() {
   const [availabilityAttempt, setAvailabilityAttempt] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
   const [checkoutError, setCheckoutError] = useState("");
+  const [resumePlanKey, setResumePlanKey] = useState<PaidPlanKey | null>(null);
   const [subscription, setSubscription] = useState<PricingSubscription | null>(null);
   const [manageBusy, setManageBusy] = useState(false);
   const [free, ...paid] = PLANS;
@@ -380,17 +396,20 @@ export function PricingPlans() {
         modal: {
           ondismiss: () => {
             setBusy(null);
-            void cancelAbandonedCheckout(order.subscriptionId);
+            void cancelAbandonedCheckout(planKey, order.subscriptionId);
           },
         },
         theme: { color: "#222b31" },
       });
       checkout.on("payment.failed", () => {
         setCheckoutError("Payment was not completed. No plan units were granted.");
+        setResumePlanKey(planKey);
       });
+      setResumePlanKey(null);
       checkout.open();
     } catch (error) {
       setCheckoutError(error instanceof Error ? error.message : "Secure checkout could not be opened.");
+      setResumePlanKey(planKey);
       setBusy(null);
     }
   }
@@ -402,16 +421,27 @@ export function PricingPlans() {
     setSubscription(value.subscription ?? null);
   }
 
-  async function cancelAbandonedCheckout(subscriptionId: string) {
+  async function cancelAbandonedCheckout(planKey: PaidPlanKey, subscriptionId: string) {
     try {
       const response = await fetch("/api/billing/checkout/cancel", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ subscriptionId }),
       });
-      if (response.ok) await refreshSubscription();
+      if (!response.ok) {
+        setCheckoutError(
+          "Cancellation could not be confirmed. Your checkout is preserved and has not been replaced; check its status or resume it.",
+        );
+        setResumePlanKey(planKey);
+        return;
+      }
+      setResumePlanKey(null);
+      await refreshSubscription();
     } catch {
-      // The backend retains the attempt as open/uncertain; the UI must not create retries itself.
+      setCheckoutError(
+        "Could not confirm cancellation. Your checkout is preserved; check its status or resume it.",
+      );
+      setResumePlanKey(planKey);
     }
   }
 
@@ -489,7 +519,9 @@ export function PricingPlans() {
               signInRequired={false}
               busy={busy}
               error=""
+              canResume={false}
               onChoose={choosePlan}
+              onResume={choosePlan}
               onRetryAvailability={() => setAvailabilityAttempt((value) => value + 1)}
             />
           )}
@@ -506,8 +538,10 @@ export function PricingPlans() {
               authStatus={authStatus}
               signInRequired={signInRequiredPlan === plan.id}
               busy={busy}
-              error={checkoutError}
+              error={resumePlanKey === null || resumePlanKey === plan.id ? checkoutError : ""}
+              canResume={resumePlanKey === plan.id}
               onChoose={choosePlan}
+              onResume={choosePlan}
               onRetryAvailability={() => setAvailabilityAttempt((value) => value + 1)}
             />
           ))}
