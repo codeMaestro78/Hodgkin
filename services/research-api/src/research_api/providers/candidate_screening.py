@@ -194,3 +194,66 @@ def screen_openalex_candidates(
         discovery_provider="openalex",
         source_class="academic",
     )
+
+
+_SCHOLARLY_IDS = {
+    "semantic_scholar": "paper_id",
+    "pubmed": "pmid",
+    "europe_pmc": "record_id",
+    "arxiv": "arxiv_id",
+    "clinical_trials": "nct_id",
+}
+
+
+def screen_scholarly_candidates(
+    candidates: tuple[Any, ...], *, provider: str, query: str,
+    max_results: int, index_total_count: int | None = None,
+) -> SearchResponse:
+    """Keep index metadata in a receipt; pass only locators to source extraction."""
+    if provider not in _SCHOLARLY_IDS:
+        raise ValueError("unsupported scholarly screening provider")
+    id_field = _SCHOLARLY_IDS[provider]
+    normalized = []
+    for candidate in candidates:
+        published = getattr(candidate, "publication_date", None)
+        if isinstance(published, str):
+            try:
+                published = date.fromisoformat(published)
+            except ValueError:
+                published = None
+        if provider == "arxiv":
+            timestamp = getattr(candidate, "published", None)
+            published = timestamp.date() if timestamp else None
+        authors = getattr(candidate, "authors", ())
+        normalized.append(OpenAlexCandidate(
+            work_id=str(getattr(candidate, id_field)),
+            doi=getattr(candidate, "doi", None),
+            title=candidate.title,
+            authors=authors if isinstance(authors, tuple) else (),
+            publication_year=getattr(candidate, "publication_year", None),
+            publication_date=published,
+            venue=getattr(candidate, "venue", None),
+            citation_count=getattr(candidate, "citation_count", None),
+            abstract=getattr(candidate, "abstract", None),
+            landing_page_url=candidate.landing_page_url,
+            pdf_url=getattr(candidate, "pdf_url", None),
+        ))
+    response = screen_openalex_candidates(
+        normalized, query=query, max_results=max_results,
+        index_total_count=index_total_count,
+    )
+    payload = response.model_dump(mode="python")
+    rows = payload["discovery_candidates"]
+    for row, candidate in zip(rows, candidates, strict=True):
+        row.update({"provider": provider, id_field: getattr(candidate, id_field)})
+        row.pop("work_id", None)
+        row["identity"] = (
+            f"doi:{candidate.doi}" if getattr(candidate, "doi", None)
+            else f"{provider}:{getattr(candidate, id_field)}"
+        )
+        row["index_record_only"] = True
+    for result in payload["results"]:
+        result["provider"] = provider
+    payload["discovery_provider"] = provider
+    payload["usage"]["reported_cost_usd"] = None
+    return SearchResponse.model_validate(payload)

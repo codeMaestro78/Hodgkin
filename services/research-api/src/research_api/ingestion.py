@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from time import monotonic
+from typing import Any
 
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
@@ -30,7 +31,13 @@ from research_api.db.models import (
 from research_api.db.session import tenant_session
 from research_api.events.outbox import EventOutbox
 from research_api.pricing import SERPER_SEARCH_POLICY_COST
-from research_api.providers.candidate_screening import screen_openalex_candidates
+from research_api.providers.arxiv import ARXIV_SCHEMA_VERSION
+from research_api.providers.candidate_screening import (
+    screen_openalex_candidates,
+    screen_scholarly_candidates,
+)
+from research_api.providers.clinical_trials import CLINICAL_TRIALS_SCHEMA_VERSION
+from research_api.providers.europe_pmc import EUROPE_PMC_SCHEMA_VERSION
 from research_api.providers.openalex import (
     MAX_PAGE_SIZE as OPENALEX_MAX_PAGE_SIZE,
 )
@@ -41,6 +48,14 @@ from research_api.providers.openalex import (
     OpenAlexCancelledAfterDispatch,
     OpenAlexCancelledBeforeDispatch,
     OpenAlexRequestError,
+)
+from research_api.providers.pubmed import PUBMED_SCHEMA_VERSION
+from research_api.providers.semantic_scholar import (
+    S2_REQUEST_SCHEMA_VERSION,
+    S2_RESPONSE_SCHEMA_VERSION,
+    SemanticScholarCancelledAfterDispatch,
+    SemanticScholarCancelledBeforeDispatch,
+    SemanticScholarRequestError,
 )
 from research_api.providers.serper import (
     SERPER_RESPONSE_SCHEMA_VERSION,
@@ -101,13 +116,31 @@ class TavilyEvidenceIngestor:
         artifact_store: ArtifactStore,
         discovery_adapter: SerperAdapter | None = None,
         academic_adapter: OpenAlexAdapter | None = None,
+        scholarly_adapter: Any | None = None,
+        scholarly_provider: str | None = None,
+        scholarly_search_budget_milli_usd: int = 0,
+        scholarly_fallback_openalex: bool = False,
     ) -> None:
         self._adapter = adapter
         self._artifact_store = artifact_store
         self._discovery_adapter = discovery_adapter
         self._academic_adapter = academic_adapter
+        self._scholarly_adapter = scholarly_adapter
+        self._scholarly_provider = scholarly_provider
+        self._scholarly_search_budget_milli_usd = scholarly_search_budget_milli_usd
+        self._scholarly_fallback_openalex = scholarly_fallback_openalex
 
     def _request_provider(self, request: ProviderRequest) -> str:
+        scholarly_schemas = {
+            S2_REQUEST_SCHEMA_VERSION: "semantic_scholar",
+            PUBMED_SCHEMA_VERSION: "pubmed",
+            EUROPE_PMC_SCHEMA_VERSION: "europe_pmc",
+            ARXIV_SCHEMA_VERSION: "arxiv",
+            CLINICAL_TRIALS_SCHEMA_VERSION: "clinical_trials",
+        }
+        schema = getattr(request, "request_schema_version", None)
+        if request.operation == "search" and schema in scholarly_schemas:
+            return scholarly_schemas[schema]
         if (
             request.operation == "search"
             and getattr(request, "request_schema_version", None) == OPENALEX_REQUEST_SCHEMA_VERSION
@@ -120,6 +153,11 @@ class TavilyEvidenceIngestor:
             "openalex": OPENALEX_RESPONSE_SCHEMA_VERSION,
             "serper": SERPER_RESPONSE_SCHEMA_VERSION,
             "tavily": TAVILY_RESPONSE_SCHEMA_VERSION,
+            "semantic_scholar": S2_RESPONSE_SCHEMA_VERSION,
+            "pubmed": PUBMED_SCHEMA_VERSION,
+            "europe_pmc": EUROPE_PMC_SCHEMA_VERSION,
+            "arxiv": ARXIV_SCHEMA_VERSION,
+            "clinical_trials": CLINICAL_TRIALS_SCHEMA_VERSION,
         }[self._request_provider(request)]
 
     async def ingest(
@@ -139,6 +177,19 @@ class TavilyEvidenceIngestor:
         await self._check_cancelled(tenant_id, run_id)
         query = query_with_domain_hints(query, allowed_domains)
         if (
+            self._scholarly_adapter is not None
+            and "academic" in (source_classes or [])
+            and not allowed_domains
+        ):
+            if self._scholarly_provider == "semantic_scholar":
+                search_request = self._scholarly_adapter.search_request(
+                    query=query, limit=min(max_results, 10)
+                )
+            else:
+                search_request = self._scholarly_adapter.search_request(
+                    query=query, per_page=min(max_results, 10)
+                )
+        elif (
             self._academic_adapter is not None
             and "academic" in (source_classes or [])
             and not allowed_domains
@@ -153,16 +204,48 @@ class TavilyEvidenceIngestor:
             search_request = search_adapter.search_request(
                 query=query, max_results=max_results, allowed_domains=allowed_domains
             )
-        replayed_search = await self._replay_response(
-            tenant_id=tenant_id, run_id=run_id, request=search_request
+        released_to_fallback = (
+            self._scholarly_fallback_openalex
+            and self._request_provider(search_request) == self._scholarly_provider
+            and await self._released_scholarly_attempt(
+                tenant_id=tenant_id, run_id=run_id, request=search_request
+            )
         )
-        if replayed_search is not None:
+        replayed_search = (
+            None if released_to_fallback else await self._replay_response(
+                tenant_id=tenant_id, run_id=run_id, request=search_request
+            )
+        )
+        fallback_used = released_to_fallback
+        if released_to_fallback:
+            search_response = await self._fallback_openalex(
+                tenant_id=tenant_id, run_id=run_id, query=query, max_results=max_results
+            )
+        elif replayed_search is not None:
             if not isinstance(replayed_search, SearchResponse):
                 raise ProviderRecoveryNeededError("recovery-needed: search receipt type mismatch")
             search_response = replayed_search
         else:
-            search_response = await self._search_fresh(
-                tenant_id=tenant_id, run_id=run_id, request=search_request
+            try:
+                search_response = await self._search_fresh(
+                    tenant_id=tenant_id, run_id=run_id, request=search_request
+                )
+            except SemanticScholarRequestError as error:
+                if not (self._scholarly_fallback_openalex and error.outcome == "released"):
+                    raise
+                fallback_used = True
+                search_response = await self._fallback_openalex(
+                    tenant_id=tenant_id, run_id=run_id, query=query, max_results=max_results
+                )
+
+        if (
+            not search_response.results
+            and not fallback_used
+            and self._scholarly_fallback_openalex
+            and self._request_provider(search_request) == self._scholarly_provider
+        ):
+            search_response = await self._fallback_openalex(
+                tenant_id=tenant_id, run_id=run_id, query=query, max_results=max_results
             )
 
         if not search_response.results:
@@ -175,8 +258,59 @@ class TavilyEvidenceIngestor:
             search_response=search_response,
             max_results=max_results,
             quick_mode=quick_mode,
-            recovery=replayed_search is not None,
+            recovery=replayed_search is not None or released_to_fallback,
         )
+
+    async def _released_scholarly_attempt(
+        self, *, tenant_id: uuid.UUID, run_id: uuid.UUID, request: ProviderRequest
+    ) -> bool:
+        async with tenant_session(str(tenant_id)) as session:
+            row = (
+                await session.execute(
+                    select(ProviderCallReservation, ProviderCall)
+                    .outerjoin(
+                        ProviderCall,
+                        (ProviderCall.tenant_id == ProviderCallReservation.tenant_id)
+                        & (ProviderCall.reservation_id == ProviderCallReservation.id),
+                    )
+                    .where(
+                        ProviderCallReservation.tenant_id == tenant_id,
+                        ProviderCallReservation.run_id == run_id,
+                        ProviderCallReservation.request_fingerprint == request.fingerprint,
+                        ProviderCallReservation.attempt == 1,
+                    )
+                )
+            ).first()
+        if row is None:
+            return False
+        reservation, call = row
+        if (
+            reservation.provider == self._request_provider(request)
+            and reservation.operation == "search"
+            and reservation.state == "released"
+            and call is not None
+            and call.provider == reservation.provider
+            and call.outcome == "failed"
+            and call.completed_at is not None
+        ):
+            return True
+        return False
+
+    async def _fallback_openalex(
+        self, *, tenant_id: uuid.UUID, run_id: uuid.UUID, query: str, max_results: int
+    ) -> SearchResponse:
+        if self._academic_adapter is None or self._scholarly_search_budget_milli_usd < 2:
+            raise ProviderRecoveryNeededError("pinned scholarly fallback budget or adapter missing")
+        request = self._academic_adapter.search_request(
+            query=query, per_page=OPENALEX_MAX_PAGE_SIZE,
+            selection_limit=min(max_results, OPENALEX_MAX_PAGE_SIZE),
+        )
+        replay = await self._replay_response(tenant_id=tenant_id, run_id=run_id, request=request)
+        if replay is not None:
+            if not isinstance(replay, SearchResponse):
+                raise ProviderRecoveryNeededError("recovery-needed: fallback receipt type mismatch")
+            return replay
+        return await self._search_fresh(tenant_id=tenant_id, run_id=run_id, request=request)
 
     async def _search_fresh(
         self, *, tenant_id: uuid.UUID, run_id: uuid.UUID, request: ProviderRequest
@@ -190,7 +324,10 @@ class TavilyEvidenceIngestor:
                     SERPER_SEARCH_POLICY_COST
                     if self._request_provider(request) == "serper"
                     else Decimal("0.001")
-                    if self._request_provider(request) == "openalex"
+                    if self._request_provider(request) in {
+                        "openalex", "semantic_scholar", "pubmed", "europe_pmc",
+                        "arxiv", "clinical_trials",
+                    }
                     else Decimal("0.008")
                 ),
             )
@@ -228,6 +365,46 @@ class TavilyEvidenceIngestor:
                         }
                     }
                 )
+            elif self._request_provider(request) == self._scholarly_provider:
+                if self._scholarly_adapter is None or self._scholarly_search_budget_milli_usd < 1:
+                    raise ProviderRecoveryNeededError(
+                        "pinned scholarly search budget or adapter missing"
+                    )
+                if self._scholarly_provider == "semantic_scholar":
+                    scholarly_result = await self._scholarly_adapter.search(
+                        request, before_attempt=lambda: self._check_cancelled(tenant_id, run_id)
+                    )
+                else:
+                    await self._check_cancelled(tenant_id, run_id)
+                    scholarly_result = await self._scholarly_adapter.search(request)
+                scholarly_query = (
+                    request.payload.get("query")
+                    or request.payload.get("query.term")
+                    or request.payload.get("term")
+                    or request.payload.get("search_query", "")
+                    .replace("all:", "").replace(" AND ", " ")
+                )
+                scholarly_limit = (
+                    request.payload.get("limit")
+                    or request.payload.get("pageSize")
+                    or request.payload.get("retmax")
+                    or request.payload.get("max_results")
+                )
+                if not isinstance(scholarly_limit, int):
+                    raise ValueError("scholarly request has no bounded result limit")
+                search_response = screen_scholarly_candidates(
+                    scholarly_result.candidates,
+                    provider=self._scholarly_provider,
+                    query=scholarly_query,
+                    max_results=scholarly_limit,
+                    index_total_count=scholarly_result.total_count,
+                )
+                search_response = search_response.model_copy(update={
+                    "usage": {
+                        **(search_response.usage or {}),
+                        "provider_attempt_count": scholarly_result.attempt_count,
+                    }
+                })
             else:
                 search_response = await (self._discovery_adapter or self._adapter).search(
                     request,
@@ -248,6 +425,9 @@ class TavilyEvidenceIngestor:
                         OpenAlexCancelledAfterDispatch,
                         OpenAlexRequestError,
                         OpenAlexCancelledBeforeDispatch,
+                        SemanticScholarRequestError,
+                        SemanticScholarCancelledBeforeDispatch,
+                        SemanticScholarCancelledAfterDispatch,
                     ),
                 )
                 else "uncertain",
@@ -261,6 +441,9 @@ class TavilyEvidenceIngestor:
                             OpenAlexRequestError,
                             OpenAlexCancelledBeforeDispatch,
                             OpenAlexCancelledAfterDispatch,
+                            SemanticScholarRequestError,
+                            SemanticScholarCancelledBeforeDispatch,
+                            SemanticScholarCancelledAfterDispatch,
                         ),
                     )
                     else None
@@ -288,7 +471,7 @@ class TavilyEvidenceIngestor:
             ),
         )
 
-        if self._request_provider(request) in {"serper", "openalex"}:
+        if self._request_provider(request) != "tavily":
             # Do not pay for extraction until the exact candidate catalogue and
             # shortlist have a durable, hash-checked receipt. Storage failures
             # retain the consumed call; recovery never guesses or re-searches.
@@ -340,9 +523,12 @@ class TavilyEvidenceIngestor:
             selected_url_by_identity[identity_url] = canonical_url
             titles[canonical_url] = result.title
             result_extra = getattr(result, "model_extra", None) or {}
-            if result_extra.get("provider") == "openalex":
+            if result_extra.get("provider") in {
+                "openalex", "semantic_scholar", "pubmed", "europe_pmc", "arxiv",
+                "clinical_trials",
+            }:
                 source_details[canonical_url] = {
-                    "provider": "openalex",
+                    "provider": result_extra["provider"],
                     "source_class": "academic",
                 }
             urls = original_urls.setdefault(canonical_url, [])

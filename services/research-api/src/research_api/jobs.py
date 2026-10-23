@@ -1,5 +1,6 @@
 """PostgreSQL is the queue. Registry discovery contains no research payloads."""
 
+import os
 import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -101,9 +102,52 @@ PROTECTED_REPAIR_MODE_OPENALEX_SERPER_GRAPH_VERSION = (
     "research-v16-protected-assessment-tail-repair-openalex-serper"
 )
 
+SCHOLARLY_PROVIDERS = frozenset({
+    "semantic_scholar", "pubmed", "europe_pmc", "arxiv", "clinical_trials",
+})
+SCHOLARLY_PROVIDER_CODES = {
+    "semantic_scholar": "s2",
+    "pubmed": "pm",
+    "europe_pmc": "ep",
+    "arxiv": "ax",
+    "clinical_trials": "ct",
+}
+
+
+def scholarly_route() -> tuple[str | None, bool, int]:
+    """Operator opt-in; encoded in new job versions to prevent route drift on resume."""
+    provider = os.getenv("SCHOLARLY_DISCOVERY_PROVIDER", "").strip().lower() or None
+    fallback = os.getenv("SCHOLARLY_DISCOVERY_FALLBACK", "").strip().lower()
+    if provider is not None and provider not in SCHOLARLY_PROVIDERS:
+        raise ValueError("SCHOLARLY_DISCOVERY_PROVIDER must name a supported scholarly provider")
+    if fallback not in {"", "openalex"} or (fallback and provider is None):
+        raise ValueError("SCHOLARLY_DISCOVERY_FALLBACK must be openalex with a selected provider")
+    raw_budget = os.getenv("SCHOLARLY_DISCOVERY_SEARCH_BUDGET_MILLI_USD", "1")
+    if not raw_budget.isascii() or not raw_budget.isdecimal():
+        raise ValueError("scholarly search budget must be an integer number of milli-USD")
+    budget = int(raw_budget)
+    if budget not in {1, 2} or (fallback and budget != 2):
+        raise ValueError("scholarly search budget must be 1, or 2 with OpenAlex fallback")
+    return provider, fallback == "openalex", budget
+
 
 def graph_version_for(settings: Settings, *, explicit_mode: bool) -> str:
     """Pin discovery and bounded-repair capabilities when the job is created."""
+    scholarly_provider, scholarly_fallback, scholarly_budget = scholarly_route()
+    if scholarly_provider and explicit_mode:
+        raise ValueError("scholarly discovery requires a standard run graph version")
+    if scholarly_provider and not settings.TAVILY_API_KEY:
+        raise ValueError("TAVILY_API_KEY is required for scholarly source extraction")
+    if scholarly_fallback and not settings.OPENALEX_DISCOVERY_ENABLED:
+        raise ValueError("OpenAlex fallback requires OPENALEX_DISCOVERY_ENABLED=true")
+    if scholarly_provider and settings.OPENALEX_DISCOVERY_ENABLED and not scholarly_fallback:
+        raise ValueError("OpenAlex and scholarly discovery require an explicit fallback selection")
+    if scholarly_provider:
+        base = SERPER_GRAPH_VERSION if settings.SERPER_DISCOVERY_ENABLED else GRAPH_VERSION
+        code = SCHOLARLY_PROVIDER_CODES[scholarly_provider]
+        return f"{base}-s-{code}-b{scholarly_budget}" + (
+            "-oa" if scholarly_fallback else ""
+        )
     if explicit_mode:
         repair_versions = settings.BOUNDED_GAP_REPAIR_ENABLED
         discovery_key = (settings.OPENALEX_DISCOVERY_ENABLED, settings.SERPER_DISCOVERY_ENABLED)
@@ -452,6 +496,18 @@ async def claim(tenant: uuid.UUID, owner: uuid.UUID, settings: Settings) -> JobF
                 OPENALEX_GRAPH_VERSION,
                 OPENALEX_SERPER_GRAPH_VERSION,
             }
+            or (
+                run.mode is None
+                and any(
+                    job.graph_version
+                    == f"{base}-s-{SCHOLARLY_PROVIDER_CODES[provider]}-b{budget}{suffix}"
+                    for base in (GRAPH_VERSION, SERPER_GRAPH_VERSION)
+                    for provider in SCHOLARLY_PROVIDERS
+                    for budget in (1, 2)
+                    for suffix in ("", "-oa")
+                    if budget >= (2 if suffix else 1)
+                )
+            )
             or (job.graph_version == "research-v3" and run.report_requirements == [])
         )
         if not graph_compatible or job.attempts >= 5:

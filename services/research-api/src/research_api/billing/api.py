@@ -7,7 +7,6 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from hmac import compare_digest
 from time import monotonic
-from types import SimpleNamespace
 from typing import Annotated, Any, Literal, cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
@@ -741,7 +740,8 @@ async def reconcile_caller_subscription(caller: CallerDep) -> dict[str, str]:
             .order_by(RazorpaySubscriptionPayment.received_at.desc())
             .limit(1)
         )
-        if payment is None and subscription.last_event_id:
+        payment_id = payment.payment_id if payment is not None else None
+        if payment_id is None and subscription.last_event_id:
             # Older webhook deployments recorded payment_id on the signed event
             # inbox but did not create the payment reconciliation row.
             event_receipt = await session.scalar(
@@ -754,18 +754,13 @@ async def reconcile_caller_subscription(caller: CallerDep) -> dict[str, str]:
                 )
             )
             if event_receipt is not None and event_receipt.payment_id:
-                payment = SimpleNamespace(
-                    payment_id=event_receipt.payment_id,
-                    subscription_id=subscription.subscription_id,
-                    status="reconciliation_required",
-                )
-        if payment is None:
+                payment_id = event_receipt.payment_id
+        if payment_id is None:
             raise HTTPException(
                 409,
                 "No captured payment is safely linked to this subscription. Contact support.",
             )
         subscription_id = subscription.subscription_id
-        payment_id = payment.payment_id
         expected_plan_id = subscription.provider_plan_id
         plan_key = subscription.plan_key
         billing_period = subscription.billing_period
@@ -809,7 +804,7 @@ async def reconcile_caller_subscription(caller: CallerDep) -> dict[str, str]:
         and cycle_end is not None
         and cycle_start < cycle_end
     )
-    if not provider_matches:
+    if not provider_matches or cycle_start is None or cycle_end is None:
         operation_event(
             "razorpay.subscription.reconcile",
             started=started,

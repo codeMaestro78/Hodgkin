@@ -429,6 +429,7 @@ export function WorkspaceShell({
           [
             ["/research/reports", "file", "Reports"],
             ["/research/library", "folder", "Library"],
+            ["/research/review", "book", "Literature review"],
             ["/research/compare", "columns", "Compare reports"],
             ["/research/automation", "clock", "Automation"],
           ] as const

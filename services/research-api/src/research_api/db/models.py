@@ -1318,3 +1318,323 @@ class LibraryItem(Base, TenantScopedMixin):
     tags: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     notes: Mapped[str] = mapped_column(Text, nullable=False, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# Review rows are owner scoped even when an import or monitoring worker writes them.
+# Their stable review identity is the FK boundary shared by those integrations.
+class ScholarlyReview(Base, TenantScopedMixin):
+    __tablename__ = "scholarly_reviews"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id", "owner_user_id"], ["users.tenant_id", "users.id"]),
+        UniqueConstraint("tenant_id", "owner_user_id", "id", name="uq_scholarly_review_owner_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    owner_user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ScholarlyOwnedMixin(TenantScopedMixin):
+    owner_user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    review_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+
+
+def _review_fk() -> ForeignKeyConstraint:
+    return ForeignKeyConstraint(
+        ["tenant_id", "owner_user_id", "review_id"],
+        ["scholarly_reviews.tenant_id", "scholarly_reviews.owner_user_id", "scholarly_reviews.id"],
+    )
+
+
+class ScholarlySearchExecution(Base, ScholarlyOwnedMixin):
+    __tablename__ = "scholarly_search_executions"
+    __table_args__ = (
+        _review_fk(),
+        UniqueConstraint(
+            "tenant_id", "owner_user_id", "review_id", "search_id", name="uq_scholarly_search_key"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    search_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    query: Mapped[str] = mapped_column(Text, nullable=False)
+    executed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    database: Mapped[str] = mapped_column(String(200), nullable=False)
+    filters: Mapped[list[dict[str, str]]] = mapped_column(JSONB, nullable=False)
+    result_record_ids: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    reported_result_count: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ScholarlySearchRecord(Base, ScholarlyOwnedMixin):
+    __tablename__ = "scholarly_search_records"
+    __table_args__ = (
+        _review_fk(),
+        ForeignKeyConstraint(
+            ["tenant_id", "owner_user_id", "review_id", "search_id"],
+            [
+                "scholarly_search_executions.tenant_id",
+                "scholarly_search_executions.owner_user_id",
+                "scholarly_search_executions.review_id",
+                "scholarly_search_executions.search_id",
+            ],
+        ),
+        UniqueConstraint(
+            "tenant_id", "owner_user_id", "review_id", "record_id", name="uq_scholarly_record_key"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    record_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    search_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    provider: Mapped[str] = mapped_column(String(200), nullable=False)
+    provider_record_id: Mapped[str] = mapped_column(String(500), nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    abstract: Mapped[str | None] = mapped_column(Text)
+    doi: Mapped[str | None] = mapped_column(String(500))
+    locator_url: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+def _record_fk() -> ForeignKeyConstraint:
+    return ForeignKeyConstraint(
+        ["tenant_id", "owner_user_id", "review_id", "record_id"],
+        [
+            "scholarly_search_records.tenant_id",
+            "scholarly_search_records.owner_user_id",
+            "scholarly_search_records.review_id",
+            "scholarly_search_records.record_id",
+        ],
+    )
+
+
+class ScholarlyScreeningDecision(Base, ScholarlyOwnedMixin):
+    __tablename__ = "scholarly_screening_decisions"
+    __table_args__ = (
+        _record_fk(),
+        UniqueConstraint(
+            "tenant_id",
+            "owner_user_id",
+            "review_id",
+            "record_id",
+            "stage",
+            name="uq_scholarly_decision_stage",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    record_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    stage: Mapped[str] = mapped_column(String(32), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+    exclusion_reason: Mapped[str | None] = mapped_column(String(64))
+    source_id: Mapped[str | None] = mapped_column(String(200))
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ScholarlyRetrievalReceipt(Base, ScholarlyOwnedMixin):
+    __tablename__ = "scholarly_retrieval_receipts"
+    __table_args__ = (
+        _record_fk(),
+        UniqueConstraint(
+            "tenant_id",
+            "owner_user_id",
+            "review_id",
+            "record_id",
+            name="uq_scholarly_receipt_record",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    record_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_id: Mapped[str | None] = mapped_column(String(200))
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ScholarlyDuplicateMark(Base, ScholarlyOwnedMixin):
+    __tablename__ = "scholarly_duplicate_marks"
+    __table_args__ = (
+        _record_fk(),
+        ForeignKeyConstraint(
+            ["tenant_id", "owner_user_id", "review_id", "canonical_record_id"],
+            [
+                "scholarly_search_records.tenant_id",
+                "scholarly_search_records.owner_user_id",
+                "scholarly_search_records.review_id",
+                "scholarly_search_records.record_id",
+            ],
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "owner_user_id",
+            "review_id",
+            "record_id",
+            name="uq_scholarly_duplicate_record",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    record_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    canonical_record_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ScholarlyStudyArtifact(Base, ScholarlyOwnedMixin):
+    __tablename__ = "scholarly_study_artifacts"
+    __table_args__ = (
+        _record_fk(),
+        UniqueConstraint(
+            "tenant_id",
+            "owner_user_id",
+            "review_id",
+            "record_id",
+            "id",
+            name="uq_scholarly_artifact_scope_id",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "owner_user_id",
+            "review_id",
+            "record_id",
+            "content_hash",
+            name="uq_scholarly_artifact_hash",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    record_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    artifact_ref: Mapped[str] = mapped_column(Text, nullable=False)
+    parsed_text: Mapped[str] = mapped_column(Text, nullable=False)
+    page_anchors: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ScholarlyEvidenceRow(Base, ScholarlyOwnedMixin):
+    __tablename__ = "scholarly_evidence_rows"
+    __table_args__ = (
+        _record_fk(),
+        ForeignKeyConstraint(
+            ["tenant_id", "owner_user_id", "review_id", "record_id", "artifact_id"],
+            [
+                "scholarly_study_artifacts.tenant_id",
+                "scholarly_study_artifacts.owner_user_id",
+                "scholarly_study_artifacts.review_id",
+                "scholarly_study_artifacts.record_id",
+                "scholarly_study_artifacts.id",
+            ],
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    record_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    artifact_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    source_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    claim: Mapped[str] = mapped_column(Text, nullable=False)
+    quote: Mapped[str] = mapped_column(Text, nullable=False)
+    page_anchor: Mapped[str | None] = mapped_column(String(200))
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ScholarlyAuditEvent(Base, ScholarlyOwnedMixin):
+    __tablename__ = "scholarly_audit_events"
+    __table_args__ = (_review_fk(),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    entity_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class LivingWatch(Base, TenantScopedMixin):
+    __tablename__ = "living_watches"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id", "owner_user_id"], ["users.tenant_id", "users.id"]),
+        UniqueConstraint("tenant_id", "id", name="uq_living_watch_tenant_id"),
+        Index("ix_living_watch_owner", "tenant_id", "owner_user_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    owner_user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    work_id: Mapped[str] = mapped_column(String(250), nullable=False)
+    title: Mapped[str] = mapped_column(String(1000), nullable=False)
+    abstract: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="unknown")
+    status_evidence_ref: Mapped[str | None] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    last_observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CollaborationMember(Base, TenantScopedMixin):
+    __tablename__ = "collaboration_members"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "watch_id"], ["living_watches.tenant_id", "living_watches.id"]
+        ),
+        ForeignKeyConstraint(["tenant_id", "user_id"], ["users.tenant_id", "users.id"]),
+        ForeignKeyConstraint(["tenant_id", "invited_by"], ["users.tenant_id", "users.id"]),
+    )
+
+    watch_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    invited_by: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    role: Mapped[str] = mapped_column(String(12), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class LivingEvent(Base, TenantScopedMixin):
+    __tablename__ = "living_events"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "watch_id"], ["living_watches.tenant_id", "living_watches.id"]
+        ),
+        UniqueConstraint("tenant_id", "watch_id", "change_key", name="uq_living_event_change"),
+        UniqueConstraint("tenant_id", "watch_id", "id", name="uq_living_event_scope_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    watch_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    change_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    priority: Mapped[str] = mapped_column(String(12), nullable=False)
+    field: Mapped[str] = mapped_column(String(20), nullable=False)
+    previous: Mapped[str | None] = mapped_column(Text)
+    current: Mapped[str | None] = mapped_column(Text)
+    evidence_ref: Mapped[str | None] = mapped_column(Text)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    decision: Mapped[str] = mapped_column(String(20), nullable=False, default="open")
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decided_by: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+
+
+class CollaborationAudit(Base, TenantScopedMixin):
+    __tablename__ = "collaboration_audit"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "watch_id"], ["living_watches.tenant_id", "living_watches.id"]
+        ),
+        ForeignKeyConstraint(["tenant_id", "actor_user_id"], ["users.tenant_id", "users.id"]),
+        ForeignKeyConstraint(
+            ["tenant_id", "watch_id", "target_event_id"],
+            ["living_events.tenant_id", "living_events.watch_id", "living_events.id"],
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    watch_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    action: Mapped[str] = mapped_column(String(40), nullable=False)
+    target_event_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    decision: Mapped[str | None] = mapped_column(String(20))
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

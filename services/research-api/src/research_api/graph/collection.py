@@ -1,6 +1,7 @@
 """Source collection graph node and its bounded provider fan-out."""
 
 import asyncio
+import re
 import uuid
 from datetime import UTC, datetime
 from time import monotonic
@@ -39,6 +40,23 @@ from research_api.providers.serper import SerperAdapter
 from research_api.providers.tavily import TavilyAdapter
 from research_api.research_limits import run_source_limit, source_allocations
 from research_api.telemetry import operation_event
+
+_SCHOLARLY_VERSION = re.compile(
+    r"^research-v(?:4|5-serper)-s-(s2|pm|ep|ax|ct)-b([12])(-oa)?$"
+)
+_SCHOLARLY_CODES = {
+    "s2": "semantic_scholar", "pm": "pubmed", "ep": "europe_pmc",
+    "ax": "arxiv", "ct": "clinical_trials",
+}
+
+
+def scholarly_route_from_version(version: str | None) -> tuple[str | None, int, bool]:
+    match = _SCHOLARLY_VERSION.fullmatch(version or "")
+    if match is None:
+        if version and "-s-" in version:
+            raise ValueError("unsupported pinned scholarly discovery route")
+        return None, 0, False
+    return _SCHOLARLY_CODES[match.group(1)], int(match.group(2)), bool(match.group(3))
 
 
 def ensure_collection_questions_resolved(
@@ -145,6 +163,9 @@ def build_collection_node(settings: Settings, checkpointer: Any = None) -> Any:
             return {"source_ids": []}
         if settings.TAVILY_API_KEY is None:
             raise RuntimeError("TAVILY_API_KEY is required to collect research sources")
+        scholarly_provider, scholarly_budget, scholarly_fallback = scholarly_route_from_version(
+            state.get("graph_version")
+        )
         store = S3ArtifactStore(
             endpoint_url=settings.OBJECT_STORAGE_ENDPOINT,
             bucket=settings.OBJECT_STORAGE_BUCKET,
@@ -161,7 +182,10 @@ def build_collection_node(settings: Settings, checkpointer: Any = None) -> Any:
         # The initial graph input is durably checkpointed before intake. Legacy
         # checkpoints without a route remain Tavily even if the flag changes.
         discovery_adapter = None
-        if state.get("discovery_provider", "tavily") == "serper":
+        if state.get("discovery_provider", "tavily") == "serper" or (
+            scholarly_provider
+            and (state.get("graph_version") or "").startswith("research-v5-serper-s-")
+        ):
             if settings.SERPER_API_KEY is None:
                 await adapter.aclose()
                 raise RuntimeError("SERPER_API_KEY is required for this pinned discovery route")
@@ -173,7 +197,7 @@ def build_collection_node(settings: Settings, checkpointer: Any = None) -> Any:
                 retry_after_max_s=settings.DISCOVERY_RETRY_AFTER_MAX_SECONDS,
             )
         academic_adapter = None
-        if state.get("openalex_discovery_enabled", False):
+        if state.get("openalex_discovery_enabled", False) or scholarly_fallback:
             from research_api.providers.openalex import OpenAlexAdapter
 
             academic_adapter = OpenAlexAdapter(
@@ -186,11 +210,36 @@ def build_collection_node(settings: Settings, checkpointer: Any = None) -> Any:
                 max_attempts=settings.PROVIDER_MAX_ATTEMPTS,
                 timeout=settings.PROVIDER_TIMEOUT_SECONDS,
             )
+        scholarly_adapter: Any = None
+        if scholarly_provider:
+            from research_api.providers.arxiv import ArxivAdapter
+            from research_api.providers.clinical_trials import ClinicalTrialsAdapter
+            from research_api.providers.europe_pmc import EuropePMCAdapter
+            from research_api.providers.pubmed import PubMedAdapter
+            from research_api.providers.semantic_scholar import SemanticScholarAdapter
+
+            scholarly_adapter = {
+                "arxiv": lambda: ArxivAdapter(timeout=settings.PROVIDER_TIMEOUT_SECONDS),
+                "pubmed": lambda: PubMedAdapter(timeout=settings.PROVIDER_TIMEOUT_SECONDS),
+                "europe_pmc": lambda: EuropePMCAdapter(timeout=settings.PROVIDER_TIMEOUT_SECONDS),
+                "clinical_trials": lambda: ClinicalTrialsAdapter(
+                    timeout=settings.PROVIDER_TIMEOUT_SECONDS
+                ),
+                "semantic_scholar": lambda: SemanticScholarAdapter(
+                    api_key=None,
+                    timeout=settings.PROVIDER_TIMEOUT_SECONDS,
+                    max_attempts=settings.PROVIDER_MAX_ATTEMPTS,
+                ),
+            }[scholarly_provider]()  # type: ignore[no-untyped-call]
         ingestor = TavilyEvidenceIngestor(
             adapter=adapter,
             artifact_store=store,
             discovery_adapter=discovery_adapter,
             academic_adapter=academic_adapter,
+            scholarly_adapter=scholarly_adapter,
+            scholarly_provider=scholarly_provider,
+            scholarly_search_budget_milli_usd=scholarly_budget,
+            scholarly_fallback_openalex=scholarly_fallback,
         )
         source_ids: list[str] = []
         async with tenant_session(str(tenant_id)) as session:
@@ -508,6 +557,8 @@ def build_collection_node(settings: Settings, checkpointer: Any = None) -> Any:
                 await discovery_adapter.aclose()
             if academic_adapter:
                 await academic_adapter.aclose()
+            if scholarly_adapter:
+                await scholarly_adapter.aclose()
         if await _cancel_if_requested(tenant_id=tenant_id, run_id=run_id):
             return {"source_ids": source_ids}
         expected_question_ids = [uuid.UUID(item) for item in state["sub_question_ids"]]

@@ -26,6 +26,8 @@ from research_api.library_api import router as library_router
 from research_api.providers.http_clients import provider_http_transport
 from research_api.request_rate_limits import RequestRateLimitMiddleware
 from research_api.runtime_api import router as runtime_router
+from research_api.scholarly.import_api import router as scholarly_import_router
+from research_api.scholarly.review_api import router as scholarly_review_router
 from research_api.sharing_exports_api import router as sharing_exports_router
 from research_api.telemetry import dependency_logging, operation_event, request_id
 
@@ -174,6 +176,8 @@ app.include_router(runtime_router)
 app.include_router(comparison_router)
 app.include_router(library_router)
 app.include_router(sharing_exports_router)
+app.include_router(scholarly_review_router)
+app.include_router(scholarly_import_router)
 app.include_router(billing_router)
 
 
