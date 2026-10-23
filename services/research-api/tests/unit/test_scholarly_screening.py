@@ -207,6 +207,26 @@ def test_index_locator_alone_never_counts_as_retrieval_or_inclusion():
     assert flow.reports_retrieved == flow.studies_included == 0
 
 
+def test_identical_included_pdf_uploads_count_as_one_study_not_two_reports():
+    records = [SearchRecord(
+        record_id=f"r{number}", search_id=f"upload-{number}", provider="user_pdf_upload",
+        provider_record_id="same-sha256", title="Same paper",
+    ) for number in (1, 2)]
+    decisions = [
+        decision(number, ScreeningStage.TITLE_ABSTRACT, ScreeningOutcome.INCLUDE)
+        for number in (1, 2)
+    ] + [
+        decision(number, ScreeningStage.FULL_TEXT, ScreeningOutcome.INCLUDE,
+                 source_id=f"pdf-{number}") for number in (1, 2)
+    ]
+    receipts = [FullTextReceipt(record_id=f"r{number}", status=RetrievalStatus.RETRIEVED,
+                                source_id=f"pdf-{number}") for number in (1, 2)]
+    flow = build_prisma_flow(records, decisions, receipts)
+    assert flow.records_identified == 2
+    assert flow.reports_retrieved == 2
+    assert flow.studies_included == 1
+
+
 @pytest.mark.parametrize(
     ("decisions", "receipts", "duplicates"),
     [

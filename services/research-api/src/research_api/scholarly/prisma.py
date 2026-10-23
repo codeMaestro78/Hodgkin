@@ -57,8 +57,9 @@ def build_prisma_flow(
     """Count observed records and explicit transitions, including unresolved work.
 
     Duplicate removal is explicit: matching titles/DOIs alone do not prove a
-    duplicate. Each record is one search occurrence, so multiple occurrences
-    of a study must be explicitly deduplicated by the review workflow.
+    duplicate. Each record is one search occurrence. The included count groups
+    exact DOI or uploaded-file matches; it is not a complete study-identity
+    resolution for different reports about one study.
     """
     records_by_id: dict[str, SearchRecord] = {}
     for record in records:
@@ -91,6 +92,7 @@ def build_prisma_flow(
     assessed = full_excluded = full_maybe = awaiting_assessment = included = 0
     title_reasons: Counter[ExclusionReason] = Counter()
     full_reasons: Counter[ExclusionReason] = Counter()
+    included_study_keys: set[tuple[str, str]] = set()
 
     for record_id in sorted(records_by_id.keys() - duplicates):
         title = decisions_by_key.get((record_id, ScreeningStage.TITLE_ABSTRACT))
@@ -142,7 +144,16 @@ def build_prisma_flow(
         elif full.outcome == ScreeningOutcome.MAYBE:
             full_maybe += 1
         else:
-            included += 1
+            record = records_by_id[record_id]
+            if record.doi:
+                study_key = ("doi", record.doi.casefold())
+            elif record.provider == "user_pdf_upload":
+                study_key = ("pdf_sha256", record.provider_record_id)
+            else:
+                study_key = ("record", record_id)
+            included_study_keys.add(study_key)
+
+    included = len(included_study_keys)
 
     return PrismaFlow(
         records_identified=len(records_by_id),

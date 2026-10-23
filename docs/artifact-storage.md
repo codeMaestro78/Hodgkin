@@ -64,6 +64,10 @@ flowchart LR
   `GET /api/research/sources/:sourceId` endpoint (see [api.md](./api.md))
   returns metadata plus the *specific verified excerpt* tied to a
   citation — not the full raw artifact.
+- For PDFs explicitly uploaded into a scholarly review, the owner-scoped
+  review page reader is an exception for extracted text from one verified page
+  at a time. The raw PDF and its storage reference remain server-side, and a
+  selected passage is still re-verified before it can be linked as evidence.
 - Access to raw artifacts (e.g., for internal debugging or evaluation
   tooling) is tenant-scoped and audited the same way any other sensitive
   read is — see [security.md](./security.md#audit-logs).

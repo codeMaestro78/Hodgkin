@@ -97,3 +97,9 @@ timeouts).
 - The frontend and API never expose full raw artifacts — only metadata
   and the specific verified excerpt tied to a citation (see
   [artifact-storage.md](./artifact-storage.md#access-control)).
+- Scholarly review has a narrower, explicit exception for a user's own uploaded
+  PDF: an authenticated, owner-scoped page-text reader may return one extracted
+  page at a time after the stored PDF hash and saved extraction are verified.
+  It never returns raw PDF bytes, object-storage references, or another user's
+  artifact; responses are private and non-cacheable. Page text is for human
+  inspection and quote selection, not automatic claim-support verification.

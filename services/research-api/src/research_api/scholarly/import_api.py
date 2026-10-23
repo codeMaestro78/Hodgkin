@@ -9,9 +9,10 @@ from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 from botocore.exceptions import BotoCoreError, ClientError
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import Field
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from research_api.artifacts.store import ArtifactRecord, ArtifactStore, artifact_identity
 from research_api.auth import Caller
@@ -50,12 +51,13 @@ class ImportResponse(APIModel):
     evidence_status: Literal["discovery_only", "page_text_locator"]
     source_artifact_id: uuid.UUID | None = None
     page_numbers: list[int] = Field(default_factory=list)
+    already_imported: bool = False
 
 
 class AnchorCheckRequest(APIModel):
     page_number: int = Field(ge=1, le=100)
-    start: int = Field(ge=0, le=1_000_000)
-    end: int = Field(gt=0, le=1_000_000)
+    start: int | None = Field(default=None, ge=0, le=1_000_000)
+    end: int | None = Field(default=None, gt=0, le=1_000_000)
     quote: str = Field(min_length=1, max_length=600)
 
 
@@ -64,6 +66,39 @@ class AnchorCheckResponse(APIModel):
     page_number: int
     locator_verified: Literal[True] = True
     claim_support_verified: Literal[False] = False
+
+
+async def _existing_pdf_import(
+    session: AsyncSession, caller: Caller, review_id: uuid.UUID, content_hash: str,
+) -> ImportResponse | None:
+    existing = await session.scalar(select(ScholarlyStudyArtifact).where(
+        ScholarlyStudyArtifact.tenant_id == caller.tenant_id,
+        ScholarlyStudyArtifact.owner_user_id == caller.user_id,
+        ScholarlyStudyArtifact.review_id == review_id,
+        ScholarlyStudyArtifact.content_hash == content_hash,
+    ).order_by(ScholarlyStudyArtifact.created_at, ScholarlyStudyArtifact.id).limit(1))
+    if existing is None:
+        return None
+    record = await session.scalar(select(ScholarlySearchRecord).where(
+        ScholarlySearchRecord.tenant_id == caller.tenant_id,
+        ScholarlySearchRecord.owner_user_id == caller.user_id,
+        ScholarlySearchRecord.review_id == review_id,
+        ScholarlySearchRecord.record_id == existing.record_id,
+    ))
+    if record is None:
+        raise HTTPException(409, "imported PDF has no review record")
+    return ImportResponse(
+        review_id=review_id, record_id=existing.record_id, doi=record.doi,
+        title=record.title, evidence_status="page_text_locator",
+        source_artifact_id=existing.id,
+        page_numbers=[
+            anchor["page_number"] for anchor in existing.page_anchors
+            if isinstance(anchor, dict)
+            and isinstance(anchor.get("page_number"), int)
+            and not isinstance(anchor["page_number"], bool)
+        ],
+        already_imported=True,
+    )
 
 
 async def _require_review(review_id: uuid.UUID, caller: Caller) -> None:
@@ -194,6 +229,7 @@ async def import_doi(
 async def import_pdf(
     review_id: uuid.UUID,
     request: Request,
+    response: Response,
     caller: CallerDep,
     title: Annotated[str, Query(min_length=1, max_length=500)],
 ) -> ImportResponse:
@@ -202,6 +238,13 @@ async def import_pdf(
     if not clean_title:
         raise HTTPException(422, "title must contain text")
     raw = await _bounded_pdf(request)
+    content_hash = hashlib.sha256(raw).hexdigest()
+    async with owner_session(caller) as session:
+        await require_review(session, caller, review_id)
+        duplicate = await _existing_pdf_import(session, caller, review_id, content_hash)
+    if duplicate is not None:
+        response.status_code = 200
+        return duplicate
     try:
         pages = await asyncio.to_thread(extract_pdf_text, raw)
     except PDFExtractionError as exc:
@@ -215,7 +258,12 @@ async def import_pdf(
     search_id = f"user-pdf-import:{record_id}"
     original_id = uuid.uuid4()
     async with owner_session(caller) as session:
-        await require_review(session, caller, review_id)
+        await require_review(session, caller, review_id, lock=True)
+        # A concurrent upload may have committed while this one was parsed/stored.
+        duplicate = await _existing_pdf_import(session, caller, review_id, content_hash)
+        if duplicate is not None:
+            response.status_code = 200
+            return duplicate
         session.add(
             ScholarlySearchExecution(
                 tenant_id=caller.tenant_id,

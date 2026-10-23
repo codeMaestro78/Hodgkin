@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
 from fastapi.testclient import TestClient
 from sqlalchemy.dialects import postgresql
 
@@ -66,21 +66,146 @@ def test_migration_protects_every_table(monkeypatch):
 @pytest.mark.asyncio
 async def test_locked_review_is_scoped_to_tenant_and_owner():
     class Session:
-        query = None
+        queries = []
 
         async def scalar(self, query):
-            self.query = query
-            return None
+            self.queries.append(query)
+            return review_id
+
+        async def execute(self, query, parameters):
+            self.queries.append((query, parameters))
 
     session = Session()
     caller = Caller(tenant_id=uuid.uuid4(), user_id=uuid.uuid4())
-    with pytest.raises(HTTPException) as error:
-        await review_api.require_review(session, caller, uuid.uuid4(), lock=True)
-    assert error.value.status_code == 404
-    sql = str(session.query.compile(dialect=postgresql.dialect()))
+    review_id = uuid.uuid4()
+    await review_api.require_review(session, caller, review_id, lock=True)
+    sql = str(session.queries[0].compile(dialect=postgresql.dialect()))
     assert "scholarly_reviews.tenant_id" in sql
     assert "scholarly_reviews.owner_user_id" in sql
-    assert "FOR UPDATE" in sql
+    assert "FOR UPDATE" not in sql
+    lock_query, lock_params = session.queries[1]
+    assert "pg_advisory_xact_lock" in str(lock_query)
+    assert lock_params == {"lock_key": f"scholarly-review:{review_id}"}
+
+
+@pytest.mark.asyncio
+async def test_artifact_list_restores_owned_pdf_metadata_without_exposing_text(monkeypatch):
+    caller = Caller(tenant_id=uuid.uuid4(), user_id=uuid.uuid4())
+    review_id = uuid.uuid4()
+    artifact_id = uuid.uuid4()
+    observed = []
+
+    class Session:
+        async def scalar(self, _query):
+            return review_id
+
+        async def scalars(self, query):
+            observed.append(query)
+            return SimpleNamespace(all=lambda: [SimpleNamespace(
+                id=artifact_id, record_id="paper-1", parsed_text="private full text",
+                artifact_ref="private/storage/ref",
+                page_anchors=[{"page_number": 1}, {"page_number": 3}],
+            )])
+
+    @asynccontextmanager
+    async def fake_session(_caller):
+        yield Session()
+
+    monkeypatch.setattr(review_api, "owner_session", fake_session)
+    rows = await review_api.list_artifacts(review_id, caller)
+    assert rows == [{"recordId": "paper-1", "artifactId": str(artifact_id), "pageNumbers": [1, 3]}]
+    sql = str(observed[0].compile(dialect=postgresql.dialect()))
+    assert "scholarly_study_artifacts.tenant_id" in sql
+    assert "scholarly_study_artifacts.owner_user_id" in sql
+    assert "scholarly_study_artifacts.review_id" in sql
+
+
+@pytest.mark.asyncio
+async def test_page_reader_returns_only_owned_verified_page_without_storage_reference(monkeypatch):
+    from research_api.scholarly import pdf_extract
+
+    caller = Caller(tenant_id=uuid.uuid4(), user_id=uuid.uuid4())
+    review_id = uuid.uuid4()
+    artifact_id = uuid.uuid4()
+    queries = []
+    artifact = SimpleNamespace(id=artifact_id, record_id="paper-1", artifact_ref="private/ref")
+
+    class Session:
+        async def scalar(self, query):
+            queries.append(str(query))
+            if len(queries) == 1:
+                return review_id
+            if len(queries) == 2:
+                return artifact
+            return SimpleNamespace(provider="user_pdf_upload")
+
+    @asynccontextmanager
+    async def fake_session(_caller):
+        yield Session()
+
+    async def fake_verified(_store, *, caller, review_id, artifact):
+        return "Page one.\n\nPage two.", [
+            {"page_number": 1, "anchor": "page:1", "start": 0, "end": 9},
+            {"page_number": 2, "anchor": "page:2", "start": 11, "end": 20},
+        ]
+
+    monkeypatch.setattr(review_api, "owner_session", fake_session)
+    monkeypatch.setattr(pdf_extract, "review_artifact_store", lambda: object())
+    monkeypatch.setattr(pdf_extract, "verified_stored_pdf_text", fake_verified)
+    response = Response()
+    result = await review_api.read_artifact_page(review_id, artifact_id, 2, caller, response)
+    assert result == {"recordId": "paper-1", "artifactId": str(artifact_id),
+                      "pageNumber": 2, "text": "Page two.", "claimSupportVerified": False}
+    assert "artifact_ref" not in result
+    assert response.headers["cache-control"] == "private, no-store"
+    assert "owner_user_id" in queries[1] and "review_id" in queries[1]
+
+
+@pytest.mark.asyncio
+async def test_page_reader_hides_unowned_artifacts(monkeypatch):
+    caller = Caller(tenant_id=uuid.uuid4(), user_id=uuid.uuid4())
+
+    class Session:
+        calls = 0
+
+        async def scalar(self, _query):
+            self.calls += 1
+            return uuid.uuid4() if self.calls == 1 else None
+
+    @asynccontextmanager
+    async def fake_session(_caller):
+        yield Session()
+
+    monkeypatch.setattr(review_api, "owner_session", fake_session)
+    with pytest.raises(HTTPException) as error:
+        await review_api.read_artifact_page(uuid.uuid4(), uuid.uuid4(), 1, caller, Response())
+    assert error.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_page_reader_rejects_non_user_pdf_artifacts(monkeypatch):
+    caller = Caller(tenant_id=uuid.uuid4(), user_id=uuid.uuid4())
+    artifact_id = uuid.uuid4()
+
+    class Session:
+        calls = 0
+
+        async def scalar(self, _query):
+            self.calls += 1
+            if self.calls == 1:
+                return uuid.uuid4()
+            if self.calls == 2:
+                return SimpleNamespace(id=artifact_id, record_id="paper-1")
+            return SimpleNamespace(provider="crossref_metadata")
+
+    @asynccontextmanager
+    async def fake_session(_caller):
+        yield Session()
+
+    monkeypatch.setattr(review_api, "owner_session", fake_session)
+    with pytest.raises(HTTPException) as error:
+        await review_api.read_artifact_page(uuid.uuid4(), artifact_id, 1, caller, Response())
+    assert error.value.status_code == 404
 
 
 def test_search_execution_rejects_invalid_receipt():

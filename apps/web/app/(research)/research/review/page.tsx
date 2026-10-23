@@ -1,13 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { WorkspaceShell } from "../../../components/workspace-shell";
 import { Alert, Button, Empty } from "../../../components/workbench-ui";
 import { safeUrl } from "../../../components/ui";
 import {
-  addEvidence, createReview, getFlow, getReview, importDoi, importPdf,
+  addEvidence, createReview, evidenceSourceForRecord, getArtifactPage, getFlow, getReview, importDoi, importPdf,
   importRecords, listReviews, saveDecision, saveRetrieval,
-  type Decision, type Flow, type RecordRow, type Review, type ReviewDetail,
+  type Decision, type Flow, type RecordRow, type Review, type ReviewDetail, type StudyArtifact,
 } from "./scholarly-client";
 import "./review.css";
 
@@ -23,7 +23,7 @@ const COUNTS = [
   ["reports_not_retrieved", "Not retrieved"], ["reports_awaiting_retrieval", "Awaiting retrieval"],
   ["reports_assessed", "Full texts assessed"], ["reports_excluded", "Full texts excluded"],
   ["reports_maybe", "Full text maybe"], ["reports_awaiting_assessment", "Awaiting assessment"],
-  ["studies_included", "Studies included"],
+  ["studies_included", "Unique included papers (exact matches)"],
 ] as const;
 
 function message(cause: unknown) {
@@ -67,11 +67,12 @@ function DecisionForm({ reviewId, record, stage, sourceId, onSaved }: {
   </form>;
 }
 
-function RetrievalForm({ reviewId, recordId, onSaved }: {
-  reviewId: string; recordId: string; onSaved: () => Promise<void>;
+function RetrievalForm({ reviewId, recordId, artifacts, onSaved }: {
+  reviewId: string; recordId: string; artifacts: StudyArtifact[]; onSaved: () => Promise<void>;
 }) {
   const [status, setStatus] = useState("retrieved");
   const [sourceId, setSourceId] = useState("");
+  const selectedSourceId = sourceId || artifacts[0]?.artifactId || "";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   async function submit(event: FormEvent) {
@@ -79,7 +80,7 @@ function RetrievalForm({ reviewId, recordId, onSaved }: {
     try {
       await saveRetrieval(reviewId, {
         record_id: recordId, status: status as "retrieved" | "not_retrieved",
-        source_id: status === "retrieved" ? sourceId.trim() : null,
+        source_id: status === "retrieved" ? selectedSourceId : null,
       });
       await onSaved();
     } catch (cause) { setError(message(cause)); }
@@ -91,10 +92,14 @@ function RetrievalForm({ reviewId, recordId, onSaved }: {
         <option value="retrieved">Retrieved</option><option value="not_retrieved">Not retrieved</option>
       </select>
     </label>
-    {status === "retrieved" ? <label>Retrieved source ID
-      <input required value={sourceId} onChange={(event) => setSourceId(event.target.value)} placeholder="ID from the retrieved source" />
-    </label> : null}
-    <Button type="submit" disabled={busy}>{busy ? "Saving…" : "Save retrieval"}</Button>
+    {status === "retrieved" ? artifacts.length ? <label>Uploaded PDF
+      <select value={selectedSourceId} onChange={(event) => setSourceId(event.target.value)}>
+        {artifacts.map((artifact) => <option key={artifact.artifactId} value={artifact.artifactId}>
+          PDF · {artifact.pageNumbers.length} pages
+        </option>)}
+      </select>
+    </label> : <p>No PDF is attached to this record. A DOI or search result alone cannot be marked retrieved.</p> : null}
+    <Button type="submit" disabled={busy || (status === "retrieved" && !selectedSourceId)}>{busy ? "Saving…" : "Save retrieval"}</Button>
     {error ? <Alert>{error}</Alert> : null}
   </form>;
 }
@@ -113,19 +118,25 @@ export default function ScholarlyReviewPage() {
   const [title, setTitle] = useState("");
   const [question, setQuestion] = useState("");
   const [doi, setDoi] = useState("");
+  const [doiError, setDoiError] = useState("");
   const [pdfTitle, setPdfTitle] = useState("");
   const [pdf, setPdf] = useState<File | null>(null);
   const [database, setDatabase] = useState("");
   const [query, setQuery] = useState("");
   const [recordJson, setRecordJson] = useState("");
   const [evidenceRecord, setEvidenceRecord] = useState("");
-  const [artifactId, setArtifactId] = useState("");
-  const [sourceId, setSourceId] = useState("");
   const [claim, setClaim] = useState("");
   const [quote, setQuote] = useState("");
   const [pageNumber, setPageNumber] = useState("1");
-  const [quoteStart, setQuoteStart] = useState("0");
-  const [quoteEnd, setQuoteEnd] = useState("");
+  const [showImport, setShowImport] = useState(false);
+  const [pendingRecordFocus, setPendingRecordFocus] = useState("");
+  const [showEvidenceForm, setShowEvidenceForm] = useState(false);
+  const [readerText, setReaderText] = useState("");
+  const [readerLoading, setReaderLoading] = useState(false);
+  const [readerError, setReaderError] = useState("");
+  const [selectionError, setSelectionError] = useState("");
+  const [readerRetry, setReaderRetry] = useState(0);
+  const pageTextRef = useRef<HTMLDivElement>(null);
 
   const refresh = useCallback(async (id: string) => {
     setDetailLoading(true); setDetailError("");
@@ -148,11 +159,19 @@ export default function ScholarlyReviewPage() {
     if (!reviewId) { setDetail(null); setFlow(null); return; }
     void refresh(reviewId);
   }, [reviewId, refresh]);
+  useEffect(() => {
+    if (!pendingRecordFocus || !detail?.records.some((record) => record.record_id === pendingRecordFocus)) return;
+    const frame = requestAnimationFrame(() => {
+      document.getElementById(`record-${pendingRecordFocus}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      setPendingRecordFocus("");
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [detail, pendingRecordFocus]);
 
-  async function run(action: () => Promise<void>, success: string) {
+  async function run(action: () => Promise<void>, success: string | (() => string), onError?: (message: string) => void) {
     setBusy(true); setError(""); setNotice("");
-    try { await action(); setNotice(success); if (reviewId) await refresh(reviewId); }
-    catch (cause) { setError(message(cause)); }
+    try { await action(); setNotice(typeof success === "string" ? success : success()); if (reviewId) await refresh(reviewId); }
+    catch (cause) { setError(message(cause)); onError?.(message(cause)); }
     finally { setBusy(false); }
   }
 
@@ -161,6 +180,7 @@ export default function ScholarlyReviewPage() {
     try {
       const created = await createReview(title.trim(), question.trim());
       setReviews((current) => [created, ...current]); setReviewId(created.reviewId);
+      setShowImport(true);
       setTitle(""); setQuestion(""); setNotice("Review created.");
     } catch (cause) { setError(message(cause)); }
     finally { setBusy(false); }
@@ -192,8 +212,49 @@ export default function ScholarlyReviewPage() {
   }
 
   const decisionFor = (recordId: string, stage: Decision["stage"]) => detail?.decisions.find((item) => item.record_id === recordId && item.stage === stage);
+  const eligibleEvidenceRecords = detail?.records.filter((record) => evidenceSourceForRecord(detail, record.record_id)) ?? [];
+  const selectedEvidenceRecord = eligibleEvidenceRecords.some((record) => record.record_id === evidenceRecord)
+    ? evidenceRecord : eligibleEvidenceRecords[0]?.record_id ?? "";
+  const selectedEvidenceArtifact = detail && selectedEvidenceRecord ? evidenceSourceForRecord(detail, selectedEvidenceRecord) : null;
+  const availablePages = selectedEvidenceArtifact?.pageNumbers ?? [];
+  const selectedPage = availablePages.includes(Number(pageNumber)) ? Number(pageNumber) : availablePages[0];
+  useEffect(() => {
+    if (!showEvidenceForm || !reviewId || !selectedEvidenceArtifact || !selectedPage) return;
+    let active = true;
+    getArtifactPage(reviewId, selectedEvidenceArtifact.artifactId, selectedPage).then((page) => {
+      if (active) { setReaderText(page.text); setReaderError(""); }
+    }).catch((cause) => { if (active) { setReaderText(""); setReaderError(message(cause)); } })
+      .finally(() => { if (active) setReaderLoading(false); });
+    return () => { active = false; };
+  }, [showEvidenceForm, reviewId, selectedEvidenceArtifact?.artifactId, selectedPage, readerRetry]);
+
+  function openEvidence(recordId: string) {
+    setEvidenceRecord(recordId);
+    setPageNumber("1");
+    setReaderText("");
+    setReaderLoading(true);
+    setShowEvidenceForm(true);
+    requestAnimationFrame(() => document.getElementById("evidence-heading")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }
+
+  function selectPassage() {
+    const selection = window.getSelection();
+    const root = pageTextRef.current;
+    if (!selection || selection.isCollapsed || !root?.contains(selection.anchorNode) || !root.contains(selection.focusNode)) return;
+    const selected = selection.toString().trim();
+    if (selected.length < 1 || selected.length > 600) {
+      setSelectionError("Select a passage between 1 and 600 characters.");
+      return;
+    }
+    if (!readerText.includes(selected)) {
+      setSelectionError("The selected text could not be matched exactly. Choose a continuous passage on one page.");
+      return;
+    }
+    setQuote(selected);
+    setSelectionError("");
+  }
   return <WorkspaceShell title="Scholarly review">
-    <main className="scholarly-review">
+    <div className="scholarly-review">
       <header className="scholarly-header"><p className="scholarly-kicker">Research / Review</p>
         <h1>Scholarly review</h1>
         <p>Import observed records and documents, record your decisions, and follow the review flow. Metadata alone is not full-text evidence.</p>
@@ -211,7 +272,7 @@ export default function ScholarlyReviewPage() {
         </form>
         {loading ? <p role="status">Loading reviews…</p> : reviews.length ?
           <label className="scholarly-picker">Open review
-            <select value={reviewId} onChange={(event) => setReviewId(event.target.value)}>
+            <select value={reviewId} onChange={(event) => { setReviewId(event.target.value); setShowImport(false); setShowEvidenceForm(false); }}>
               {reviews.map((item) => <option key={item.reviewId} value={item.reviewId}>{item.title}</option>)}
             </select>
           </label> : <Empty title="No reviews yet">Create one to begin collecting records.</Empty>}
@@ -221,14 +282,17 @@ export default function ScholarlyReviewPage() {
         {detailLoading ? <p role="status">Loading review and counts…</p> : null}
         {detailError ? <Alert>{detailError} <Button type="button" variant="outline" onClick={() => void refresh(reviewId)}>Retry</Button></Alert> : null}
         <section className="scholarly-panel" aria-labelledby="import-heading">
-          <h2 id="import-heading">Import</h2>
-          <p>DOI results add discovery metadata. A PDF import stores parsed page text; inspect the source before recording a retrieval or decision.</p>
+          <div className="scholarly-section-heading"><h2 id="import-heading">Add papers</h2><Button type="button" variant="outline" onClick={() => setShowImport((value) => !value)} aria-expanded={showImport} aria-controls={showImport ? "scholarly-import-content" : undefined}>{showImport ? "Hide import options" : "Import DOI or PDF"}</Button></div>
+          {showImport ? <div id="scholarly-import-content">
+          <p>A DOI is a published paper’s identifier, often shown near its title or in a doi.org link. It is optional. If you have a PDF instead, use the PDF form. DOI import adds bibliographic details only; a PDF is needed to link exact source passages.</p>
           <div className="scholarly-import-grid">
-            <form className="scholarly-form" onSubmit={(event) => { event.preventDefault(); void run(async () => { await importDoi(reviewId, doi.trim()); setDoi(""); }, "DOI metadata imported."); }}>
-              <h3>DOI</h3><label>DOI<input required value={doi} onChange={(event) => setDoi(event.target.value)} placeholder="10.1000/example" /></label>
+            <form className="scholarly-form" onSubmit={(event) => { event.preventDefault(); setDoiError(""); void run(async () => { await importDoi(reviewId, doi.trim()); setDoi(""); }, "DOI metadata imported.", setDoiError); }}>
+              <h3>Import a paper by DOI</h3><label>DOI or doi.org link<input required value={doi} onChange={(event) => { setDoi(event.target.value); setDoiError(""); }} placeholder="10.1038/s41586-020-2649-2" /></label>
+              <p>Example: 10.1038/s41586-020-2649-2. A title, search phrase, or ordinary webpage URL will not work here.</p>
               <Button type="submit" disabled={busy}>Import DOI</Button>
+              {doiError ? <Alert>{doiError}</Alert> : null}
             </form>
-            <form className="scholarly-form" onSubmit={(event) => { event.preventDefault(); if (!pdf) return; void run(async () => { const imported = await importPdf(reviewId, pdfTitle.trim(), pdf); setEvidenceRecord(imported.recordId); setArtifactId(imported.artifactId); setSourceId(String(imported.artifactId)); setPdf(null); setPdfTitle(""); }, "PDF imported. Its artifact ID is filled in below; screen and retrieve the record before linking a passage."); }}>
+            <form className="scholarly-form" onSubmit={(event) => { event.preventDefault(); if (!pdf) return; let duplicate = false; void run(async () => { const imported = await importPdf(reviewId, pdfTitle.trim(), pdf); duplicate = imported.alreadyImported; setEvidenceRecord(imported.recordId); setPendingRecordFocus(imported.recordId); setPdf(null); setPdfTitle(""); setShowImport(false); }, () => duplicate ? "This PDF is already in this review. No new record was created." : "PDF imported. Screen the paper to continue."); }}>
               <h3>PDF document</h3><label>Document title<input required maxLength={500} value={pdfTitle} onChange={(event) => setPdfTitle(event.target.value)} /></label>
               <label>PDF, up to 4 MiB<input required type="file" accept="application/pdf,.pdf" onChange={(event) => setPdf(event.target.files?.[0] ?? null)} /></label>
               <Button type="submit" disabled={busy || !pdf}>Import PDF</Button>
@@ -243,11 +307,21 @@ export default function ScholarlyReviewPage() {
               <Button type="submit" disabled={busy}>Import records</Button>
             </form>
           </details>
+          </div> : !detail?.records.length ? <p>No papers yet. Import a DOI or PDF to start this review.</p> : null}
         </section>
 
         <section className="scholarly-panel" aria-labelledby="flow-heading">
-          <h2 id="flow-heading">Review flow counts</h2><p>Counts reflect recorded workflow events and unresolved work. They are not a PRISMA compliance certification.</p>
-          {flow ? <dl className="scholarly-counts">{COUNTS.map(([key, label]) => <div key={key}><dt>{label}</dt><dd>{typeof flow[key] === "number" ? flow[key] : "—"}</dd></div>)}</dl> : <p>No counts available yet.</p>}
+          <h2 id="flow-heading">Where your review stands</h2>
+          {flow ? <>
+            <dl className="scholarly-counts scholarly-counts-focus">
+              {([ ["records_awaiting_screening", "To screen"], ["reports_awaiting_assessment", "To assess"], ["studies_included", "Included papers"] ] as const).map(([key, label]) =>
+                <div key={key}><dt>{label}</dt><dd>{typeof flow[key] === "number" ? flow[key] : "—"}</dd></div>)}
+            </dl>
+            <details className="scholarly-manual"><summary>View all review flow counts</summary>
+              <p>“Retrieved” means a PDF was marked available, not that it was fetched automatically. Identical PDF files or matching DOIs count once as an included paper; other duplicates may still need review. These counts are not a PRISMA compliance certification.</p>
+              <dl className="scholarly-counts">{COUNTS.map(([key, label]) => <div key={key}><dt>{label}</dt><dd>{typeof flow[key] === "number" ? flow[key] : "—"}</dd></div>)}</dl>
+            </details>
+          </> : <p>No counts available yet.</p>}
         </section>
 
         <section className="scholarly-panel" aria-labelledby="records-heading">
@@ -256,18 +330,31 @@ export default function ScholarlyReviewPage() {
             const titleDecision = decisionFor(record.record_id, "title_abstract");
             const retrieval = detail.retrievals.find((item) => item.record_id === record.record_id);
             const fullDecision = decisionFor(record.record_id, "full_text");
+            const artifacts = detail.artifacts.filter((item) => item.recordId === record.record_id);
             const url = record.locator_url ? safeUrl(record.locator_url) : undefined;
-            return <article className="scholarly-record" key={record.record_id}>
-              <div className="scholarly-record-head"><h3>{record.title}</h3><span>{record.provider}</span></div>
-              <p className="scholarly-record-meta">{record.doi ? `DOI: ${record.doi}` : "No DOI"} · Record ID: {record.record_id}</p>
-              {record.abstract ? <details><summary>Abstract</summary><p>{record.abstract}</p></details> : <p>No abstract supplied.</p>}
+            const evidenceCount = detail.evidence.filter((row) => row.recordId === record.record_id).length;
+            const firstPdfCopy = record.provider === "user_pdf_upload"
+              ? detail.records.find((item) => item.provider === "user_pdf_upload" && item.provider_record_id === record.provider_record_id)
+              : undefined;
+            return <article className="scholarly-record" id={`record-${record.record_id}`} key={record.record_id}>
+              <div className="scholarly-record-head"><h3>{record.title}</h3><span>{artifacts.length ? "Uploaded PDF" : "Search record"}</span></div>
+              {firstPdfCopy && firstPdfCopy.record_id !== record.record_id ? <p className="scholarly-duplicate-note">This is the same PDF as <a href={`#record-${firstPdfCopy.record_id}`}>{firstPdfCopy.title}</a>. Earlier screening decisions remain in the audit; the included-paper count groups exact copies.</p> : null}
+              {record.abstract ? <details><summary>Abstract</summary><p>{record.abstract}</p></details> : <p>{artifacts.length ? "Abstract details were not imported; assess the uploaded paper itself." : "No abstract supplied."}</p>}
+              {artifacts[0] ? <p className="scholarly-document-status">You uploaded this PDF. Text was extracted from {artifacts[0].pageNumbers.length} {artifacts[0].pageNumbers.length === 1 ? "page" : "pages"}.</p> : null}
               {url ? <a href={url} target="_blank" rel="noopener noreferrer">Open source locator</a> : null}
+              <p className="scholarly-stage-line">Screening: {titleDecision?.outcome ?? "Needs decision"} · PDF: {retrieval?.status === "retrieved" ? "Available" : artifacts.length ? "Uploaded, not yet recorded" : "Not attached"} · Full text: {fullDecision?.outcome ?? "Needs decision"} · Passages: {evidenceCount}</p>
               {titleDecision ? <p><strong>Title/abstract:</strong> {titleDecision.outcome}{titleDecision.exclusion_reason ? ` · ${titleDecision.exclusion_reason.replaceAll("_", " ")}` : ""}</p>
                 : <DecisionForm reviewId={reviewId} record={record} stage="title_abstract" onSaved={() => refresh(reviewId)} />}
-              {titleDecision?.outcome === "include" ? retrieval ? <p><strong>Retrieval:</strong> {retrieval.status}{retrieval.source_id ? ` · ${retrieval.source_id}` : ""}</p>
-                : <RetrievalForm reviewId={reviewId} recordId={record.record_id} onSaved={() => refresh(reviewId)} /> : null}
+              {titleDecision?.outcome === "include" ? retrieval ? <p><strong>PDF availability:</strong> {retrieval.status === "retrieved" ? "Recorded for full-text assessment" : "Full text not retrieved"}</p>
+                : artifacts.length === 1 ? <div className="scholarly-next-action"><p>Next: confirm that your uploaded PDF is available for full-text assessment. This does not fetch or assess the paper.</p><Button type="button" onClick={() => void run(() => saveRetrieval(reviewId, { record_id: record.record_id, status: "retrieved", source_id: artifacts[0]?.artifactId ?? null }), "Uploaded PDF recorded as available.")} disabled={busy}>Use uploaded PDF</Button></div>
+                : <RetrievalForm reviewId={reviewId} recordId={record.record_id} artifacts={artifacts} onSaved={() => refresh(reviewId)} /> : null}
+              {retrieval?.status === "retrieved" && !fullDecision ? <p>Next: assess the full text below. Evidence can be linked after you include it.</p> : null}
               {retrieval?.status === "retrieved" && retrieval.source_id ? fullDecision ? <p><strong>Full text:</strong> {fullDecision.outcome}</p>
                 : <DecisionForm reviewId={reviewId} record={record} stage="full_text" sourceId={retrieval.source_id} onSaved={() => refresh(reviewId)} /> : null}
+              {fullDecision?.outcome === "include" && retrieval?.status === "retrieved" && artifacts.some((item) => item.artifactId === retrieval.source_id) ?
+                <div className="scholarly-next-action"><p>{evidenceCount ? `${evidenceCount} passage${evidenceCount === 1 ? "" : "s"} linked. Add another if needed; a matching quote is not proof that a claim is supported.` : "No passages linked yet. Read a page and select an exact passage to support your review."}</p>
+                  <Button type="button" onClick={() => openEvidence(record.record_id)}>{evidenceCount ? "Add another passage" : "Add a passage"}</Button></div> : null}
+              <details className="scholarly-record-details"><summary>Details</summary><p>{record.doi ? `DOI: ${record.doi}` : "DOI not linked"}</p><p>Source: {record.provider} · Record ID: {record.record_id}</p></details>
             </article>;
           })}</div> : <Empty title="No records yet">Import a DOI, PDF, or observed search records to start screening.</Empty>}
         </section>
@@ -282,25 +369,35 @@ export default function ScholarlyReviewPage() {
               <td>{row.pageAnchor || "No page anchor"}</td>
             </tr>)}</tbody>
           </table></div> : <Empty title="No passages linked">Add evidence after recording a retrieved source and matching artifact.</Empty>}
-          {detail?.records.length ? <details className="scholarly-manual"><summary>Add a source passage</summary>
+          {eligibleEvidenceRecords.length ? <div className="scholarly-manual">
+            {!showEvidenceForm ? <Button type="button" variant="outline" onClick={() => { const first = eligibleEvidenceRecords[0]; if (first) openEvidence(first.record_id); }}>Add a source passage</Button> : null}
+            {showEvidenceForm ? <>
+            <h3>Read and link a passage</h3>
             <form className="scholarly-form" onSubmit={(event) => { event.preventDefault(); void run(async () => {
-              await addEvidence(reviewId, evidenceRecord, { artifactId: artifactId.trim(), sourceId: sourceId.trim(), claim: claim.trim(), quote: quote.trim(), pageNumber: Number(pageNumber), start: Number(quoteStart), end: Number(quoteEnd) });
-              setClaim(""); setQuote(""); setQuoteStart("0"); setQuoteEnd("");
+              if (!selectedEvidenceArtifact || !selectedPage) throw new Error("Select a retrieved PDF page first.");
+              await addEvidence(reviewId, selectedEvidenceRecord, { artifactId: selectedEvidenceArtifact.artifactId, sourceId: selectedEvidenceArtifact.artifactId, claim: claim.trim(), quote: quote.trim(), pageNumber: selectedPage });
+              setClaim(""); setQuote("");
             }, "Source passage linked. Claim support has not been assessed."); }}>
-              <p>The quote must occur in the stored artifact text and the source ID must match a retrieved source.</p>
-              <label>Record<select required value={evidenceRecord} onChange={(event) => setEvidenceRecord(event.target.value)}><option value="">Select record</option>{detail.records.map((record) => <option key={record.record_id} value={record.record_id}>{record.title}</option>)}</select></label>
-              <label>Artifact ID<input required value={artifactId} onChange={(event) => setArtifactId(event.target.value)} /></label>
-              <label>Retrieved source ID<input required value={sourceId} onChange={(event) => setSourceId(event.target.value)} /></label>
-              <label>Claim<input required value={claim} onChange={(event) => setClaim(event.target.value)} /></label>
-              <label>Exact quote<textarea required rows={3} value={quote} onChange={(event) => setQuote(event.target.value)} /></label>
-              <label>PDF page number<input required type="number" min="1" max="100" value={pageNumber} onChange={(event) => setPageNumber(event.target.value)} /></label>
-              <label>Quote start offset on page<input required type="number" min="0" value={quoteStart} onChange={(event) => setQuoteStart(event.target.value)} /></label>
-              <label>Quote end offset on page<input required type="number" min="1" value={quoteEnd} onChange={(event) => setQuoteEnd(event.target.value)} /></label>
-              <Button type="submit" disabled={busy}>Link passage</Button>
+              <p>Read the extracted text, select an exact passage, then write the claim it relates to. A matching passage confirms the locator, not whether the claim is supported.</p>
+              <label>Paper<select required value={selectedEvidenceRecord} onChange={(event) => { setEvidenceRecord(event.target.value); setPageNumber("1"); setQuote(""); setReaderText(""); setReaderLoading(true); }}>{eligibleEvidenceRecords.map((record) => <option key={record.record_id} value={record.record_id}>{record.title} ({record.record_id.slice(0, 8)})</option>)}</select></label>
+              {selectedEvidenceArtifact ? <>
+                <label>Extracted PDF page<select value={selectedPage ?? ""} onChange={(event) => { setPageNumber(event.target.value); setQuote(""); setReaderText(""); setReaderLoading(true); }}>
+                  {availablePages.map((page) => <option key={page} value={page}>Page {page}</option>)}
+                </select></label>
+                <div className="scholarly-reader" role="region" aria-label={`Extracted text from PDF page ${selectedPage}`}>
+                  <div className="scholarly-reader-head"><strong>Page {selectedPage}</strong><span>Extracted text, not a visual PDF</span></div>
+                  {readerLoading ? <p role="status">Checking the stored PDF…</p> : readerError ? <div><Alert>{readerError}</Alert><Button type="button" variant="outline" onClick={() => { setReaderLoading(true); setReaderRetry((value) => value + 1); }}>Retry page</Button></div> : <div ref={pageTextRef} className="scholarly-page-text" onMouseUp={selectPassage} onKeyUp={selectPassage}>{readerText}</div>}
+                </div>
+                {selectionError ? <Alert>{selectionError}</Alert> : null}
+              </> : null}
+              <label>Exact quote<textarea required rows={3} maxLength={600} value={quote} onChange={(event) => setQuote(event.target.value)} placeholder="Select text above, or paste an exact passage from this page" /></label>
+              <label>Claim<input required value={claim} onChange={(event) => setClaim(event.target.value)} placeholder="What does this passage help you evaluate?" /></label>
+              <div className="scholarly-evidence-actions"><Button type="submit" disabled={busy || !selectedEvidenceArtifact || readerLoading || !!readerError || !readerText}>Link passage on page {selectedPage}</Button><Button type="button" variant="outline" onClick={() => setShowEvidenceForm(false)}>Close reader</Button></div>
             </form>
-          </details> : null}
+            </> : null}
+          </div> : <p>To link a passage, include a record at title screening, mark its uploaded PDF as available, then include it at full-text assessment.</p>}
         </section>
       </> : null}
-    </main>
+    </div>
   </WorkspaceShell>;
 }

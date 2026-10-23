@@ -14,9 +14,18 @@ export type Decision = {
   exclusion_reason: string | null; source_id: string | null;
 };
 export type Retrieval = { record_id: string; status: "retrieved" | "not_retrieved"; source_id: string | null };
+export type StudyArtifact = { recordId: string; artifactId: string; pageNumbers: number[] };
+export type ArtifactPage = { recordId: string; artifactId: string; pageNumber: number; text: string; claimSupportVerified: false };
 export type Evidence = { id: string; recordId: string; artifactId: string; sourceId: string; claim: string; quote: string; pageAnchor: string | null };
-export type ReviewDetail = Review & { records: RecordRow[]; decisions: Decision[]; retrievals: Retrieval[]; evidence: Evidence[] };
+export type ReviewDetail = Review & { records: RecordRow[]; decisions: Decision[]; retrievals: Retrieval[]; artifacts: StudyArtifact[]; evidence: Evidence[] };
 export type Flow = Record<string, number | [string, number][]>;
+
+export function evidenceSourceForRecord(detail: ReviewDetail, recordId: string): StudyArtifact | null {
+  const receipt = detail.retrievals.find((item) => item.record_id === recordId && item.status === "retrieved");
+  const decision = detail.decisions.find((item) => item.record_id === recordId && item.stage === "full_text");
+  if (!receipt?.source_id || decision?.outcome !== "include" || decision.source_id !== receipt.source_id) return null;
+  return detail.artifacts.find((artifact) => artifact.recordId === recordId && artifact.artifactId === receipt.source_id) ?? null;
+}
 
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Research service returned an invalid response.");
@@ -27,13 +36,19 @@ function items(value: unknown): Record<string, unknown>[] {
   if (!Array.isArray(value)) return [];
   return value.map(object);
 }
+function responseError(body: unknown, fallback: string): string {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return fallback;
+  const payload = body as Record<string, unknown>;
+  const message = payload.error ?? payload.detail;
+  return typeof message === "string" && message.trim() ? message : fallback;
+}
 function review(value: unknown): Review {
   const raw = object(value);
   const reviewId = string(raw.reviewId ?? raw.review_id ?? raw.id);
   if (!reviewId) throw new Error("Research service returned a review without an id.");
   return { reviewId, title: string(raw.title ?? raw.name) || "Untitled review", question: string(raw.question) };
 }
-function detail(base: Review, recordsRaw: unknown, decisionsRaw: unknown, retrievalsRaw: unknown, evidenceRaw: unknown): ReviewDetail {
+function detail(base: Review, recordsRaw: unknown, decisionsRaw: unknown, retrievalsRaw: unknown, artifactsRaw: unknown, evidenceRaw: unknown): ReviewDetail {
   const raw = { records: recordsRaw, decisions: decisionsRaw, retrievals: retrievalsRaw };
   return {
     ...base,
@@ -55,6 +70,16 @@ function detail(base: Review, recordsRaw: unknown, decisionsRaw: unknown, retrie
       status: row.status === "retrieved" ? "retrieved" as const : "not_retrieved" as const,
       source_id: string(row.sourceId ?? row.source_id) || null,
     })),
+    artifacts: items(artifactsRaw).map((row) => {
+      const pages = row.pageNumbers ?? row.page_numbers;
+      return {
+        recordId: string(row.recordId ?? row.record_id),
+        artifactId: string(row.artifactId ?? row.artifact_id),
+        pageNumbers: Array.isArray(pages)
+          ? pages.filter((page: unknown): page is number => typeof page === "number" && Number.isInteger(page) && page > 0)
+          : [],
+      };
+    }).filter((row) => row.recordId && row.artifactId),
     evidence: items(evidenceRaw).map((row) => ({
       id: string(row.id), recordId: string(row.recordId ?? row.record_id),
       artifactId: string(row.artifactId ?? row.artifact_id),
@@ -70,8 +95,7 @@ async function request(path: string, init?: RequestInit): Promise<unknown> {
   let body: unknown;
   try { body = await response.json(); } catch { throw new Error("Research service returned an invalid response."); }
   if (!response.ok) {
-    const message = body && typeof body === "object" ? (body as Record<string, unknown>).error : null;
-    throw new Error(typeof message === "string" ? message : "Research request failed. Please try again.");
+    throw new Error(responseError(body, "Research request failed. Please try again."));
   }
   return body;
 }
@@ -88,11 +112,11 @@ export async function listReviews(): Promise<Review[]> {
 export async function createReview(title: string, question: string): Promise<Review> { return review(await post("", { title, question })); }
 export async function getReview(reviewId: string): Promise<ReviewDetail> {
   const path = reviewPath(reviewId);
-  const [metadata, records, decisions, retrievals, evidence] = await Promise.all([
+  const [metadata, records, decisions, retrievals, artifacts, evidence] = await Promise.all([
     request(path), request(`${path}/records`), request(`${path}/decisions`),
-    request(`${path}/retrievals`), request(`${path}/evidence`),
+    request(`${path}/retrievals`), request(`${path}/artifacts`), request(`${path}/evidence`),
   ]);
-  return detail(review(metadata), records, decisions, retrievals, evidence);
+  return detail(review(metadata), records, decisions, retrievals, artifacts, evidence);
 }
 export async function importRecords(reviewId: string, execution: unknown, records: unknown[]): Promise<void> {
   const path = reviewPath(reviewId);
@@ -100,6 +124,9 @@ export async function importRecords(reviewId: string, execution: unknown, record
   for (const record of records) await post(`${path}/records`, record);
 }
 export async function importDoi(reviewId: string, doi: string): Promise<void> {
+  if (!/^10\.\d{4,9}\/\S+$/i.test(doi.replace(/^doi:\s*/i, "").replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, ""))) {
+    throw new Error("Enter a DOI such as 10.1038/s41586-020-2649-2, or its doi.org URL.");
+  }
   await post(`${reviewPath(reviewId)}/imports/doi`, { doi });
 }
 export async function saveDecision(reviewId: string, decision: Decision): Promise<void> {
@@ -112,7 +139,7 @@ export async function saveRetrieval(reviewId: string, receipt: Retrieval): Promi
 }
 export async function addEvidence(reviewId: string, recordId: string, body: {
   artifactId: string; sourceId: string; claim: string; quote: string;
-  pageNumber: number; start: number; end: number;
+  pageNumber: number;
 }): Promise<void> {
   await post(`${reviewPath(reviewId)}/records/${encodeURIComponent(recordId)}/evidence`, body);
 }
@@ -126,7 +153,14 @@ export async function getFlow(reviewId: string): Promise<Flow> {
   }
   return result;
 }
-export async function importPdf(reviewId: string, title: string, file: File): Promise<{ recordId: string; artifactId: string }> {
+export async function getArtifactPage(reviewId: string, artifactId: string, pageNumber: number): Promise<ArtifactPage> {
+  if (!Number.isInteger(pageNumber) || pageNumber < 1 || pageNumber > 100) throw new Error("Select a valid PDF page.");
+  const raw = object(await request(`${reviewPath(reviewId)}/artifacts/${encodeURIComponent(artifactId)}/pages/${pageNumber}`));
+  if (raw.artifactId !== artifactId || raw.pageNumber !== pageNumber || typeof raw.text !== "string" || raw.claimSupportVerified !== false)
+    throw new Error("Research service returned an invalid PDF page.");
+  return { recordId: string(raw.recordId), artifactId, pageNumber, text: raw.text, claimSupportVerified: false };
+}
+export async function importPdf(reviewId: string, title: string, file: File): Promise<{ recordId: string; artifactId: string; alreadyImported: boolean }> {
   if (file.size > PDF_LIMIT) throw new Error("PDF must be 4 MiB or smaller.");
   const response = await fetch(`${ROOT}${reviewPath(reviewId)}/imports/pdf?title=${encodeURIComponent(title)}`, {
     method: "POST", headers: { "content-type": "application/pdf" }, body: file,
@@ -134,12 +168,11 @@ export async function importPdf(reviewId: string, title: string, file: File): Pr
   let body: unknown;
   try { body = await response.json(); } catch { throw new Error("Research service returned an invalid response."); }
   if (!response.ok) {
-    const message = body && typeof body === "object" ? (body as Record<string, unknown>).error : null;
-    throw new Error(typeof message === "string" ? message : "PDF import failed. Please try again.");
+    throw new Error(responseError(body, "PDF import failed. Please try again."));
   }
   const imported = object(body);
   const recordId = string(imported.recordId ?? imported.record_id);
   const artifactId = string(imported.sourceArtifactId ?? imported.source_artifact_id);
   if (!recordId || !artifactId) throw new Error("Research service did not return the PDF locator.");
-  return { recordId, artifactId };
+  return { recordId, artifactId, alreadyImported: imported.alreadyImported === true || imported.already_imported === true };
 }

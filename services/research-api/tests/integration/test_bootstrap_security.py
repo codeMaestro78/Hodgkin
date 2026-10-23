@@ -9,19 +9,42 @@ import subprocess
 import sys
 import uuid
 from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
 
+import httpx
 import psycopg
 import pytest
+from fastapi import FastAPI, HTTPException, Response
 from psycopg import sql
+from pypdf import PdfWriter
+from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session
 
+from research_api.artifacts.store import InMemoryArtifactStore
+from research_api.auth import Caller
+from research_api.db import session as db_session
 from research_api.db.assessments import ResearchAssessment
-from research_api.db.models import Base, Report, ResearchPlan, ResearchRun, Source, Tenant, User
+from research_api.db.models import (
+    Base,
+    Report,
+    ResearchPlan,
+    ResearchRun,
+    ScholarlyReview,
+    ScholarlySearchExecution,
+    ScholarlySearchRecord,
+    ScholarlyStudyArtifact,
+    Source,
+    Tenant,
+    User,
+)
 from research_api.db.source_relationships import SourceIdentityRecord, SourceRelationship
+from research_api.scholarly import import_api, pdf_extract, review_api
+from research_api.scholarly.pdf_extract import assemble_pages, extract_pdf_text
 
 pytestmark = [
     pytest.mark.integration,
@@ -124,7 +147,7 @@ def test_0019_upgrades_preexisting_mode_guards(bootstrap_db):
 @pytest.fixture
 def bootstrap_db(request):
     target = request.param
-    assert target in {"0001", "0014", "0015", "0016", "0017", "0018", "0019"}
+    assert target in {"0001", "0014", "0015", "0016", "0017", "0018", "0019", "0036"}
     admin_url = make_url(os.environ["TEST_DATABASE_ADMIN_URL"])
     runtime_url = make_url(os.environ["DATABASE_URL"])
     assert admin_url.host in {"localhost", "127.0.0.1", "::1"}
@@ -181,6 +204,178 @@ def bootstrap_db(request):
         owner.dispose()
         with psycopg.connect(**connect, autocommit=True) as admin:
             admin.execute(sql.SQL("DROP DATABASE {}").format(sql.Identifier(name)))
+
+
+@pytest.mark.parametrize("bootstrap_db", ["0036"], indirect=True)
+@pytest.mark.asyncio
+async def test_scholarly_decision_succeeds_with_append_only_runtime_grants(
+    bootstrap_db, monkeypatch
+):
+    _target, owner, runtime = bootstrap_db
+    tenant_id, user_id, review_id = (uuid.uuid4() for _ in range(3))
+    artifact_id = uuid.uuid4()
+    record_id = str(uuid.uuid4())
+    search_id = "test-search"
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=300, height=300)
+    font = DictionaryObject({
+        NameObject("/Type"): NameObject("/Font"),
+        NameObject("/Subtype"): NameObject("/Type1"),
+        NameObject("/BaseFont"): NameObject("/Helvetica"),
+    })
+    page[NameObject("/Resources")] = DictionaryObject({
+        NameObject("/Font"): DictionaryObject({NameObject("/F1"): writer._add_object(font)})
+    })
+    stream = DecodedStreamObject()
+    stream.set_data(b"BT /F1 12 Tf 30 250 Td (Test passage) Tj ET")
+    page[NameObject("/Contents")] = writer._add_object(stream)
+    output = BytesIO()
+    writer.write(output)
+    raw_pdf = output.getvalue()
+    store = InMemoryArtifactStore()
+    stored = await store.put(
+        tenant_id=tenant_id, run_id=review_id, content=raw_pdf, media_type="application/pdf"
+    )
+    parsed_text, page_anchors = assemble_pages(extract_pdf_text(raw_pdf))
+    with Session(owner) as session, session.begin():
+        session.add(Tenant(id=tenant_id, name="scholarly test"))
+        session.flush()
+        session.add(User(id=user_id, tenant_id=tenant_id, external_subject=str(user_id)))
+        session.flush()
+        session.add(ScholarlyReview(
+            id=review_id, tenant_id=tenant_id, owner_user_id=user_id,
+            title="Test review", question="Does the decision persist?",
+        ))
+        session.flush()
+        session.add(ScholarlySearchExecution(
+            tenant_id=tenant_id, owner_user_id=user_id, review_id=review_id,
+            search_id=search_id, query="test query", executed_at=datetime.now(UTC),
+            database="test", filters=[], result_record_ids=[record_id],
+            reported_result_count=1,
+        ))
+        session.flush()
+        session.add(ScholarlySearchRecord(
+            tenant_id=tenant_id, owner_user_id=user_id, review_id=review_id,
+            record_id=record_id, search_id=search_id, provider="user_pdf_upload",
+            provider_record_id=stored.content_hash, title="Test paper",
+        ))
+        session.flush()
+        session.add(ScholarlyStudyArtifact(
+            id=artifact_id, tenant_id=tenant_id, owner_user_id=user_id,
+            review_id=review_id, record_id=record_id,
+            artifact_ref=stored.artifact_ref, content_hash=stored.content_hash,
+            parsed_text=parsed_text, page_anchors=page_anchors,
+        ))
+    with owner.connect() as connection:
+        assert not connection.scalar(text(
+            "SELECT has_table_privilege('research_app', 'public.scholarly_reviews', 'UPDATE')"
+        ))
+
+    runtime_engine = create_async_engine(runtime.url)
+    monkeypatch.setattr(
+        db_session, "session_factory", async_sessionmaker(runtime_engine, expire_on_commit=False)
+    )
+    monkeypatch.setattr(import_api, "review_artifact_store", lambda: store)
+    monkeypatch.setattr(pdf_extract, "review_artifact_store", lambda: store)
+    caller = Caller(tenant_id=tenant_id, user_id=user_id)
+    try:
+        api = FastAPI()
+        api.include_router(review_api.router)
+        api.include_router(import_api.router)
+        api.dependency_overrides[review_api.caller_dependency] = lambda: caller
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=api), base_url="http://test"
+        ) as client:
+            response = await client.post(
+                f"/research/reviews/{review_id}/records/{record_id}/decisions",
+                json={"stage": "title_abstract", "outcome": "include"},
+            )
+        assert response.status_code == 201
+        assert response.json()["recordId"] == record_id
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=api), base_url="http://test"
+        ) as client:
+            artifacts_response = await client.get(f"/research/reviews/{review_id}/artifacts")
+        assert artifacts_response.status_code == 200
+        assert artifacts_response.json() == [{
+            "recordId": record_id, "artifactId": str(artifact_id), "pageNumbers": [1],
+        }]
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=api), base_url="http://test"
+        ) as client:
+            page_response = await client.get(
+                f"/research/reviews/{review_id}/artifacts/{artifact_id}/pages/1"
+            )
+            repeated_pdf = await client.post(
+                f"/research/reviews/{review_id}/imports/pdf?title=Another title",
+                headers={"content-type": "application/pdf"}, content=raw_pdf,
+            )
+        assert page_response.status_code == 200
+        assert page_response.json()["text"] == "Test passage"
+        assert page_response.json()["claimSupportVerified"] is False
+        assert "artifactRef" not in page_response.json()
+        assert page_response.headers["cache-control"] == "private, no-store"
+        assert repeated_pdf.status_code == 200
+        assert repeated_pdf.json()["alreadyImported"] is True
+        assert repeated_pdf.json()["recordId"] == record_id
+        assert len(await review_api.list_records(review_id, caller)) == 1
+        with pytest.raises(HTTPException) as duplicate:
+            await review_api.add_decision(
+                review_id, record_id,
+                review_api.DecisionBody(stage="title_abstract", outcome="include"), caller,
+            )
+        assert duplicate.value.status_code == 409
+        receipt = await review_api.add_retrieval(
+            review_id, record_id,
+            review_api.ReceiptBody(status="retrieved", source_id=str(artifact_id)), caller,
+        )
+        assert receipt["status"] == "retrieved"
+        full_text = await review_api.add_decision(
+            review_id, record_id,
+            review_api.DecisionBody(
+                stage="full_text", outcome="include", source_id=str(artifact_id)
+            ), caller,
+        )
+        assert full_text["stage"] == "full_text"
+        evidence = await review_api.add_evidence(
+            review_id, record_id,
+            review_api.EvidenceBody(
+                artifact_id=artifact_id, source_id=str(artifact_id),
+                claim="The source contains a test passage.", quote="Test passage", page_number=1,
+            ), caller,
+        )
+        assert evidence["recordId"] == record_id
+        rows = await review_api.list_evidence(review_id, caller)
+        assert len(rows) == 1
+        assert rows[0]["quote"] == "Test passage"
+        assert rows[0]["pageAnchor"] == "page:1"
+        with pytest.raises(HTTPException) as stranger:
+            await review_api.add_decision(
+                review_id, record_id,
+                review_api.DecisionBody(stage="title_abstract", outcome="exclude",
+                                        exclusion_reason="out_of_scope"),
+                Caller(tenant_id=tenant_id, user_id=uuid.uuid4()),
+            )
+        assert stranger.value.status_code == 404
+        with pytest.raises(HTTPException) as stranger_artifacts:
+            await review_api.list_artifacts(
+                review_id, Caller(tenant_id=tenant_id, user_id=uuid.uuid4())
+            )
+        assert stranger_artifacts.value.status_code == 404
+        with pytest.raises(HTTPException) as stranger_page:
+            await review_api.read_artifact_page(
+                review_id, artifact_id, 1,
+                Caller(tenant_id=tenant_id, user_id=uuid.uuid4()), Response(),
+            )
+        assert stranger_page.value.status_code == 404
+        async with review_api.owner_session(caller) as session:
+            decisions = await session.scalars(text(
+                "SELECT stage FROM scholarly_screening_decisions "
+                "WHERE review_id = :review_id ORDER BY stage"
+            ), {"review_id": review_id})
+            assert decisions.all() == ["full_text", "title_abstract"]
+    finally:
+        await runtime_engine.dispose()
 
 
 def seed(owner, target):

@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 import uuid
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from io import BytesIO
+from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
 from pypdf import PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
+from starlette.requests import Request
 
 from research_api.artifacts.store import ArtifactRecord, InMemoryArtifactStore
 from research_api.auth import Caller
-from research_api.scholarly.import_api import ImportResponse, _verified_put
+from research_api.scholarly import import_api
+from research_api.scholarly.import_api import AnchorCheckRequest, ImportResponse, _verified_put
 from research_api.scholarly.pdf_extract import (
     MAX_PDF_BYTES,
     PageText,
@@ -23,6 +27,7 @@ from research_api.scholarly.pdf_extract import (
     verify_quote_anchor,
     verify_stored_pdf_quote,
 )
+from research_api.scholarly.review_api import EvidenceBody
 
 
 def test_page_offsets_bind_quote_to_its_page() -> None:
@@ -56,6 +61,19 @@ def test_public_import_response_excludes_storage_path_and_full_text() -> None:
     assert response["pageNumbers"] == [1]
     assert "artifactRef" not in response
     assert "parsedText" not in response
+
+
+def test_quote_requests_accept_page_and_exact_text_without_offsets() -> None:
+    anchor = AnchorCheckRequest.model_validate({"pageNumber": 1, "quote": "Observed result"})
+    evidence = EvidenceBody.model_validate({
+        "artifactId": str(uuid.uuid4()),
+        "sourceId": str(uuid.uuid4()),
+        "claim": "A finding was reported.",
+        "quote": "Observed result",
+        "pageNumber": 1,
+    })
+    assert anchor.start is None and anchor.end is None
+    assert evidence.start is None and evidence.end is None
 
 
 def test_pdf_rejects_non_pdf_and_oversize() -> None:
@@ -92,6 +110,50 @@ def test_pdf_extractor_returns_one_based_page_text() -> None:
     assert len(pages) == 1
     assert pages[0].page_number == 1
     assert "Observed result" in pages[0].text
+
+
+@pytest.mark.asyncio
+async def test_reimport_identical_pdf_returns_existing_record_without_storing(monkeypatch) -> None:
+    caller = Caller(tenant_id=uuid.uuid4(), user_id=uuid.uuid4())
+    review_id = uuid.uuid4()
+    artifact_id = uuid.uuid4()
+    queries = []
+
+    class Session:
+        async def scalar(self, query):
+            queries.append(str(query))
+            if len(queries) == 1:
+                return SimpleNamespace(
+                    id=artifact_id, record_id="existing", page_anchors=[{"page_number": 1}],
+                )
+            return SimpleNamespace(doi=None, title="Existing paper")
+
+    @asynccontextmanager
+    async def fake_session(_caller):
+        yield Session()
+
+    async def fake_review(*_args, **_kwargs):
+        return None
+
+    async def fake_body(_request):
+        return _sample_pdf()
+
+    monkeypatch.setattr(import_api, "owner_session", fake_session)
+    monkeypatch.setattr(import_api, "require_review", fake_review)
+    monkeypatch.setattr(import_api, "_bounded_pdf", fake_body)
+    monkeypatch.setattr(
+        import_api, "review_artifact_store", lambda: pytest.fail("duplicate stored")
+    )
+    response = Response()
+    result = await import_api.import_pdf(
+        review_id, Request({"type": "http", "method": "POST", "headers": []}),
+        response, caller, "New title ignored",
+    )
+    assert response.status_code == 200
+    assert result.already_imported is True
+    assert result.record_id == "existing"
+    assert result.source_artifact_id == artifact_id
+    assert all("owner_user_id" in query and "review_id" in query for query in queries)
 
 
 @pytest.mark.asyncio

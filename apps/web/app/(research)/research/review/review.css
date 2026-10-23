@@ -1,3 +1,4 @@
+.evidence-desk .workspace-content:has(> .scholarly-review){display:block;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
 .scholarly-review{width:min(1100px,100%);margin:0 auto;padding:clamp(24px,4vw,56px) clamp(16px,3vw,40px) 80px;color:var(--ink,#262b2a)}
 .scholarly-review *{box-sizing:border-box}
 .scholarly-header{max-width:730px;margin-bottom:34px}
@@ -29,4 +30,20 @@
 .scholarly-inline-form{display:flex;flex-wrap:wrap;align-items:end;gap:10px;padding:14px 0;margin-top:8px;border-top:1px solid color-mix(in srgb,currentColor 12%,transparent)}.scholarly-inline-form label{min-width:160px;flex:1}.scholarly-inline-form .desk-alert{flex-basis:100%}
 .scholarly-table-wrap{overflow-x:auto;margin-top:20px}.scholarly-review table{width:100%;border-collapse:collapse;min-width:620px;text-align:left}.scholarly-review th,.scholarly-review td{vertical-align:top;padding:13px;border-bottom:1px solid color-mix(in srgb,currentColor 15%,transparent);overflow-wrap:anywhere}.scholarly-review th{font-size:12px;text-transform:uppercase;letter-spacing:.05em}.scholarly-review blockquote{margin:0 0 5px;line-height:1.5}.scholarly-review td small{opacity:.7}
 .scholarly-notice{padding:12px 16px;border:1px solid color-mix(in srgb,currentColor 25%,transparent);border-radius:8px}
+.scholarly-counts-focus{grid-template-columns:repeat(3,minmax(0,1fr));max-width:720px;margin:18px 0 20px}
+.scholarly-section-heading{display:flex;align-items:center;justify-content:space-between;gap:16px}.scholarly-section-heading h2{margin:0}
+.scholarly-counts-focus>div{background:color-mix(in srgb,var(--surface,#fff) 78%,#e3ece7)}
+.scholarly-record{scroll-margin-top:84px}
+.scholarly-record-head span{white-space:nowrap}
+.scholarly-stage-line{font-size:13px;color:color-mix(in srgb,currentColor 75%,transparent);padding:10px 0;border-top:1px solid color-mix(in srgb,currentColor 12%,transparent);border-bottom:1px solid color-mix(in srgb,currentColor 12%,transparent)}
+.scholarly-next-action{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:15px 16px;margin:16px 0;background:color-mix(in srgb,var(--surface,#fff) 88%,#d4e7dc);border:1px solid color-mix(in srgb,currentColor 14%,transparent);border-radius:10px}
+.scholarly-next-action p{margin:0;max-width:60ch}.scholarly-next-action button{flex-shrink:0}
+.scholarly-record-details{margin-top:18px;padding-top:12px;border-top:1px solid color-mix(in srgb,currentColor 12%,transparent);font-size:12px}.scholarly-record-details p{margin:7px 0}
+.scholarly-duplicate-note{padding:10px 12px;border-radius:8px;background:color-mix(in srgb,var(--surface,#fff) 78%,#f2dfaa)}
+.scholarly-reader{border:1px solid color-mix(in srgb,currentColor 20%,transparent);border-radius:10px;overflow:hidden}
+.scholarly-reader-head{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:11px 15px;border-bottom:1px solid color-mix(in srgb,currentColor 14%,transparent);font-size:13px}.scholarly-reader-head span{opacity:.7}
+.scholarly-page-text{white-space:pre-wrap;overflow-wrap:anywhere;max-height:450px;overflow-y:auto;padding:18px 20px;line-height:1.7;font-size:14px;user-select:text;cursor:text;background:var(--surface,#fff)}
+.scholarly-page-text::selection{background:#bfded0;color:#172b20}
+.scholarly-evidence-actions{display:flex;flex-wrap:wrap;gap:10px}
 @media(max-width:750px){.scholarly-create,.scholarly-import-grid{grid-template-columns:1fr}.scholarly-record-head{display:block}.scholarly-inline-form{display:grid}.scholarly-panel{padding:20px}}
+@media(max-width:650px){.scholarly-counts-focus{grid-template-columns:repeat(3,minmax(0,1fr))}.scholarly-counts-focus>div{padding:10px}.scholarly-counts-focus dt{font-size:11px}.scholarly-counts-focus dd{font-size:23px}.scholarly-next-action{display:grid}.scholarly-next-action button{width:100%}.scholarly-reader-head{display:grid;gap:2px}.scholarly-section-heading{align-items:start;flex-direction:column}}

@@ -140,28 +140,9 @@ async def verify_stored_pdf_quote(
     The caller must also load the artifact through its owner-scoped DB query.
     This establishes a text locator, not that the quote supports a claim.
     """
-    if (
-        artifact.tenant_id != caller.tenant_id
-        or artifact.owner_user_id != caller.user_id
-        or artifact.review_id != review_id
-    ):
-        raise PDFSourceMismatch("artifact is outside the caller's review")
-    expected_ref = f"tenants/{caller.tenant_id}/runs/{review_id}/sha256/{artifact.content_hash}"
-    if artifact.artifact_ref != expected_ref:
-        raise PDFSourceMismatch("artifact identity is invalid")
-    try:
-        raw = await store.get_for_verification(artifact_ref=expected_ref)
-    except (KeyError, OSError, BotoCoreError, ClientError) as exc:
-        raise PDFSourceUnavailable("stored PDF could not be read") from exc
-    if len(raw) > MAX_PDF_BYTES or hashlib.sha256(raw).hexdigest() != artifact.content_hash:
-        raise PDFSourceMismatch("stored PDF failed hash or size verification")
-    try:
-        pages = await asyncio.to_thread(extract_pdf_text, raw)
-    except PDFExtractionError as exc:
-        raise PDFSourceMismatch("stored PDF cannot be inspected") from exc
-    actual_text, actual_anchors = assemble_pages(pages)
-    if actual_text != artifact.parsed_text or actual_anchors != artifact.page_anchors:
-        raise PDFSourceMismatch("saved page text differs from the stored PDF")
+    actual_text, actual_anchors = await verified_stored_pdf_text(
+        store, caller=caller, review_id=review_id, artifact=artifact
+    )
     page = next((item for item in actual_anchors if item["anchor"] == page_anchor), None)
     if page is None or not quote:
         raise PDFQuoteMismatch("quote has no inspected page anchor")
@@ -185,6 +166,39 @@ async def verify_stored_pdf_quote(
     ):
         raise PDFQuoteMismatch("quote is not an exact span on the selected page")
     return VerifiedPageQuote(page_anchor=page_anchor, start=start, end=end, quote=quote)
+
+
+async def verified_stored_pdf_text(
+    store: ArtifactStore,
+    *,
+    caller: Caller,
+    review_id: uuid.UUID,
+    artifact: ArtifactForVerification,
+) -> tuple[str, list[dict[str, int | str]]]:
+    """Read an owned PDF and verify saved extraction against the stored bytes."""
+    if (
+        artifact.tenant_id != caller.tenant_id
+        or artifact.owner_user_id != caller.user_id
+        or artifact.review_id != review_id
+    ):
+        raise PDFSourceMismatch("artifact is outside the caller's review")
+    expected_ref = f"tenants/{caller.tenant_id}/runs/{review_id}/sha256/{artifact.content_hash}"
+    if artifact.artifact_ref != expected_ref:
+        raise PDFSourceMismatch("artifact identity is invalid")
+    try:
+        raw = await store.get_for_verification(artifact_ref=expected_ref)
+    except (KeyError, OSError, BotoCoreError, ClientError) as exc:
+        raise PDFSourceUnavailable("stored PDF could not be read") from exc
+    if len(raw) > MAX_PDF_BYTES or hashlib.sha256(raw).hexdigest() != artifact.content_hash:
+        raise PDFSourceMismatch("stored PDF failed hash or size verification")
+    try:
+        pages = await asyncio.to_thread(extract_pdf_text, raw)
+    except PDFExtractionError as exc:
+        raise PDFSourceMismatch("stored PDF cannot be inspected") from exc
+    actual_text, actual_anchors = assemble_pages(pages)
+    if actual_text != artifact.parsed_text or actual_anchors != artifact.page_anchors:
+        raise PDFSourceMismatch("saved page text differs from the stored PDF")
+    return actual_text, actual_anchors
 
 
 def extract_pdf_text(content: bytes) -> tuple[PageText, ...]:

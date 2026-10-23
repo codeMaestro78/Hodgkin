@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import and_, select, text
 from sqlalchemy.exc import IntegrityError
@@ -103,8 +103,8 @@ class EvidenceBody(APIModel):
     claim: str = Field(min_length=1)
     quote: str = Field(min_length=1, max_length=600)
     page_number: int = Field(ge=1, le=100)
-    start: int = Field(ge=0, le=1_000_000)
-    end: int = Field(gt=0, le=1_000_000)
+    start: int | None = Field(default=None, ge=0, le=1_000_000)
+    end: int | None = Field(default=None, gt=0, le=1_000_000)
 
 
 async def caller_dependency(
@@ -141,9 +141,17 @@ async def require_review(
         ScholarlyReview.tenant_id == caller.tenant_id,
         ScholarlyReview.owner_user_id == caller.user_id,
     )
-    found = await session.scalar(query.with_for_update() if lock else query)
+    found = await session.scalar(query)
     if found is None:
         raise HTTPException(404, "review not found")
+    if lock:
+        # Scholarly tables are append-only: the runtime role deliberately has
+        # no UPDATE privilege, which PostgreSQL requires for SELECT FOR UPDATE.
+        # Serialize review mutations without granting table-update access.
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"),
+            {"lock_key": f"scholarly-review:{review_id}"},
+        )
 
 
 async def require_record(session: AsyncSession, caller: Caller,
@@ -250,6 +258,69 @@ async def list_retrievals(review_id: uuid.UUID, caller: CallerDep) -> list[dict[
         rows = (await session.scalars(query)).all()
         return [{key: getattr(row, key) for key in ("record_id", "status", "source_id")}
                 for row in rows]
+
+
+@router.get("/{review_id}/artifacts")
+async def list_artifacts(review_id: uuid.UUID, caller: CallerDep) -> list[dict[str, Any]]:
+    """Return only owner-scoped PDF locator metadata, never stored text or object keys."""
+    async with owner_session(caller) as session:
+        await require_review(session, caller, review_id)
+        rows = (await session.scalars(select(ScholarlyStudyArtifact).where(
+            scope(ScholarlyStudyArtifact, caller, review_id)
+        ).order_by(ScholarlyStudyArtifact.created_at, ScholarlyStudyArtifact.id).limit(1000))).all()
+        return [{
+            "recordId": row.record_id,
+            "artifactId": str(row.id),
+            "pageNumbers": [anchor["page_number"] for anchor in row.page_anchors
+                            if isinstance(anchor, dict)
+                            and isinstance(anchor.get("page_number"), int)
+                            and not isinstance(anchor["page_number"], bool)],
+        } for row in rows]
+
+
+@router.get("/{review_id}/artifacts/{artifact_id}/pages/{page_number}")
+async def read_artifact_page(
+    review_id: uuid.UUID, artifact_id: uuid.UUID, page_number: int,
+    caller: CallerDep, response: Response,
+) -> dict[str, Any]:
+    """Inspect one extracted page from an owned PDF, never a storage URL or raw PDF."""
+    if not 1 <= page_number <= 100:
+        raise HTTPException(422, "page number must be between 1 and 100")
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    async with owner_session(caller) as session:
+        await require_review(session, caller, review_id)
+        artifact = await session.scalar(select(ScholarlyStudyArtifact).where(
+            scope(ScholarlyStudyArtifact, caller, review_id),
+            ScholarlyStudyArtifact.id == artifact_id,
+        ))
+        if artifact is None:
+            raise HTTPException(404, "PDF not found in this review")
+        record = await require_record(session, caller, review_id, artifact.record_id)
+        if record.provider != "user_pdf_upload":
+            raise HTTPException(404, "PDF not found in this review")
+        from research_api.scholarly.pdf_extract import (
+            PDFSourceMismatch,
+            PDFSourceUnavailable,
+            review_artifact_store,
+            verified_stored_pdf_text,
+        )
+
+        try:
+            parsed_text, anchors = await verified_stored_pdf_text(
+                review_artifact_store(), caller=caller, review_id=review_id, artifact=artifact
+            )
+        except (PDFSourceMismatch, PDFSourceUnavailable) as exc:
+            raise HTTPException(503, "PDF text could not be verified") from exc
+        page = next((item for item in anchors if item["page_number"] == page_number), None)
+        if page is None:
+            raise HTTPException(404, "no extracted text for this page")
+        return {
+            "recordId": artifact.record_id, "artifactId": str(artifact.id),
+            "pageNumber": page_number,
+            "text": parsed_text[int(page["start"]):int(page["end"])],
+            "claimSupportVerified": False,
+        }
 
 
 @router.post("/{review_id}/searches", status_code=201)

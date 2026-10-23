@@ -13,6 +13,9 @@ function upstreamPath(parts: string[], method: "GET" | "POST") {
   if (parts.length === 2 && method === "GET") return base;
   if (parts.length === 3 && parts[2] && ["prisma", "evidence", "records", "decisions", "retrievals", "artifacts"].includes(parts[2]) && method === "GET")
     return `${base}/${parts[2]}`;
+  if (method === "GET" && parts.length === 6 && parts[2] === "artifacts" && id.test(parts[3] ?? "") &&
+      parts[4] === "pages" && /^(?:[1-9]|[1-9][0-9]|100)$/.test(parts[5] ?? ""))
+    return `${base}/artifacts/${parts[3]}/pages/${parts[5]}`;
   if (parts.length === 3 && parts[2] && ["searches", "records"].includes(parts[2]) && method === "POST")
     return `${base}/${parts[2]}`;
   if (parts.length === 5 && parts[2] === "records" && parts[3] && parts[3].length <= 200 && parts[4] &&
