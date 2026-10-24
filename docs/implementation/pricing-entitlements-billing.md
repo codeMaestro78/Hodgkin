@@ -8,6 +8,53 @@
 > one-time credit-purchase provider is Razorpay; subscription checkout remains
 > unavailable until a provider-specific subscription flow is implemented.
 
+> **Current purchased-credit behavior:** One-time top-ups use Razorpay and are
+> account-scoped, not plan-scoped. Any authenticated, metered account can buy a
+> configured pack when the wallet, payment, terms, and database-schema gates
+> pass. Remaining monthly units are used first; purchased units cover a run's
+> shortfall. They do not add monthly allowance or unlock a mode excluded by the
+> plan. The internal unmetered UUID allowlist is a separate operator override;
+> it bypasses unit admission and its accounts intentionally do not see top-up
+> checkout. Readiness diagnostics must never expose payment credentials.
+
+### Current Razorpay credit-pack setup
+
+Credit packs are **one-time Orders**, not Razorpay recurring Plans. The server
+creates each order with its configured amount; no Razorpay Plan ID, subscription,
+or dashboard product needs to be created for a credit pack. These proposed
+Test-mode offers are deliberately priced above or near the monthly plan's
+per-unit rate so that top-ups do not become a cheaper replacement for a plan.
+That is a pricing hypothesis only—not verified unit economics or approval for
+live sale.
+
+| Pack | Price | Units | Approx. price per unit |
+| --- | ---: | ---: | ---: |
+| Starter | ₹199 | 5 | ₹39.80 |
+| Standard | ₹499 | 15 | ₹33.27 |
+| Value | ₹899 | 30 | ₹29.97 |
+
+The exact JSON and a 60-unit wallet ceiling are in both `.env.example` files.
+Keep payment and wallet gates disabled in live environments until margins,
+customer terms, refund/dispute operations, and database migrations are approved.
+This code currently grants on a verified captured payment and handles duplicate
+capture delivery idempotently; refund/dispute webhook handling is not yet
+implemented for Razorpay credit purchases. Do not enable live top-ups until that
+gap is closed and tested.
+
+For a Test-mode end-to-end check, configure a matching Test-mode Razorpay key
+pair, `RAZORPAY_LIVEMODE=false`, a Test-mode webhook secret, the offers above,
+and the credit gates. In Razorpay Dashboard Test Mode, configure the webhook at
+the API's `/billing/webhooks/razorpay` URL and subscribe to `payment.captured`
+(retain any subscription events already used by the same endpoint). Apply the
+credit-wallet/order migrations (0030 and 0033, or the current full migration
+head) to the API database before turning the gates on. A successful checkout
+must pass server signature verification and captured-payment amount/currency
+checks before the account wallet is credited. Razorpay's [Orders integration
+guide](https://razorpay.com/docs/server-integration/python/test-app/) requires
+server-side callback signature verification, and its [security
+checklist](https://razorpay.com/security/checklist) recommends retrieving
+payment amounts from a trusted backend source.
+
 **Status:** historical design; current checkout implementation and provider decisions are documented in the active Razorpay billing code and environment examples
 **As of:** 2026-10-19
 **Scope:** Free, Scholar, and Investigator plans; server-enforced usage; future paid subscriptions
@@ -92,7 +139,7 @@ This is the **recommended entitlement table**, not a claim that every row is alr
 4. Retries of the same idempotent request do not reserve twice. An intentional fresh attempt is a new run and a new reservation.
 5. A scheduled occurrence reserves at execution time, not schedule-creation time. If insufficient units remain, mark that occurrence as quota-blocked and pause or skip according to an explicit user-visible policy; never silently purchase units.
 6. Per-run operation, source, wall-clock, and estimated-cost limits remain independent hard safety bounds. A plan allowance cannot raise those bounds. Client budget overrides may only tighten a server limit, never exceed the plan/server ceiling.
-7. No unlimited research, unbounded batch fan-out, rollover, paid overage, or purchased top-ups in v1.
+7. No unmetered usage through purchased wallets, unbounded batch fan-out, monthly rollover, or automatic top-ups. Fixed purchased packs are separate finite research units and do not raise per-run safety limits.
 
 ### 3.2.1 Mode-weighted units: product contract and economics
 
@@ -115,14 +162,13 @@ tail risk. A mode's maximum provider budget is a safety ceiling, not expected
 cost. If mode weights change, version the catalog and charge only new admissions
 under the new version; never reprice an existing reservation or historical run.
 
-For the subscription-only v1, do not change a unit price based on provider/model choice,
+Do not change a unit price based on provider/model choice,
 discovered-source count, actual token usage, retries, or repair rounds. That would
 make the price hard to predict and couple the customer balance to noisy provider
 measurements. Keep per-run provider-operation, source, wall-clock, token, and
-estimated-cost ceilings as separate safety controls. Purchased top-ups are a
-proposed extension described below; they require separate disclosed pricing and
-ledger semantics and do not become active merely because this document describes
-them.
+estimated-cost ceilings as separate safety controls. Purchased top-ups use the
+separate account wallet and ledger described in §3.2.3; they never alter these
+mode prices or safety limits.
 
 **Balance formula:**
 
@@ -178,9 +224,10 @@ that is a separate billing architecture and customer promise.
 
 The product owner approved the local product policy below on 2026-10-19.
 This is not legal advice or authorization to sell. Customer-facing wording and
-jurisdictional compliance remain launch gates. The implementation permits only
-explicitly configured Stripe **test-mode** checkout; live-mode top-ups are
-hard-blocked in code.
+jurisdictional compliance remain launch gates. The active implementation uses
+Razorpay and fails closed unless the independent payment, wallet, terms,
+fulfillment, spending, webhook, currency, and database-schema gates pass. There
+is no paid-plan requirement in the credit-pack purchase route.
 
 Draft customer disclosure for finance/legal review:
 
@@ -196,9 +243,9 @@ Draft customer disclosure for finance/legal review:
 - The UI may call these “research credits” only with an adjacent definition:
   **1 research credit = 1 research unit**. A run still costs the existing
   server-owned mode price (Focused 1, Balanced 2, Deep 4).
-- Sell fixed server-configured packs through a one-time Stripe Checkout Session.
-  The browser chooses a package key only; the server maps it to one configured,
-  active, one-time Stripe Price and a fixed unit grant. No arbitrary
+- Sell fixed server-configured packs through a one-time Razorpay order. The
+  browser chooses a package key only; the server maps it to a configured pack
+  and fixed unit grant. No arbitrary
   client-entered dollar amount, client-selected grant, or automatic recharge in
   the first release.
 - Keep purchased units in a separate account-level wallet and append-only ledger;
@@ -936,3 +983,15 @@ AnswerThis's public pricing page currently presents a $35/month Pro headline and
 - Append-only, auditable usage history; explicit unresolved/uncertain states.
 - Same evidence verification across tiers; capacity differs, truthfulness does not.
 - No feature or price claim before the end-to-end implementation and regression gate pass.
+
+## Internal unmetered access
+
+Set `BILLING_INTERNAL_UNMETERED_USER_IDS` to a JSON array of immutable Supabase
+Auth user UUIDs in the API environment, for example `["<auth-user-uuid>"]`.
+The user must still sign in normally. This server-side allowlist bypasses only
+monthly and purchased-unit reservation and exposes all research modes; it does
+not bypass per-run provider-operation, model-token/cost, concurrency, or tenant
+limits. Do not use an email address, browser-supplied role, or Supabase
+`user_metadata` for this grant. Create/reset the account through Supabase Auth;
+the application does not create or store a shared password. The default list
+is empty.

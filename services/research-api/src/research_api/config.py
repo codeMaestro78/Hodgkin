@@ -1,4 +1,5 @@
 import os
+import uuid
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -111,6 +112,8 @@ class Settings(BaseSettings):
     BILLING_ENFORCEMENT_ENABLED: bool = False
     # JSON object mapping immutable operator UUIDs to unique bearer secrets.
     BILLING_OPERATOR_TOKENS: SecretStr | None = None
+    # Server-controlled Supabase Auth subject IDs with unmetered internal access.
+    BILLING_INTERNAL_UNMETERED_USER_IDS: set[uuid.UUID] = Field(default_factory=set)
     # Razorpay Standard Checkout is fail-closed until account and commercial gates pass.
     BILLING_RAZORPAY_ENABLED: bool = False
     BILLING_SUBSCRIPTIONS_ENABLED: bool = False

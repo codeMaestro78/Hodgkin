@@ -52,7 +52,7 @@ def test_verify_missing_callback_fields_returns_400(monkeypatch):
     assert response.status_code == 400
 
 
-def test_order_uses_server_pack_amount_and_returns_public_key_only(monkeypatch):
+def test_configured_credit_checkout_has_no_plan_gate_and_uses_server_pack(monkeypatch):
     currency, amount_minor = "INR", 100
     purchase_id = uuid.uuid4()
     purchase = SimpleNamespace(
@@ -79,9 +79,8 @@ def test_order_uses_server_pack_amount_and_returns_public_key_only(monkeypatch):
         "research_api.billing.api.configured_razorpay_credit_packs", lambda _: {"starter": pack}
     )
     monkeypatch.setattr("research_api.billing.api.tenant_session", tenant_session)
-    monkeypatch.setattr(
-        "research_api.billing.api._begin_credit_purchase", AsyncMock(return_value=purchase)
-    )
+    begin_purchase = AsyncMock(return_value=purchase)
+    monkeypatch.setattr("research_api.billing.api._begin_credit_purchase", begin_purchase)
     monkeypatch.setattr("research_api.billing.api.create_razorpay_order", provider_create)
 
     response = _client().post(
@@ -98,6 +97,10 @@ def test_order_uses_server_pack_amount_and_returns_public_key_only(monkeypatch):
         "currency": currency,
         "keyId": "rzp_test_fixture123",
     }
+    # The authenticated caller has no plan/entitlement context on this route;
+    # package availability is global and the account owns the resulting wallet.
+    begin_purchase.assert_awaited_once()
+    assert begin_purchase.await_args.args[0] == Caller(tenant_id=TENANT_ID, user_id=USER_ID)
     provider_create.assert_awaited_once_with(
         _settings(), amount_minor=amount_minor, currency=currency, receipt=purchase_id.hex
     )
@@ -306,3 +309,82 @@ def test_captured_exact_order_is_credited_once_after_provider_confirmation(monke
     assert grant.entry_type == "grant"
     assert grant.available_delta == 5
     assert grant.idempotency_key == f"credit-grant:{purchase_id}"
+
+
+def test_verified_payment_retry_replays_paid_without_refetch_or_second_grant(monkeypatch):
+    purchase = SimpleNamespace(
+        id=uuid.uuid4(),
+        state="paid",
+        provider_order_state="created",
+        provider_order_id="order_fixture123",
+        provider_payment_id="pay_fixture123",
+    )
+    session = AsyncMock()
+    session.scalar.return_value = purchase
+
+    @asynccontextmanager
+    async def tenant_session(_tenant_id):
+        yield session
+
+    provider_fetch = AsyncMock()
+    monkeypatch.setattr("research_api.billing.api.get_settings", _settings)
+    monkeypatch.setattr("research_api.billing.api.razorpay_credit_topups_available", lambda _: True)
+    monkeypatch.setattr("research_api.billing.api.payment_signature_valid", lambda **_: True)
+    monkeypatch.setattr("research_api.billing.api.tenant_session", tenant_session)
+    monkeypatch.setattr("research_api.billing.api.fetch_razorpay_payment", provider_fetch)
+
+    response = _client().post(
+        "/billing/credit-checkout/verify",
+        json={
+            "razorpay_payment_id": "pay_fixture123",
+            "razorpay_order_id": "order_fixture123",
+            "razorpay_signature": "a" * 64,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "paid"}
+    provider_fetch.assert_not_awaited()
+    session.add.assert_not_called()
+
+
+def test_webhook_event_retry_does_not_grant_twice(monkeypatch):
+    event = SimpleNamespace(processing_status="processed")
+    session = AsyncMock()
+    session.scalar.side_effect = [None, event]
+
+    @asynccontextmanager
+    async def system_session():
+        yield session
+
+    monkeypatch.setattr(
+        "research_api.billing.api.get_settings",
+        lambda: _settings().model_copy(
+            update={"RAZORPAY_WEBHOOK_SECRET": SecretStr("webhook-fixture")}
+        ),
+    )
+    monkeypatch.setattr("research_api.billing.api.system_session", system_session)
+    monkeypatch.setattr("research_api.billing.api.webhook_signature_valid", lambda **_: True)
+
+    response = _client().post(
+        "/billing/webhooks/razorpay",
+        headers={"x-razorpay-event-id": "evt_fixture", "x-razorpay-signature": "a" * 64},
+        json={
+            "event": "payment.captured",
+            "payload": {
+                "payment": {
+                    "entity": {
+                        "id": "pay_fixture123",
+                        "order_id": "order_fixture123",
+                        "amount": 100,
+                        "currency": "INR",
+                        "status": "captured",
+                    }
+                }
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"received": True, "duplicate": True}
+    session.add.assert_not_called()

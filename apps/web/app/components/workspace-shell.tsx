@@ -47,6 +47,7 @@ export type HistoryRun = {
 
 type BillingEntitlement = {
   status: "not_configured" | "active";
+  internalAccess?: boolean;
   allowedModes?: ("focused" | "balanced" | "deep")[];
   planKey?: "free" | "scholar" | "investigator";
   periodEnd?: string;
@@ -622,6 +623,11 @@ export function WorkspaceShell({
           <p role="status">Budget temporarily unavailable.</p>
         ) : !entitlement ? (
           <p role="status">Loading allowance…</p>
+        ) : entitlement.internalAccess ? (
+          <div className="workspace-budget-internal" role="status">
+            <strong>Internal research access</strong>
+            <p>No monthly unit limit. Per-run cost, provider, and concurrency limits still apply.</p>
+          </div>
         ) : entitlement.status === "active" &&
           entitlement.availableUnits != null &&
           entitlement.allowanceUnits != null ? (
@@ -695,7 +701,7 @@ export function WorkspaceShell({
         ) : (
           <p>Monthly allowance has not been activated yet.</p>
         )}
-        <ResearchCreditTopUp revision={entitlementRevision} />
+        {!entitlement?.internalAccess && <ResearchCreditTopUp revision={entitlementRevision} />}
       </section>
       <div className="sidebar-bottom">
         <div className="local-avatar">

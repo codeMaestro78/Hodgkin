@@ -1,7 +1,8 @@
 import uuid
 from dataclasses import asdict
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -139,3 +140,20 @@ async def test_idempotent_replay_does_not_retroactively_reserve_units(
     assert replayed is run
     assert created is False
     repository._reserve_billing_if_enabled.assert_not_awaited()
+
+
+async def test_internal_unmetered_user_skips_only_unit_reservation(monkeypatch):
+    user_id = uuid.uuid4()
+    repository = RunRepository(AsyncMock(), uuid.uuid4())
+    run = SimpleNamespace(id=uuid.uuid4(), mode="deep")
+    settings = Settings(
+        _env_file=None,
+        BILLING_ENFORCEMENT_ENABLED=True,
+        BILLING_INTERNAL_UNMETERED_USER_IDS={user_id},
+    )
+    monkeypatch.setattr("research_api.repositories.runs.get_settings", lambda: settings)
+    monkeypatch.setattr("research_api.telemetry.operation_event", Mock())
+
+    await repository._reserve_billing_if_enabled(run, user_id, "request-key-123", settings)
+
+    repository._session.execute.assert_not_awaited()

@@ -61,6 +61,7 @@ def test_entitlement_balance_is_derived_from_persisted_period_and_ledger():
         "consumedUnits": 8,
         "reservedUnits": 4,
         "availableUnits": 28,
+        "internalAccess": False,
     }
 
 

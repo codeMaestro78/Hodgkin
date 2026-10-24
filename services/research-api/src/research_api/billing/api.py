@@ -74,7 +74,13 @@ from research_api.db.models import (
     RazorpayWebhookEvent,
 )
 from research_api.db.session import system_session, tenant_session
-from research_api.schemas.generated.billing_entitlement import BillingEntitlement
+from research_api.schemas.generated.billing_entitlement import (
+    AllowedMode,
+    BillingEntitlement,
+)
+from research_api.schemas.generated.billing_entitlement import (
+    Status as EntitlementStatus,
+)
 from research_api.telemetry import operation_event
 
 router = APIRouter(prefix="/billing", tags=["billing"])
@@ -927,6 +933,104 @@ async def list_credit_packs(caller: CallerDep) -> dict[str, object]:
     }
 
 
+@router.get("/credit-packs/diagnostics")
+async def credit_pack_diagnostics(caller: CallerDep) -> dict[str, object]:
+    """Explain credit-pack readiness without returning keys, secrets, or values."""
+    settings = get_settings()
+    key_id = settings.RAZORPAY_KEY_ID or ""
+    key_mode_matches = key_id.startswith(
+        "rzp_live_"
+    ) == settings.RAZORPAY_LIVEMODE and key_id.startswith(("rzp_test_", "rzp_live_"))
+    if key_id.startswith("rzp_live_") and not settings.BILLING_LIVE_LAUNCH_APPROVED:
+        key_mode_matches = False
+    packs = configured_razorpay_credit_packs(settings)
+    checks: list[dict[str, object]] = [
+        {
+            "id": "razorpay_enabled",
+            "label": "Razorpay checkout enabled",
+            "ready": settings.BILLING_RAZORPAY_ENABLED,
+        },
+        {
+            "id": "billing_enforced",
+            "label": "Research-unit billing enabled",
+            "ready": settings.BILLING_ENFORCEMENT_ENABLED,
+        },
+        {
+            "id": "topups_enabled",
+            "label": "Credit purchases enabled",
+            "ready": settings.BILLING_CREDIT_TOPUPS_ENABLED,
+        },
+        {
+            "id": "terms_approved",
+            "label": "Credit terms approved",
+            "ready": settings.BILLING_CREDIT_TERMS_APPROVED
+            and settings.BILLING_CREDIT_TERMS_VERSION == "research-credit-terms-v1",
+        },
+        {
+            "id": "fulfillment_enabled",
+            "label": "Credit fulfillment enabled",
+            "ready": settings.BILLING_CREDIT_FULFILLMENT_ENABLED,
+        },
+        {
+            "id": "spending_enabled",
+            "label": "Credit spending enabled",
+            "ready": settings.BILLING_CREDIT_SPENDING_ENABLED,
+        },
+        {
+            "id": "wallet_limit",
+            "label": "Wallet capacity configured",
+            "ready": settings.BILLING_CREDIT_MAX_WALLET_UNITS > 0,
+        },
+        {
+            "id": "key_pair",
+            "label": "Razorpay API key pair configured",
+            "ready": bool(key_id and settings.RAZORPAY_KEY_SECRET),
+        },
+        {
+            "id": "key_mode",
+            "label": "Razorpay key mode matches configuration",
+            "ready": key_mode_matches,
+        },
+        {
+            "id": "webhook_secret",
+            "label": "Webhook verification secret configured",
+            "ready": bool(
+                settings.RAZORPAY_WEBHOOK_SECRET
+                and settings.RAZORPAY_WEBHOOK_SECRET.get_secret_value().strip()
+            ),
+        },
+        {
+            "id": "pack_catalog",
+            "label": "At least one valid credit pack configured",
+            "ready": bool(packs),
+        },
+        {
+            "id": "inr_catalog",
+            "label": "Credit packs use INR",
+            "ready": bool(packs) and all(pack.currency == "INR" for pack in packs.values()),
+        },
+    ]
+    async with tenant_session(str(caller.tenant_id)) as session:
+        schema_ready = await _razorpay_schema_ready(session)
+    checks.append(
+        {
+            "id": "database_schema",
+            "label": "Credit-purchase database schema is ready",
+            "ready": schema_ready,
+        }
+    )
+    blocked = [str(check["id"]) for check in checks if not check["ready"]]
+    return {
+        "ready": not blocked,
+        "mode": "live"
+        if key_id.startswith("rzp_live_")
+        else "test"
+        if key_id.startswith("rzp_test_")
+        else "unconfigured",
+        "checks": checks,
+    }
+
+
 @router.get("/credit-balance")
 async def read_credit_balance(caller: CallerDep) -> dict[str, object]:
     """Owner-scoped purchased balance; never conflated with monthly entitlement."""
@@ -1406,6 +1510,8 @@ async def cancel_caller_subscription(caller: CallerDep) -> dict[str, object]:
 
 async def read_caller_entitlement(caller: Caller) -> BillingEntitlement:
     """Bind the authenticated owner to RLS before reading their projection."""
+    settings = get_settings()
+    internal_access = caller.user_id in settings.BILLING_INTERNAL_UNMETERED_USER_IDS
     async with tenant_session(str(caller.tenant_id)) as session:
         await session.execute(
             text("SELECT set_config('app.user_id', :id, true)"),
@@ -1415,13 +1521,23 @@ async def read_caller_entitlement(caller: Caller) -> BillingEntitlement:
             await ensure_default_free_period(
                 session, tenant_id=caller.tenant_id, user_id=caller.user_id
             )
-        return await read_entitlement(session, tenant_id=caller.tenant_id, user_id=caller.user_id)
+        entitlement = await read_entitlement(
+            session, tenant_id=caller.tenant_id, user_id=caller.user_id
+        )
+    if internal_access:
+        return BillingEntitlement(
+            status=EntitlementStatus.active,
+            allowed_modes=[AllowedMode.focused, AllowedMode.balanced, AllowedMode.deep],
+            internal_access=True,
+        )
+    return entitlement
 
 
 @router.get(
     "/entitlement",
     response_model=BillingEntitlement,
     response_model_exclude_none=True,
+    response_model_exclude_defaults=True,
 )
 async def get_entitlement(caller: CallerDep) -> BillingEntitlement:
     """Read the caller's period projection without trusting request-supplied plan data."""

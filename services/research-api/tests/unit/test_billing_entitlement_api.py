@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from research_api.auth import Caller
 from research_api.billing.api import caller_dependency, read_caller_entitlement, router
+from research_api.config import Settings
 from research_api.schemas.generated.billing_entitlement import BillingEntitlement, Status
 
 
@@ -103,6 +104,36 @@ async def test_entitlement_read_binds_authenticated_identity_to_rls(monkeypatch)
     assert session.execute.await_args.args[0].text == "SELECT set_config('app.user_id', :id, true)"
     assert session.execute.await_args.args[1] == {"id": str(user_id)}
     read_projection.assert_awaited_once_with(session, tenant_id=tenant_id, user_id=user_id)
+
+
+async def test_configured_internal_user_gets_unmetered_all_mode_entitlement(monkeypatch):
+    tenant_id, user_id = uuid.uuid4(), uuid.uuid4()
+    caller = Caller(tenant_id=tenant_id, user_id=user_id)
+    session = AsyncMock()
+
+    @asynccontextmanager
+    async def fake_tenant_session(_tenant_id):
+        yield session
+
+    monkeypatch.setattr("research_api.billing.api.tenant_session", fake_tenant_session)
+    monkeypatch.setattr(
+        "research_api.billing.api.get_settings",
+        lambda: Settings(
+            _env_file=None,
+            BILLING_INTERNAL_UNMETERED_USER_IDS={user_id},
+        ),
+    )
+    monkeypatch.setattr(
+        "research_api.billing.api.read_entitlement",
+        AsyncMock(return_value=BillingEntitlement(status=Status.not_configured)),
+    )
+
+    result = await read_caller_entitlement(caller)
+
+    assert result.status == Status.active
+    assert result.internal_access is True
+    assert [mode.value for mode in result.allowed_modes] == ["focused", "balanced", "deep"]
+    assert result.available_units is None
 
 
 def test_catalog_exposes_inr_v3_proposal_and_preserves_prior_catalog_terms():

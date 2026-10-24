@@ -78,6 +78,18 @@ def test_request_is_deterministic_strict_and_mode_named():
     assert "untrusted data" in first["instructions"]
 
 
+def test_deeper_modes_allow_more_evidence_supported_explanation():
+    focused = NARRATIVE_LIMITS["focused"]
+    balanced = NARRATIVE_LIMITS["balanced"]
+    deep = NARRATIVE_LIMITS["deep"]
+    assert focused.output_tokens < balanced.output_tokens < deep.output_tokens
+    assert focused.max_sentences < balanced.max_sentences < deep.max_sentences
+    request, _ = narrative_request(inputs(mode="deep"))
+    assert request["max_output_tokens"] == deep.output_tokens
+    assert "Cover each evidence-supported research dimension" in request["instructions"]
+    assert "Thin evidence should remain concise" in request["instructions"]
+
+
 def test_catalogue_is_bounded_and_prefers_cited_sources():
     limits = NARRATIVE_LIMITS["focused"]
     uncited = tuple((1, f"s1_p{i}", "x" * 600) for i in range(1, 40))
@@ -202,7 +214,7 @@ def test_new_claim_capacity_is_bounded_by_mode():
         "not json",
         json.dumps({"blocks": [{"role": "answer"}]}),
         json.dumps({"blocks": [], "extra": True}),
-        json.dumps({"blocks": [block("answer", "none", *[sentence("c0")] * 7)]}),
+        json.dumps({"blocks": [block("answer", "none", *[sentence("c0")] * 9)]}),
         json.dumps({"blocks": [block("answer", "none")] * 4}),
     ],
 )

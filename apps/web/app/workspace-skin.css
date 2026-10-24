@@ -177,6 +177,21 @@ html .desk-mobile-history .workspace-budget-active > span {
   border-radius: 50%;
   background: #39784e;
 }
+html .evidence-desk .workspace-budget-internal,
+html .desk-mobile-history .workspace-budget-internal {
+  padding: 9px 10px;
+  border: 1px solid var(--desk-line);
+  border-radius: 10px;
+  background: var(--desk-sand);
+  color: #292723;
+  font-size: 11px;
+  line-height: 1.5;
+}
+html .evidence-desk .workspace-budget-internal p,
+html .desk-mobile-history .workspace-budget-internal p {
+  margin: 4px 0 0;
+  color: #625c55;
+}
 html .evidence-desk .workspace-budget-pending,
 html .desk-mobile-history .workspace-budget-pending {
   display: inline-flex;

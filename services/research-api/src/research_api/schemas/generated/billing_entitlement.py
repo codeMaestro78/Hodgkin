@@ -42,3 +42,4 @@ class BillingEntitlement(BaseModel):
     consumed_units: conint(ge=0, le=9007199254740991) | None = Field(None, alias="consumedUnits")
     reserved_units: conint(ge=0, le=9007199254740991) | None = Field(None, alias="reservedUnits")
     available_units: conint(ge=0, le=9007199254740991) | None = Field(None, alias="availableUnits")
+    internal_access: bool | None = Field(False, alias="internalAccess")

@@ -218,6 +218,15 @@ class RunRepository:
     ) -> None:
         if not settings.BILLING_ENFORCEMENT_ENABLED:
             return
+        if user_id in settings.BILLING_INTERNAL_UNMETERED_USER_IDS:
+            from research_api.telemetry import operation_event
+
+            operation_event(
+                "billing.internal_unmetered_admission",
+                outcome="succeeded",
+                runId=str(run.id),
+            )
+            return
         if run.mode not in {"focused", "balanced", "deep"}:
             from research_api.billing.ledger import BillingModeUnavailable
 

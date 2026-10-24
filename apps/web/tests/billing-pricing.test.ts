@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { shouldHideCreditTopUp } from "../app/components/research-credit-topup";
 import {
   checkoutFailureMessage,
   shouldOfferCheckoutResume,
@@ -8,6 +9,18 @@ import {
 } from "../lib/billing-pricing";
 
 describe("pricing checkout availability", () => {
+  it("keeps an empty-wallet panel visible when checkout is globally disabled", () => {
+    expect(
+      shouldHideCreditTopUp({ enabled: false, currency: "INR", packs: [] },
+        { enabled: false, availableUnits: 0, reservedUnits: 0 }, ""),
+    ).toBe(false);
+  });
+
+  it("hides the purchased-credit panel only while its initial data is loading", () => {
+    expect(shouldHideCreditTopUp(null, null, "")).toBe(true);
+    expect(shouldHideCreditTopUp(null, null, "Balance unavailable")).toBe(false);
+  });
+
   it("distinguishes provider-active subscriptions from ledger-confirmed access", () => {
     expect(paidAccessState("active", "scholar", "scholar")).toBe("active");
     expect(paidAccessState("active", "scholar", "free")).toBe("pending");

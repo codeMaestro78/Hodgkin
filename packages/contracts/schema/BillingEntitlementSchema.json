@@ -121,6 +121,10 @@
           "type": "null"
         }
       ]
+    },
+    "internalAccess": {
+      "type": "boolean",
+      "default": false
     }
   },
   "required": [
