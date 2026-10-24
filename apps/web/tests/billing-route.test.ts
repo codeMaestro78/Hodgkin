@@ -9,6 +9,8 @@ import { POST as portal } from "../app/api/billing/portal/route";
 import { GET as availability } from "../app/api/billing/checkout-availability/route";
 import { GET as creditPacks } from "../app/api/billing/credit-packs/route";
 import { POST as creditCheckout } from "../app/api/billing/credit-checkout/route";
+import { GET as pendingCreditPurchases } from "../app/api/billing/credit-purchases/route";
+import { POST as resumeCreditPurchase } from "../app/api/billing/credit-purchases/[purchaseId]/resume/route";
 import { POST as verifySubscription } from "../app/api/billing/verify-subscription/route";
 import { GET as subscription } from "../app/api/billing/subscription/route";
 import { POST as cancelCheckout } from "../app/api/billing/checkout/cancel/route";
@@ -94,6 +96,23 @@ it("forwards Checkout, Portal, and purchase availability through the authenticat
     "/billing/credit-checkout",
     "POST",
   );
+
+  const pendingRequest = new NextRequest("http://localhost/api/billing/credit-purchases");
+  await pendingCreditPurchases(pendingRequest);
+  expect(proxy).toHaveBeenLastCalledWith(pendingRequest, "/billing/credit-purchases");
+
+  const resumeRequest = new NextRequest(
+    "http://localhost/api/billing/credit-purchases/3c5c0e8b-47f8-4552-b3a4-7c893d1e1e29/resume",
+    { method: "POST" },
+  );
+  await resumeCreditPurchase(resumeRequest, {
+    params: Promise.resolve({ purchaseId: "3c5c0e8b-47f8-4552-b3a4-7c893d1e1e29" }),
+  });
+  expect(proxy).toHaveBeenLastCalledWith(
+    resumeRequest,
+    "/billing/credit-purchases/3c5c0e8b-47f8-4552-b3a4-7c893d1e1e29/resume",
+    "POST",
+  );
 });
 
 it("forwards subscription verification, status, and abandoned-checkout cancellation via BFF", async () => {
@@ -133,4 +152,17 @@ it("forwards subscription verification, status, and abandoned-checkout cancellat
     "/billing/subscription/reconcile",
     "POST",
   );
+});
+
+it("rejects malformed credit purchase ids before proxying a resume request", async () => {
+  const request = new NextRequest(
+    "http://localhost/api/billing/credit-purchases/not-a-uuid/resume",
+    { method: "POST" },
+  );
+  const response = await resumeCreditPurchase(request, {
+    params: Promise.resolve({ purchaseId: "not-a-uuid" }),
+  });
+
+  expect(response.status).toBe(404);
+  expect(proxy).not.toHaveBeenCalled();
 });

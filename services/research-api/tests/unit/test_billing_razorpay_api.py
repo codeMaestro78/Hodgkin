@@ -52,6 +52,182 @@ def test_verify_missing_callback_fields_returns_400(monkeypatch):
     assert response.status_code == 400
 
 
+def test_pending_credit_purchases_are_listed_with_resume_state(monkeypatch):
+    purchase = SimpleNamespace(
+        id=uuid.uuid4(),
+        package_key="starter",
+        amount_minor=19900,
+        currency="INR",
+        unit_grant=5,
+        created_at=None,
+        provider_order_id="order_fixture123",
+        provider_order_state="created",
+    )
+    purchases_session = AsyncMock()
+    purchases_session.scalar.return_value = True
+    result = Mock()
+    result.all.return_value = [purchase]
+    purchases_session.scalars.return_value = result
+
+    @asynccontextmanager
+    async def tenant_session(_tenant_id):
+        yield purchases_session
+
+    monkeypatch.setattr("research_api.billing.api.tenant_session", tenant_session)
+    monkeypatch.setattr("research_api.billing.api.razorpay_credit_topups_available", lambda _: True)
+    response = _client().get("/billing/credit-purchases")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "purchases": [
+            {
+                "purchaseId": str(purchase.id),
+                "packageKey": "starter",
+                "amountMinor": 19900,
+                "currency": "INR",
+                "units": 5,
+                "createdAt": None,
+                "orderId": "order_fixture123",
+                "orderState": "created",
+                "canResume": True,
+            }
+        ]
+    }
+
+
+def test_resume_existing_credit_purchase_returns_same_order(monkeypatch):
+    purchase = SimpleNamespace(
+        id=uuid.uuid4(),
+        user_id=USER_ID,
+        payment_provider="razorpay",
+        state="pending",
+        provider_order_state="created",
+        provider_order_id="order_fixture123",
+        amount_minor=19900,
+        currency="INR",
+        package_key="starter",
+        unit_grant=5,
+    )
+    purchase_session = AsyncMock()
+    purchase_session.scalar.side_effect = [True, purchase]
+
+    @asynccontextmanager
+    async def tenant_session(_tenant_id):
+        yield purchase_session
+
+    provider_create = AsyncMock()
+    monkeypatch.setattr("research_api.billing.api.get_settings", _settings)
+    monkeypatch.setattr("research_api.billing.api.razorpay_credit_topups_available", lambda _: True)
+    monkeypatch.setattr("research_api.billing.api.tenant_session", tenant_session)
+    monkeypatch.setattr("research_api.billing.api.create_razorpay_order", provider_create)
+
+    response = _client().post(f"/billing/credit-purchases/{purchase.id}/resume")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "purchaseId": str(purchase.id),
+        "orderId": "order_fixture123",
+        "amount": 19900,
+        "currency": "INR",
+        "keyId": "rzp_test_fixture123",
+    }
+    provider_create.assert_not_awaited()
+
+
+def test_credit_purchase_resume_does_not_disclose_another_users_purchase(monkeypatch):
+    purchase_session = AsyncMock()
+    purchase_session.scalar.side_effect = [True, None]
+
+    @asynccontextmanager
+    async def tenant_session(_tenant_id):
+        yield purchase_session
+
+    provider_create = AsyncMock()
+    monkeypatch.setattr("research_api.billing.api.get_settings", _settings)
+    monkeypatch.setattr("research_api.billing.api.razorpay_credit_topups_available", lambda _: True)
+    monkeypatch.setattr("research_api.billing.api.tenant_session", tenant_session)
+    monkeypatch.setattr("research_api.billing.api.create_razorpay_order", provider_create)
+
+    response = _client().post(f"/billing/credit-purchases/{uuid.uuid4()}/resume")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Credit purchase not found"
+    provider_create.assert_not_awaited()
+
+
+def test_resume_not_started_credit_purchase_creates_one_order_for_that_purchase(monkeypatch):
+    purchase = SimpleNamespace(
+        id=uuid.uuid4(),
+        user_id=USER_ID,
+        payment_provider="razorpay",
+        state="pending",
+        provider_order_state="not_started",
+        provider_order_id=None,
+        amount_minor=19900,
+        currency="INR",
+        package_key="starter",
+        unit_grant=5,
+    )
+    read_session, claim_session, save_session = AsyncMock(), AsyncMock(), AsyncMock()
+    read_session.scalar.side_effect = [True, purchase]
+    claim_session.scalar.return_value = purchase.id
+    save_session.scalar.return_value = "order_fixture123"
+    sessions = iter((read_session, claim_session, save_session))
+
+    @asynccontextmanager
+    async def tenant_session(_tenant_id):
+        yield next(sessions)
+
+    provider_create = AsyncMock(return_value={"id": "order_fixture123"})
+    monkeypatch.setattr("research_api.billing.api.get_settings", _settings)
+    monkeypatch.setattr("research_api.billing.api.razorpay_credit_topups_available", lambda _: True)
+    monkeypatch.setattr("research_api.billing.api.tenant_session", tenant_session)
+    monkeypatch.setattr("research_api.billing.api.create_razorpay_order", provider_create)
+
+    response = _client().post(f"/billing/credit-purchases/{purchase.id}/resume")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["orderId"] == "order_fixture123"
+    provider_create.assert_awaited_once_with(
+        _settings(), amount_minor=19900, currency="INR", receipt=purchase.id.hex
+    )
+
+
+def test_uncertain_credit_purchase_cannot_create_a_replacement_order(monkeypatch):
+    purchase = SimpleNamespace(
+        id=uuid.uuid4(),
+        user_id=USER_ID,
+        payment_provider="razorpay",
+        state="pending",
+        provider_order_state="uncertain",
+        provider_order_id=None,
+        amount_minor=19900,
+        currency="INR",
+        package_key="starter",
+        unit_grant=5,
+    )
+    purchase_session = AsyncMock()
+    purchase_session.scalar.side_effect = [True, purchase]
+
+    @asynccontextmanager
+    async def tenant_session(_tenant_id):
+        yield purchase_session
+
+    provider_create = AsyncMock()
+    monkeypatch.setattr("research_api.billing.api.get_settings", _settings)
+    monkeypatch.setattr("research_api.billing.api.razorpay_credit_topups_available", lambda _: True)
+    monkeypatch.setattr("research_api.billing.api.tenant_session", tenant_session)
+    monkeypatch.setattr("research_api.billing.api.create_razorpay_order", provider_create)
+
+    response = _client().post(f"/billing/credit-purchases/{purchase.id}/resume")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "This credit checkout needs reconciliation; no new order was created"
+    )
+    provider_create.assert_not_awaited()
+
+
 def test_configured_credit_checkout_has_no_plan_gate_and_uses_server_pack(monkeypatch):
     currency, amount_minor = "INR", 100
     purchase_id = uuid.uuid4()
@@ -104,6 +280,41 @@ def test_configured_credit_checkout_has_no_plan_gate_and_uses_server_pack(monkey
     provider_create.assert_awaited_once_with(
         _settings(), amount_minor=amount_minor, currency=currency, receipt=purchase_id.hex
     )
+
+
+def test_new_credit_checkout_is_blocked_until_pending_order_is_resolved(monkeypatch):
+    account = SimpleNamespace(id=uuid.uuid4())
+    schema_session, purchase_session = AsyncMock(), AsyncMock()
+    schema_session.scalar.return_value = True
+    purchase_session.scalar.side_effect = [account, None, 0, 0, 0, 1]
+    sessions = iter((schema_session, purchase_session))
+
+    @asynccontextmanager
+    async def tenant_session(_tenant_id):
+        yield next(sessions)
+
+    pack = SimpleNamespace(
+        key="starter", amount_minor=19900, currency="INR", units=5, expiry_days=None
+    )
+    provider_create = AsyncMock()
+    monkeypatch.setattr("research_api.billing.api.get_settings", _settings)
+    monkeypatch.setattr("research_api.billing.api.razorpay_credit_topups_available", lambda _: True)
+    monkeypatch.setattr(
+        "research_api.billing.api.configured_razorpay_credit_packs", lambda _: {"starter": pack}
+    )
+    monkeypatch.setattr("research_api.billing.api.tenant_session", tenant_session)
+    monkeypatch.setattr("research_api.billing.api.ensure_default_free_period", AsyncMock())
+    monkeypatch.setattr("research_api.billing.api.create_razorpay_order", provider_create)
+
+    response = _client().post(
+        "/billing/credit-checkout",
+        headers={"Idempotency-Key": "another-credit-request-123"},
+        json={"packageKey": "starter"},
+    )
+
+    assert response.status_code == 429
+    assert response.json()["detail"] == "Finish an existing credit checkout before starting another"
+    provider_create.assert_not_awaited()
 
 
 def test_order_claim_conflict_does_not_dispatch_second_provider_order(monkeypatch):

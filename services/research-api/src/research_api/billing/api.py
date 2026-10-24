@@ -1069,6 +1069,46 @@ async def read_credit_balance(caller: CallerDep) -> dict[str, object]:
         }
 
 
+@router.get("/credit-purchases")
+async def list_pending_credit_purchases(caller: CallerDep) -> dict[str, list[dict[str, object]]]:
+    """List only the authenticated user's pending Razorpay credit checkouts."""
+    async with tenant_session(str(caller.tenant_id)) as session:
+        if not await _razorpay_schema_ready(session):
+            raise HTTPException(503, "Credit purchase status is temporarily unavailable")
+        await session.execute(
+            text("SELECT set_config('app.user_id', :id, true)"),
+            {"id": str(caller.user_id)},
+        )
+        result = await session.scalars(
+            select(BillingCreditPurchase)
+            .where(
+                BillingCreditPurchase.tenant_id == caller.tenant_id,
+                BillingCreditPurchase.user_id == caller.user_id,
+                BillingCreditPurchase.payment_provider == "razorpay",
+                BillingCreditPurchase.state == "pending",
+            )
+            .order_by(BillingCreditPurchase.created_at.desc())
+            .limit(10)
+        )
+        purchases = result.all()
+    return {
+        "purchases": [
+            {
+                "purchaseId": str(purchase.id),
+                "packageKey": purchase.package_key,
+                "amountMinor": purchase.amount_minor,
+                "currency": purchase.currency,
+                "units": purchase.unit_grant,
+                "createdAt": purchase.created_at.isoformat() if purchase.created_at else None,
+                "orderId": purchase.provider_order_id,
+                "orderState": purchase.provider_order_state,
+                "canResume": purchase.provider_order_state in {"not_started", "created"},
+            }
+            for purchase in purchases
+        ]
+    }
+
+
 @router.get("/credit-purchases/{order_id}")
 async def read_credit_purchase(order_id: str, caller: CallerDep) -> dict[str, str]:
     """Read Razorpay fulfillment state for this authenticated purchase owner."""
@@ -1092,6 +1132,119 @@ async def read_credit_purchase(order_id: str, caller: CallerDep) -> dict[str, st
         if purchase is None:
             raise HTTPException(404, "Credit purchase not found")
         return {"status": purchase.state}
+
+
+@router.post("/credit-purchases/{purchase_id}/resume")
+async def resume_credit_purchase(purchase_id: uuid.UUID, caller: CallerDep) -> dict[str, str | int]:
+    """Resume an existing pending credit purchase without creating a duplicate order."""
+    settings = get_settings()
+    if not razorpay_credit_topups_available(settings):
+        raise HTTPException(503, "Research-credit purchases are not available")
+    async with tenant_session(str(caller.tenant_id)) as session:
+        if not await _razorpay_schema_ready(session):
+            raise HTTPException(503, "Research-credit purchases are not available")
+        await session.execute(
+            text("SELECT set_config('app.user_id', :id, true)"),
+            {"id": str(caller.user_id)},
+        )
+        purchase = await session.scalar(
+            select(BillingCreditPurchase)
+            .where(
+                BillingCreditPurchase.id == purchase_id,
+                BillingCreditPurchase.tenant_id == caller.tenant_id,
+                BillingCreditPurchase.user_id == caller.user_id,
+                BillingCreditPurchase.payment_provider == "razorpay",
+            )
+            .with_for_update()
+        )
+    if purchase is None:
+        raise HTTPException(404, "Credit purchase not found")
+    if purchase.state != "pending":
+        raise HTTPException(409, "This credit purchase is no longer payable")
+    if purchase.provider_order_id:
+        if purchase.provider_order_state != "created":
+            raise HTTPException(
+                409, "This credit checkout needs reconciliation; no new order was created"
+            )
+        order_id = purchase.provider_order_id
+    else:
+        if purchase.provider_order_state != "not_started":
+            raise HTTPException(
+                409, "This credit checkout needs reconciliation; no new order was created"
+            )
+        async with tenant_session(str(caller.tenant_id)) as session:
+            await session.execute(
+                text("SELECT set_config('app.user_id', :id, true)"),
+                {"id": str(caller.user_id)},
+            )
+            await session.execute(text("SELECT set_config('app.billing_system', 'on', true)"))
+            claimed = await session.scalar(
+                update(BillingCreditPurchase)
+                .where(
+                    BillingCreditPurchase.id == purchase.id,
+                    BillingCreditPurchase.tenant_id == caller.tenant_id,
+                    BillingCreditPurchase.user_id == caller.user_id,
+                    BillingCreditPurchase.state == "pending",
+                    BillingCreditPurchase.provider_order_state == "not_started",
+                    BillingCreditPurchase.provider_order_id.is_(None),
+                )
+                .values(provider_order_state="creating")
+                .returning(BillingCreditPurchase.id)
+            )
+        if claimed is None:
+            raise HTTPException(409, "This credit checkout is already being resumed")
+        try:
+            result = await create_razorpay_order(
+                settings,
+                amount_minor=purchase.amount_minor,
+                currency=purchase.currency,
+                receipt=purchase.id.hex,
+            )
+        except (RazorpayUnavailable, ValueError) as exc:
+            async with tenant_session(str(caller.tenant_id)) as session:
+                await session.execute(
+                    text("SELECT set_config('app.user_id', :id, true)"),
+                    {"id": str(caller.user_id)},
+                )
+                await session.execute(text("SELECT set_config('app.billing_system', 'on', true)"))
+                await session.execute(
+                    update(BillingCreditPurchase)
+                    .where(
+                        BillingCreditPurchase.id == purchase.id,
+                        BillingCreditPurchase.user_id == caller.user_id,
+                    )
+                    .values(provider_order_state="uncertain")
+                )
+            raise HTTPException(
+                503, "Payment order status is uncertain. Do not retry; contact support."
+            ) from exc
+        order_id = str(result["id"])
+        async with tenant_session(str(caller.tenant_id)) as session:
+            await session.execute(
+                text("SELECT set_config('app.user_id', :id, true)"),
+                {"id": str(caller.user_id)},
+            )
+            await session.execute(text("SELECT set_config('app.billing_system', 'on', true)"))
+            saved = await session.scalar(
+                update(BillingCreditPurchase)
+                .where(
+                    BillingCreditPurchase.id == purchase.id,
+                    BillingCreditPurchase.user_id == caller.user_id,
+                    BillingCreditPurchase.provider_order_state == "creating",
+                    BillingCreditPurchase.provider_order_id.is_(None),
+                )
+                .values(provider_order_id=order_id, provider_order_state="created")
+                .returning(BillingCreditPurchase.provider_order_id)
+            )
+        if saved is None:
+            raise HTTPException(409, "Payment order needs reconciliation")
+    return {
+        "purchaseId": str(purchase.id),
+        "orderId": order_id,
+        "amount": purchase.amount_minor,
+        "currency": purchase.currency,
+        "keyId": configured_key_id(settings),
+    }
 
 
 async def _begin_credit_purchase(
@@ -1181,7 +1334,7 @@ async def _begin_credit_purchase(
                     BillingCreditPurchase.state == "pending",
                 )
             )
-            if int(pending_count or 0) >= 2:
+            if int(pending_count or 0) >= 1:
                 raise HTTPException(
                     429, "Finish an existing credit checkout before starting another"
                 )

@@ -41,6 +41,15 @@ capture delivery idempotently; refund/dispute webhook handling is not yet
 implemented for Razorpay credit purchases. Do not enable live top-ups until that
 gap is closed and tested.
 
+The workspace shows a pending-checkout recovery panel. It lists only the signed-in
+account's pending purchases; **Continue checkout** reopens the persisted Razorpay
+order, never creates a replacement order. A purchase with no order yet can safely
+create one only while its stored state is `not_started`. `creating` and `uncertain`
+orders are marked for support reconciliation and cannot be retried from the UI.
+Refreshing status reads the server's fulfillment state and wallet balance; it does
+not itself query Razorpay or cancel an order. A captured payment is fulfilled by
+the signed checkout verification or the configured `payment.captured` webhook.
+
 For a Test-mode end-to-end check, configure a matching Test-mode Razorpay key
 pair, `RAZORPAY_LIVEMODE=false`, a Test-mode webhook secret, the offers above,
 and the credit gates. In Razorpay Dashboard Test Mode, configure the webhook at
