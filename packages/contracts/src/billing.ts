@@ -13,6 +13,7 @@ export const BillingEntitlementSchema = z
     consumedUnits: z.number().int().nonnegative().nullable().optional(),
     reservedUnits: z.number().int().nonnegative().nullable().optional(),
     availableUnits: z.number().int().nonnegative().nullable().optional(),
+    internalAccess: z.boolean().optional().meta({ default: false }),
   })
   .strict()
   .superRefine((entitlement, context) => {
@@ -46,6 +47,15 @@ export const BillingEntitlementSchema = z
         code: "custom",
         message: "Allowed modes must be unique",
       });
+    }
+    if (entitlement.internalAccess) {
+      if (projectionFields.some((value) => value != null)) {
+        context.addIssue({
+          code: "custom",
+          message: "Internal entitlements cannot contain a metered balance projection",
+        });
+      }
+      return;
     }
     if (projectionFields.some((value) => value == null)) {
       context.addIssue({

@@ -4,6 +4,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
+from time import monotonic
 from typing import Literal, cast
 
 from sqlalchemy import select
@@ -223,6 +224,7 @@ class RunRepository:
 
             operation_event(
                 "billing.internal_unmetered_admission",
+                started=monotonic(),
                 outcome="succeeded",
                 runId=str(run.id),
             )

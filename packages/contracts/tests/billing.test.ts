@@ -44,6 +44,34 @@ describe("billing entitlement response", () => {
       }).success,
     ).toBe(false);
   });
+
+  it("accepts the explicit internal-access marker", () => {
+    expect(
+      BillingEntitlementSchema.parse({
+        status: "active",
+        internalAccess: true,
+        planKey: null,
+        catalogVersion: null,
+        periodStart: null,
+        periodEnd: null,
+        allowanceUnits: null,
+        consumedUnits: null,
+        reservedUnits: null,
+        availableUnits: null,
+      }),
+    ).toEqual({
+      status: "active",
+      internalAccess: true,
+      planKey: null,
+      catalogVersion: null,
+      periodStart: null,
+      periodEnd: null,
+      allowanceUnits: null,
+      consumedUnits: null,
+      reservedUnits: null,
+      availableUnits: null,
+    });
+  });
 });
 
 describe("Razorpay Standard Checkout contracts", () => {
